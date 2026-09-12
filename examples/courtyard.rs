@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
 use glam::Vec3;
-use terrarium::{Camera, CameraController, Color3, PartId, PartShape, Renderer, Workspace};
+use terrarium::{CameraController, Color3, PartId, PartShape, Renderer, Workspace};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -16,7 +16,6 @@ struct App {
     renderer: Option<Renderer>,
     workspace: Workspace,
     moving_parts: MovingParts,
-    camera: Camera,
     controller: CameraController,
     animation_time: f32,
     last_frame: Instant,
@@ -37,11 +36,6 @@ impl App {
             renderer: None,
             workspace,
             moving_parts,
-            camera: Camera::new(
-                Vec3::new(7.0, 3.8, 10.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                16.0 / 9.0,
-            ),
             controller: CameraController::new(6.0, 0.0025),
             animation_time: 0.0,
             last_frame: Instant::now(),
@@ -108,7 +102,9 @@ impl ApplicationHandler for App {
             .with_inner_size(PhysicalSize::new(1280, 720));
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
         let size = window.inner_size();
-        self.camera.resize(size.width, size.height);
+        self.workspace
+            .current_camera
+            .resize(size.width, size.height);
 
         let mut renderer = match pollster::block_on(Renderer::new(window.clone())) {
             Ok(renderer) => renderer,
@@ -148,7 +144,9 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
-                self.camera.resize(size.width, size.height);
+                self.workspace
+                    .current_camera
+                    .resize(size.width, size.height);
                 if let Some(renderer) = &mut self.renderer {
                     renderer.resize(size.width, size.height);
                 }
@@ -168,11 +166,12 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 let delta = now.duration_since(self.last_frame).as_secs_f32();
                 self.last_frame = now;
-                self.controller.update_camera(&mut self.camera, delta);
+                self.controller
+                    .update_camera(&mut self.workspace.current_camera, delta);
                 self.animate_parts(delta);
 
                 if let Some(renderer) = &mut self.renderer {
-                    if let Err(error) = renderer.render(&self.workspace, &self.camera) {
+                    if let Err(error) = renderer.render(&self.workspace) {
                         eprintln!("rendering stopped: {error}");
                         event_loop.exit();
                     } else {

@@ -465,10 +465,12 @@ impl Part {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PartId(usize);
 
-/// The 3D container that owns all renderable [`Part`] instances.
+/// The 3D container that owns all renderable [`Part`] instances and its active camera.
 #[derive(Clone, Debug, Default)]
 pub struct Workspace {
     parts: Vec<Part>,
+    /// The camera used when this workspace is rendered.
+    pub current_camera: Camera,
 }
 
 impl Workspace {
@@ -534,6 +536,12 @@ pub struct Camera {
     pub fovy: f32,
     pub znear: f32,
     pub zfar: f32,
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0)
+    }
 }
 
 impl Camera {
@@ -1018,9 +1026,9 @@ impl Renderer {
         });
     }
 
-    /// Renders all parts in a workspace. A lost or outdated surface is reconfigured and retried on
-    /// the next frame; minimized and occluded windows simply skip their frame.
-    pub fn render(&mut self, workspace: &Workspace, camera: &Camera) -> Result<(), RendererError> {
+    /// Renders a workspace using its current camera. A lost or outdated surface is reconfigured
+    /// and retried on the next frame; minimized and occluded windows simply skip their frame.
+    pub fn render(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -1037,7 +1045,10 @@ impl Renderer {
         };
 
         let camera_uniform = CameraUniform {
-            view_projection: camera.view_projection_matrix().to_cols_array_2d(),
+            view_projection: workspace
+                .current_camera
+                .view_projection_matrix()
+                .to_cols_array_2d(),
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
@@ -1143,4 +1154,17 @@ fn create_depth_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn workspace_has_a_current_camera_by_default() {
+        let workspace = Workspace::new();
+
+        assert_eq!(workspace.current_camera.position, Vec3::new(0.0, 1.0, 5.0));
+        assert_eq!(workspace.current_camera.aspect, 1.0);
+    }
 }
