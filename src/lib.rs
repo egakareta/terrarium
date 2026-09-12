@@ -30,6 +30,8 @@ pub enum RendererError {
     InvalidMeshIndex { index: u16 },
     #[error("the surface reported a validation error while acquiring a frame")]
     SurfaceValidation,
+    #[error("could not wait for submitted GPU work: {0}")]
+    DevicePoll(#[from] wgpu::PollError),
 }
 
 /// A position and vertex color consumed by the built-in pipeline.
@@ -756,6 +758,17 @@ pub struct Renderer {
 impl Renderer {
     /// Creates a renderer and keeps the supplied window alive through its surface.
     pub async fn new(window: Arc<Window>) -> Result<Self, RendererError> {
+        Self::new_with_present_mode(window, wgpu::PresentMode::Fifo).await
+    }
+
+    /// Creates a renderer with the requested surface presentation mode.
+    ///
+    /// FIFO presentation is used when the surface does not support the requested mode.
+    /// [`Renderer::new`] retains the normal FIFO presentation behavior.
+    pub async fn new_with_present_mode(
+        window: Arc<Window>,
+        requested_present_mode: wgpu::PresentMode,
+    ) -> Result<Self, RendererError> {
         let size = window.inner_size();
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window)?;
@@ -786,13 +799,18 @@ impl Renderer {
             .find(wgpu::TextureFormat::is_srgb)
             .or_else(|| capabilities.formats.first().copied())
             .ok_or(RendererError::NoSurfaceFormat)?;
+        let present_mode = if capabilities.present_modes.contains(&requested_present_mode) {
+            requested_present_mode
+        } else {
+            wgpu::PresentMode::Fifo
+        };
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
             color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::Fifo,
+            present_mode,
             desired_maximum_frame_latency: 2,
             alpha_mode: capabilities.alpha_modes[0],
             view_formats: vec![],
@@ -970,6 +988,20 @@ impl Renderer {
         let delta_seconds = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
         delta_seconds.min(0.1)
+    }
+
+    /// Blocks until all GPU work submitted before this call has completed.
+    ///
+    /// This is intended for deterministic measurements and should not be used in a real-time
+    /// render loop, where allowing multiple frames in flight is preferable.
+    pub fn wait_for_gpu(&self) -> Result<(), RendererError> {
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .map(|_| ())
+            .map_err(RendererError::DevicePoll)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
