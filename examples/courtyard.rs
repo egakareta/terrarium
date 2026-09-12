@@ -14,7 +14,7 @@ use winit::{
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
-    workspace: Option<Workspace>,
+    workspace: Workspace,
     camera: Camera,
     controller: CameraController,
     last_frame: Instant,
@@ -26,7 +26,7 @@ impl App {
         Self {
             window: None,
             renderer: None,
-            workspace: None,
+            workspace: create_workspace(),
             camera: Camera::new(
                 Vec3::new(7.0, 3.8, 10.0),
                 Vec3::new(0.0, 1.0, 0.0),
@@ -66,7 +66,7 @@ impl ApplicationHandler for App {
         }
 
         let attributes = Window::default_attributes()
-            .with_title("Terrarium | Courtyard")
+            .with_title("Courtyard")
             .with_inner_size(PhysicalSize::new(1280, 720));
         let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
         let size = window.inner_size();
@@ -86,11 +86,9 @@ impl ApplicationHandler for App {
             b: 0.050,
             a: 1.0,
         });
-        let world = create_world();
 
         self.window = Some(window);
         self.renderer = Some(renderer);
-        self.workspace = Some(world);
         self.capture_mouse();
         self.last_frame = Instant::now();
     }
@@ -134,8 +132,8 @@ impl ApplicationHandler for App {
                 self.last_frame = now;
                 self.controller.update_camera(&mut self.camera, delta);
 
-                if let (Some(renderer), Some(workspace)) = (&mut self.renderer, &self.workspace)
-                    && let Err(error) = renderer.render(workspace, &self.camera)
+                if let Some(renderer) = (&mut self.renderer)
+                    && let Err(error) = renderer.render(&self.workspace, &self.camera)
                 {
                     eprintln!("rendering stopped: {error}");
                     event_loop.exit();
@@ -164,93 +162,66 @@ impl ApplicationHandler for App {
     }
 }
 
-fn create_world() -> Workspace {
+fn create_workspace() -> Workspace {
     let mut workspace = Workspace::new();
-    add_part(
-        &mut workspace,
-        "Ground",
-        PartShape::Block,
-        Vec3::new(0.0, -0.1, 0.0),
-        Vec3::new(42.0, 0.2, 42.0),
-        Color3::new(0.07, 0.12, 0.13),
-    );
+    workspace.create_part_with("Ground", |part| {
+        part.shape = PartShape::Block;
+        part.position = Vec3::new(0.0, -0.1, 0.0);
+        part.size = Vec3::new(42.0, 0.2, 42.0);
+        part.color = Color3::new(0.07, 0.12, 0.13);
+    });
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        add_part(
-            &mut workspace,
-            "StoneBlock",
-            PartShape::Block,
-            Vec3::new(x, 0.22, -4.0),
-            Vec3::new(0.72, 0.45, 0.72),
-            Color3::new(0.29, 0.34, 0.39),
-        );
+        workspace.create_part_with("StoneBlock", |part| {
+            part.shape = PartShape::Block;
+            part.position = Vec3::new(x, 0.22, -4.0);
+            part.size = Vec3::new(0.72, 0.45, 0.72);
+            part.color = Color3::new(0.29, 0.34, 0.39);
+        });
     }
 
-    for (name, shape, position, size, color, orientation) in [
-        (
-            "CopperTower",
-            PartShape::Cylinder,
-            Vec3::new(-3.4, 1.0, -1.8),
-            Vec3::new(1.2, 2.0, 1.2),
-            Color3::new(0.76, 0.30, 0.14),
-            Vec3::new(0.0, -33.0, 0.0),
-        ),
-        (
-            "TealBlock",
-            PartShape::Ball,
-            Vec3::new(3.2, 0.8, -2.3),
-            Vec3::new(1.5, 1.6, 1.5),
-            Color3::new(0.10, 0.48, 0.47),
-            Vec3::new(0.0, 31.0, 0.0),
-        ),
-        (
-            "PalePlatform",
-            PartShape::Block,
-            Vec3::new(-1.0, 0.55, 1.6),
-            Vec3::new(2.0, 1.1, 2.0),
-            Color3::new(0.60, 0.68, 0.50),
-            Vec3::ZERO,
-        ),
-        (
-            "CopperPillar",
-            PartShape::Wedge,
-            Vec3::new(2.7, 1.5, 2.2),
-            Vec3::new(1.1, 3.0, 1.1),
-            Color3::new(0.76, 0.30, 0.14),
-            Vec3::new(0.0, 26.0, 0.0),
-        ),
-        (
-            "TealMonolith",
-            PartShape::CornerWedge,
-            Vec3::new(-4.7, 0.6, 3.1),
-            Vec3::new(1.8, 1.2, 1.8),
-            Color3::new(0.10, 0.48, 0.47),
-            Vec3::new(0.0, -46.0, 0.0),
-        ),
-    ] {
-        let id = add_part(&mut workspace, name, shape, position, size, color);
-        workspace.part_mut(id).expect("new part").orientation = orientation;
-    }
+    workspace.create_part_with("CopperTower", |part| {
+        part.shape = PartShape::Cylinder;
+        part.position = Vec3::new(-3.4, 1.0, -1.8);
+        part.size = Vec3::new(1.2, 2.0, 1.2);
+        part.color = Color3::new(0.76, 0.30, 0.14);
+        part.orientation = Vec3::new(0.0, -33.0, 0.0);
+    });
+
+    workspace.create_part_with("TealBlock", |part| {
+        part.shape = PartShape::Block;
+        part.position = Vec3::new(3.2, 0.8, -2.3);
+        part.size = Vec3::new(1.5, 1.6, 1.5);
+        part.color = Color3::new(0.10, 0.48, 0.47);
+        part.orientation = Vec3::new(0.0, 31.0, 0.0);
+    });
+
+    workspace.create_part_with("PalePlatform", |part| {
+        part.shape = PartShape::Block;
+        part.position = Vec3::new(-1.0, 0.55, 1.6);
+        part.size = Vec3::new(2.0, 1.1, 2.0);
+        part.color = Color3::new(0.60, 0.68, 0.50);
+        part.orientation = Vec3::ZERO;
+    });
+
+    workspace.create_part_with("CopperPillar", |part| {
+        part.shape = PartShape::Wedge;
+        part.position = Vec3::new(2.7, 1.5, 2.2);
+        part.size = Vec3::new(1.1, 3.0, 1.1);
+        part.color = Color3::new(0.76, 0.30, 0.14);
+        part.orientation = Vec3::new(0.0, 26.0, 0.0);
+    });
+
+    workspace.create_part_with("TealMonolith", |part| {
+        part.shape = PartShape::CornerWedge;
+        part.position = Vec3::new(-4.7, 0.6, 3.1);
+        part.size = Vec3::new(1.8, 1.2, 1.8);
+        part.color = Color3::new(0.10, 0.48, 0.47);
+        part.orientation = Vec3::new(0.0, -46.0, 0.0);
+    });
 
     workspace
-}
-
-fn add_part(
-    workspace: &mut Workspace,
-    name: &str,
-    shape: PartShape,
-    position: Vec3,
-    size: Vec3,
-    color: Color3,
-) -> terrarium::PartId {
-    let id = workspace.create_part(name);
-    let part = workspace.part_mut(id).expect("new part");
-    part.shape = shape;
-    part.position = position;
-    part.size = size;
-    part.color = color;
-    id
 }
 
 fn main() {

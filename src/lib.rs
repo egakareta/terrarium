@@ -481,10 +481,27 @@ impl Workspace {
         self.add_part(Part::new(name))
     }
 
+    pub fn create_part_with(
+        &mut self,
+        name: impl Into<String>,
+        configure: impl FnOnce(&mut Part),
+    ) -> PartId {
+        let mut part = Part::new(name);
+        configure(&mut part);
+        self.add_part(part)
+    }
+
     pub fn add_part(&mut self, part: Part) -> PartId {
         let id = PartId(self.parts.len());
         self.parts.push(part);
         id
+    }
+
+    pub fn add_parts<I>(&mut self, parts: I) -> Vec<PartId>
+    where
+        I: IntoIterator<Item = Part>,
+    {
+        parts.into_iter().map(|part| self.add_part(part)).collect()
     }
 
     pub fn part(&self, id: PartId) -> Option<&Part> {
