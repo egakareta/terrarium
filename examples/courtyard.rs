@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
-use glam::{Mat4, Vec3};
-use terrarium::{Camera, CameraController, Mesh, Renderer, Scene};
+use glam::Vec3;
+use terrarium::{Camera, CameraController, Color3, PartShape, Renderer, Workspace};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -14,7 +14,7 @@ use winit::{
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
-    scene: Option<Scene>,
+    workspace: Option<Workspace>,
     camera: Camera,
     controller: CameraController,
     last_frame: Instant,
@@ -26,7 +26,7 @@ impl App {
         Self {
             window: None,
             renderer: None,
-            scene: None,
+            workspace: None,
             camera: Camera::new(
                 Vec3::new(7.0, 3.8, 10.0),
                 Vec3::new(0.0, 1.0, 0.0),
@@ -86,11 +86,11 @@ impl ApplicationHandler for App {
             b: 0.050,
             a: 1.0,
         });
-        let scene = create_scene(&mut renderer);
+        let world = create_world();
 
         self.window = Some(window);
         self.renderer = Some(renderer);
-        self.scene = Some(scene);
+        self.workspace = Some(world);
         self.capture_mouse();
         self.last_frame = Instant::now();
     }
@@ -134,8 +134,8 @@ impl ApplicationHandler for App {
                 self.last_frame = now;
                 self.controller.update_camera(&mut self.camera, delta);
 
-                if let (Some(renderer), Some(scene)) = (&mut self.renderer, &self.scene)
-                    && let Err(error) = renderer.render(scene, &self.camera)
+                if let (Some(renderer), Some(workspace)) = (&mut self.renderer, &self.workspace)
+                    && let Err(error) = renderer.render(workspace, &self.camera)
                 {
                     eprintln!("rendering stopped: {error}");
                     event_loop.exit();
@@ -164,76 +164,93 @@ impl ApplicationHandler for App {
     }
 }
 
-fn create_scene(renderer: &mut Renderer) -> Scene {
-    let ground = renderer
-        .add_mesh(&Mesh::plane(42.0, [0.07, 0.12, 0.13, 1.0]))
-        .expect("ground mesh");
-    let warm_cube = renderer
-        .add_mesh(&Mesh::cube(1.0, [0.76, 0.30, 0.14, 1.0]))
-        .expect("warm cube mesh");
-    let teal_cube = renderer
-        .add_mesh(&Mesh::cube(1.0, [0.10, 0.48, 0.47, 1.0]))
-        .expect("teal cube mesh");
-    let pale_cube = renderer
-        .add_mesh(&Mesh::cube(1.0, [0.60, 0.68, 0.50, 1.0]))
-        .expect("pale cube mesh");
-    let stone_cube = renderer
-        .add_mesh(&Mesh::cube(1.0, [0.29, 0.34, 0.39, 1.0]))
-        .expect("stone cube mesh");
-
-    let mut scene = Scene::new();
-    scene.add(ground, Mat4::IDENTITY);
+fn create_world() -> Workspace {
+    let mut workspace = Workspace::new();
+    add_part(
+        &mut workspace,
+        "Ground",
+        PartShape::Block,
+        Vec3::new(0.0, -0.1, 0.0),
+        Vec3::new(42.0, 0.2, 42.0),
+        Color3::new(0.07, 0.12, 0.13),
+    );
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        scene.add(
-            stone_cube,
-            Mat4::from_scale_rotation_translation(
-                Vec3::new(0.72, 0.45, 0.72),
-                glam::Quat::IDENTITY,
-                Vec3::new(x, 0.22, -4.0),
-            ),
+        add_part(
+            &mut workspace,
+            "StoneBlock",
+            PartShape::Block,
+            Vec3::new(x, 0.22, -4.0),
+            Vec3::new(0.72, 0.45, 0.72),
+            Color3::new(0.29, 0.34, 0.39),
         );
     }
 
-    for (position, scale, mesh) in [
+    for (name, shape, position, size, color, orientation) in [
         (
+            "CopperTower",
+            PartShape::Cylinder,
             Vec3::new(-3.4, 1.0, -1.8),
             Vec3::new(1.2, 2.0, 1.2),
-            warm_cube,
+            Color3::new(0.76, 0.30, 0.14),
+            Vec3::new(0.0, -33.0, 0.0),
         ),
         (
+            "TealBlock",
+            PartShape::Ball,
             Vec3::new(3.2, 0.8, -2.3),
             Vec3::new(1.5, 1.6, 1.5),
-            teal_cube,
+            Color3::new(0.10, 0.48, 0.47),
+            Vec3::new(0.0, 31.0, 0.0),
         ),
         (
+            "PalePlatform",
+            PartShape::Block,
             Vec3::new(-1.0, 0.55, 1.6),
             Vec3::new(2.0, 1.1, 2.0),
-            pale_cube,
+            Color3::new(0.60, 0.68, 0.50),
+            Vec3::ZERO,
         ),
         (
+            "CopperPillar",
+            PartShape::Wedge,
             Vec3::new(2.7, 1.5, 2.2),
             Vec3::new(1.1, 3.0, 1.1),
-            warm_cube,
+            Color3::new(0.76, 0.30, 0.14),
+            Vec3::new(0.0, 26.0, 0.0),
         ),
         (
+            "TealMonolith",
+            PartShape::CornerWedge,
             Vec3::new(-4.7, 0.6, 3.1),
             Vec3::new(1.8, 1.2, 1.8),
-            teal_cube,
+            Color3::new(0.10, 0.48, 0.47),
+            Vec3::new(0.0, -46.0, 0.0),
         ),
     ] {
-        scene.add(
-            mesh,
-            Mat4::from_scale_rotation_translation(
-                scale,
-                glam::Quat::from_rotation_y(position.x * 0.17),
-                position,
-            ),
-        );
+        let id = add_part(&mut workspace, name, shape, position, size, color);
+        workspace.part_mut(id).expect("new part").orientation = orientation;
     }
 
-    scene
+    workspace
+}
+
+fn add_part(
+    workspace: &mut Workspace,
+    name: &str,
+    shape: PartShape,
+    position: Vec3,
+    size: Vec3,
+    color: Color3,
+) -> terrarium::PartId {
+    let id = workspace.create_part(name);
+    let part = workspace.part_mut(id).expect("new part");
+    part.shape = shape;
+    part.position = position;
+    part.size = size;
+    part.color = color;
+    id
 }
 
 fn main() {

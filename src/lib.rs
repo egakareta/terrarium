@@ -1,12 +1,7 @@
-//! A small, opinionated 3D renderer built on wgpu.
-//!
-//! Build meshes once with [`Renderer::add_mesh`], put them into a [`Scene`], and pass that scene
-//! to [`Renderer::render`] each frame.
-
 use std::{num::NonZeroU64, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec3};
+use glam::{EulerRot, Mat4, Quat, Vec3};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 use winit::{
@@ -61,6 +56,49 @@ impl Vertex {
     }
 }
 
+/// The primitive geometry available to a [`Part`].
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum PartShape {
+    #[default]
+    Block,
+    Ball,
+    Cylinder,
+    Wedge,
+    CornerWedge,
+}
+
+impl PartShape {
+    const ALL: [Self; 5] = [
+        Self::Block,
+        Self::Ball,
+        Self::Cylinder,
+        Self::Wedge,
+        Self::CornerWedge,
+    ];
+
+    const COUNT: usize = Self::ALL.len();
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Block => 0,
+            Self::Ball => 1,
+            Self::Cylinder => 2,
+            Self::Wedge => 3,
+            Self::CornerWedge => 4,
+        }
+    }
+
+    fn mesh(self, color: [f32; 4]) -> Mesh {
+        match self {
+            Self::Block => Mesh::block(1.0, color),
+            Self::Ball => Mesh::ball(0.5, 16, 24, color),
+            Self::Cylinder => Mesh::cylinder(0.5, 1.0, 24, color),
+            Self::Wedge => Mesh::wedge(color),
+            Self::CornerWedge => Mesh::corner_wedge(color),
+        }
+    }
+}
+
 /// CPU-side mesh data ready to be uploaded to a [`Renderer`].
 #[derive(Clone, Debug)]
 pub struct Mesh {
@@ -73,8 +111,13 @@ impl Mesh {
         Self { vertices, indices }
     }
 
-    /// Creates a cube centered at the origin.
+    /// Creates a block centered at the origin.
     pub fn cube(size: f32, color: [f32; 4]) -> Self {
+        Self::block(size, color)
+    }
+
+    /// Creates a box centered at the origin.
+    pub fn block(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         let faces = [
             ([-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h], 1.0),
@@ -107,6 +150,209 @@ impl Mesh {
         Self { vertices, indices }
     }
 
+    /// Creates a UV sphere centered at the origin.
+    pub fn ball(
+        radius: f32,
+        latitude_segments: usize,
+        longitude_segments: usize,
+        color: [f32; 4],
+    ) -> Self {
+        let latitude_segments = latitude_segments.max(2);
+        let longitude_segments = longitude_segments.max(3);
+        let mut vertices = Vec::with_capacity((latitude_segments + 1) * (longitude_segments + 1));
+        let mut indices = Vec::with_capacity(latitude_segments * longitude_segments * 6);
+        let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
+
+        for latitude in 0..=latitude_segments {
+            let v = latitude as f32 / latitude_segments as f32;
+            let phi = v * std::f32::consts::PI;
+            let y = phi.cos();
+            let ring = phi.sin();
+            for longitude in 0..=longitude_segments {
+                let u = longitude as f32 / longitude_segments as f32;
+                let theta = u * std::f32::consts::TAU;
+                let normal = Vec3::new(theta.cos() * ring, y, theta.sin() * ring);
+                let shade = 0.62 + normal.dot(light_direction).max(0.0) * 0.38;
+                vertices.push(Vertex::new(
+                    [normal.x * radius, normal.y * radius, normal.z * radius],
+                    shade_color(color, shade),
+                ));
+            }
+        }
+
+        for latitude in 0..latitude_segments {
+            for longitude in 0..longitude_segments {
+                let row = longitude_segments + 1;
+                let top_left = (latitude * row + longitude) as u16;
+                let top_right = top_left + 1;
+                let bottom_left = ((latitude + 1) * row + longitude) as u16;
+                let bottom_right = bottom_left + 1;
+                indices.extend([
+                    top_left,
+                    bottom_left,
+                    top_right,
+                    top_right,
+                    bottom_left,
+                    bottom_right,
+                ]);
+            }
+        }
+
+        Self { vertices, indices }
+    }
+
+    /// Creates a cylinder aligned to the Y axis and centered at the origin.
+    pub fn cylinder(radius: f32, height: f32, segments: usize, color: [f32; 4]) -> Self {
+        let segments = segments.max(3);
+        let half_height = height * 0.5;
+        let mut vertices = Vec::with_capacity(segments * 12);
+        let mut indices = Vec::with_capacity(segments * 12);
+
+        for segment in 0..segments {
+            let next = (segment + 1) % segments;
+            let angle = segment as f32 / segments as f32 * std::f32::consts::TAU;
+            let next_angle = next as f32 / segments as f32 * std::f32::consts::TAU;
+            let side_shade = 0.68 + angle.cos().mul_add(-0.16, angle.sin() * 0.10);
+            push_quad(
+                &mut vertices,
+                &mut indices,
+                [
+                    [radius * angle.cos(), -half_height, radius * angle.sin()],
+                    [
+                        radius * next_angle.cos(),
+                        -half_height,
+                        radius * next_angle.sin(),
+                    ],
+                    [
+                        radius * next_angle.cos(),
+                        half_height,
+                        radius * next_angle.sin(),
+                    ],
+                    [radius * angle.cos(), half_height, radius * angle.sin()],
+                ],
+                shade_color(color, side_shade),
+            );
+
+            push_triangle(
+                &mut vertices,
+                &mut indices,
+                [
+                    [0.0, half_height, 0.0],
+                    [
+                        radius * next_angle.cos(),
+                        half_height,
+                        radius * next_angle.sin(),
+                    ],
+                    [radius * angle.cos(), half_height, radius * angle.sin()],
+                ],
+                shade_color(color, 1.12),
+            );
+            push_triangle(
+                &mut vertices,
+                &mut indices,
+                [
+                    [0.0, -half_height, 0.0],
+                    [radius * angle.cos(), -half_height, radius * angle.sin()],
+                    [
+                        radius * next_angle.cos(),
+                        -half_height,
+                        radius * next_angle.sin(),
+                    ],
+                ],
+                shade_color(color, 0.56),
+            );
+        }
+
+        Self { vertices, indices }
+    }
+
+    /// Creates a triangular prism with a sloped top surface.
+    pub fn wedge(color: [f32; 4]) -> Self {
+        let h = 0.5;
+        let front_bottom_left = [-h, -h, -h];
+        let front_bottom_right = [h, -h, -h];
+        let front_top_right = [h, h, -h];
+        let back_bottom_left = [-h, -h, h];
+        let back_bottom_right = [h, -h, h];
+        let back_top_right = [h, h, h];
+        let mut vertices = Vec::with_capacity(18);
+        let mut indices = Vec::with_capacity(24);
+
+        push_triangle(
+            &mut vertices,
+            &mut indices,
+            [front_bottom_left, front_bottom_right, front_top_right],
+            shade_color(color, 0.88),
+        );
+        push_triangle(
+            &mut vertices,
+            &mut indices,
+            [back_bottom_left, back_top_right, back_bottom_right],
+            shade_color(color, 0.70),
+        );
+        push_quad(
+            &mut vertices,
+            &mut indices,
+            [
+                front_bottom_left,
+                back_bottom_left,
+                back_bottom_right,
+                front_bottom_right,
+            ],
+            shade_color(color, 0.55),
+        );
+        push_quad(
+            &mut vertices,
+            &mut indices,
+            [
+                front_bottom_right,
+                back_bottom_right,
+                back_top_right,
+                front_top_right,
+            ],
+            shade_color(color, 0.82),
+        );
+        push_quad(
+            &mut vertices,
+            &mut indices,
+            [
+                front_bottom_left,
+                front_top_right,
+                back_top_right,
+                back_bottom_left,
+            ],
+            shade_color(color, 1.08),
+        );
+
+        Self { vertices, indices }
+    }
+
+    /// Creates a pyramid-like corner wedge with one high corner and four sloped sides.
+    pub fn corner_wedge(color: [f32; 4]) -> Self {
+        let h = 0.5;
+        let corners = [[-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h]];
+        let apex = [-h, h, -h];
+        let mut vertices = Vec::with_capacity(16);
+        let mut indices = Vec::with_capacity(18);
+
+        push_quad(
+            &mut vertices,
+            &mut indices,
+            [corners[0], corners[3], corners[2], corners[1]],
+            shade_color(color, 0.52),
+        );
+        for (index, next) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
+            push_triangle(
+                &mut vertices,
+                &mut indices,
+                [corners[index], corners[next], apex],
+                shade_color(color, 0.72 + index as f32 * 0.10),
+            );
+        }
+
+        Self { vertices, indices }
+    }
+
     /// Creates a square on the XZ plane, centered at the origin.
     pub fn plane(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
@@ -122,34 +368,142 @@ impl Mesh {
     }
 }
 
+fn shade_color(color: [f32; 4], shade: f32) -> [f32; 4] {
+    [
+        (color[0] * shade).clamp(0.0, 1.0),
+        (color[1] * shade).clamp(0.0, 1.0),
+        (color[2] * shade).clamp(0.0, 1.0),
+        color[3],
+    ]
+}
+
+fn push_triangle(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 3],
+    color: [f32; 4],
+) {
+    let start = vertices.len() as u16;
+    vertices.extend(positions.map(|position| Vertex::new(position, color)));
+    indices.extend([start, start + 1, start + 2]);
+}
+
+fn push_quad(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 4],
+    color: [f32; 4],
+) {
+    let start = vertices.len() as u16;
+    vertices.extend(positions.map(|position| Vertex::new(position, color)));
+    indices.extend([start, start + 1, start + 2, start + 2, start + 3, start]);
+}
+
 /// A handle to mesh data stored on the GPU.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MeshHandle(usize);
 
-/// One mesh placement in a scene.
-#[derive(Clone, Copy, Debug)]
-pub struct RenderObject {
-    pub mesh: MeshHandle,
-    pub transform: Mat4,
+/// An RGB color used by a [`Part`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Color3 {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
 }
 
-/// A collection of mesh placements rendered in insertion order.
+impl Color3 {
+    pub const WHITE: Self = Self::new(1.0, 1.0, 1.0);
+
+    pub const fn new(r: f32, g: f32, b: f32) -> Self {
+        Self { r, g, b }
+    }
+
+    fn rgba(self) -> [f32; 4] {
+        [self.r, self.g, self.b, 1.0]
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Part {
+    pub name: String,
+    pub shape: PartShape,
+    pub position: Vec3,
+    pub size: Vec3,
+    /// Euler angles in degrees, matching Roblox's `Orientation` property.
+    pub orientation: Vec3,
+    pub color: Color3,
+    pub anchored: bool,
+    pub can_collide: bool,
+}
+
+impl Part {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            shape: PartShape::Block,
+            position: Vec3::ZERO,
+            size: Vec3::ONE,
+            orientation: Vec3::ZERO,
+            color: Color3::WHITE,
+            anchored: true,
+            can_collide: true,
+        }
+    }
+
+    pub fn transform(&self) -> Mat4 {
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            self.orientation.x.to_radians(),
+            self.orientation.y.to_radians(),
+            self.orientation.z.to_radians(),
+        );
+        Mat4::from_scale_rotation_translation(self.size, rotation, self.position)
+    }
+}
+
+/// Stable handle for a part in a [`Workspace`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PartId(usize);
+
+/// The 3D container that owns all renderable [`Part`] instances.
 #[derive(Clone, Debug, Default)]
-pub struct Scene {
-    objects: Vec<RenderObject>,
+pub struct Workspace {
+    parts: Vec<Part>,
 }
 
-impl Scene {
+impl Workspace {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn add(&mut self, mesh: MeshHandle, transform: Mat4) {
-        self.objects.push(RenderObject { mesh, transform });
+    /// Creates and parents a new Part to this workspace.
+    pub fn create_part(&mut self, name: impl Into<String>) -> PartId {
+        self.add_part(Part::new(name))
     }
 
-    pub fn objects(&self) -> &[RenderObject] {
-        &self.objects
+    pub fn add_part(&mut self, part: Part) -> PartId {
+        let id = PartId(self.parts.len());
+        self.parts.push(part);
+        id
+    }
+
+    pub fn part(&self, id: PartId) -> Option<&Part> {
+        self.parts.get(id.0)
+    }
+
+    pub fn part_mut(&mut self, id: PartId) -> Option<&mut Part> {
+        self.parts.get_mut(id.0)
+    }
+
+    pub fn find_first(&self, name: &str) -> Option<(PartId, &Part)> {
+        self.parts
+            .iter()
+            .position(|part| part.name == name)
+            .map(|index| (PartId(index), &self.parts[index]))
+    }
+
+    pub fn parts(&self) -> &[Part] {
+        &self.parts
     }
 }
 
@@ -300,7 +654,7 @@ impl CameraController {
             camera.position += movement.normalize() * speed * delta_seconds;
         }
 
-        camera.yaw -= self.mouse_delta.0 * self.sensitivity;
+        camera.yaw += self.mouse_delta.0 * self.sensitivity;
         camera.pitch = (camera.pitch - self.mouse_delta.1 * self.sensitivity)
             .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
         self.mouse_delta = (0.0, 0.0);
@@ -333,6 +687,7 @@ struct CameraUniform {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct ModelUniform {
     model: [[f32; 4]; 4],
+    color: [f32; 4],
 }
 
 struct GpuMesh {
@@ -357,6 +712,7 @@ pub struct Renderer {
     model_bind_group: wgpu::BindGroup,
     model_stride: u64,
     meshes: Vec<GpuMesh>,
+    primitive_meshes: [MeshHandle; PartShape::COUNT],
     clear_color: wgpu::Color,
 }
 
@@ -527,7 +883,7 @@ impl Renderer {
             cache: None,
         });
 
-        Ok(Self {
+        let mut renderer = Self {
             surface,
             device,
             queue,
@@ -542,13 +898,19 @@ impl Renderer {
             model_bind_group,
             model_stride,
             meshes: Vec::new(),
+            primitive_meshes: [MeshHandle(usize::MAX); PartShape::COUNT],
             clear_color: wgpu::Color {
                 r: 0.018,
                 g: 0.028,
                 b: 0.065,
                 a: 1.0,
             },
-        })
+        };
+        for shape in PartShape::ALL {
+            let mesh = renderer.add_mesh(&shape.mesh([1.0; 4]))?;
+            renderer.primitive_meshes[shape.index()] = mesh;
+        }
+        Ok(renderer)
     }
 
     pub fn set_clear_color(&mut self, color: wgpu::Color) {
@@ -565,7 +927,9 @@ impl Renderer {
         (self.depth_texture, self.depth_view) = create_depth_texture(&self.device, &self.config);
     }
 
-    /// Uploads a mesh and returns the handle used by [`Scene::add`].
+    /// Uploads a custom mesh and returns its GPU handle.
+    ///
+    /// Regular [`Part`] instances use the built-in box mesh automatically.
     pub fn add_mesh(&mut self, mesh: &Mesh) -> Result<MeshHandle, RendererError> {
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Err(RendererError::EmptyMesh);
@@ -625,9 +989,9 @@ impl Renderer {
         });
     }
 
-    /// Renders all objects in a scene. A lost or outdated surface is reconfigured and retried on
+    /// Renders all parts in a workspace. A lost or outdated surface is reconfigured and retried on
     /// the next frame; minimized and occluded windows simply skip their frame.
-    pub fn render(&mut self, scene: &Scene, camera: &Camera) -> Result<(), RendererError> {
+    pub fn render(&mut self, workspace: &Workspace, camera: &Camera) -> Result<(), RendererError> {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -648,10 +1012,11 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
-        self.ensure_model_capacity(scene.objects().len());
-        for (index, object) in scene.objects().iter().enumerate() {
+        self.ensure_model_capacity(workspace.parts().len());
+        for (index, part) in workspace.parts().iter().enumerate() {
             let model_uniform = ModelUniform {
-                model: object.transform.to_cols_array_2d(),
+                model: part.transform().to_cols_array_2d(),
+                color: part.color.rgba(),
             };
             self.queue.write_buffer(
                 &self.model_buffer,
@@ -696,8 +1061,9 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            for (index, object) in scene.objects().iter().enumerate() {
-                let Some(mesh) = self.meshes.get(object.mesh.0) else {
+            for (index, part) in workspace.parts().iter().enumerate() {
+                let mesh_handle = self.primitive_meshes[part.shape.index()];
+                let Some(mesh) = self.meshes.get(mesh_handle.0) else {
                     continue;
                 };
                 pass.set_bind_group(

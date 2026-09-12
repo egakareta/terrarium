@@ -4,6 +4,7 @@ struct Camera {
 
 struct Model {
     model: mat4x4<f32>,
+    color: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -27,7 +28,7 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     let world_position = model.model * vec4<f32>(vertex.position, 1.0);
     output.position = camera.view_projection * world_position;
-    output.color = vertex.color;
+    output.color = vertex.color * model.color;
     return output;
 }
 
