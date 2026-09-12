@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, sync::Arc};
+use std::{num::NonZeroU64, sync::Arc, time::Instant};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{EulerRot, Mat4, Quat, Vec3};
@@ -731,6 +731,9 @@ pub struct Renderer {
     meshes: Vec<GpuMesh>,
     primitive_meshes: [MeshHandle; PartShape::COUNT],
     clear_color: wgpu::Color,
+    fps_timer: Instant,
+    frame_count: u32,
+    fps: f32,
 }
 
 impl Renderer {
@@ -922,6 +925,9 @@ impl Renderer {
                 b: 0.065,
                 a: 1.0,
             },
+            fps_timer: Instant::now(),
+            frame_count: 0,
+            fps: 0.0,
         };
         for shape in PartShape::ALL {
             let mesh = renderer.add_mesh(&shape.mesh([1.0; 4]))?;
@@ -932,6 +938,12 @@ impl Renderer {
 
     pub fn set_clear_color(&mut self, color: wgpu::Color) {
         self.clear_color = color;
+    }
+
+    /// Returns the average number of successfully presented frames per second over the last
+    /// measurement interval.
+    pub fn fps(&self) -> f32 {
+        self.fps
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -1095,6 +1107,13 @@ impl Renderer {
         }
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);
+        self.frame_count += 1;
+        let elapsed = self.fps_timer.elapsed().as_secs_f32();
+        if elapsed >= 1.0 {
+            self.fps = self.frame_count as f32 / elapsed;
+            self.frame_count = 0;
+            self.fps_timer = Instant::now();
+        }
         Ok(())
     }
 }
