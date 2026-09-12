@@ -46,11 +46,7 @@ run = "wasm-pack test --headless --chrome -- --lib --test '*' -- --nocapture"
 
 [tasks."bench:native"]
 description = "Run benchmarks for native"
-run = "cargo bench --bench controls"
-
-[tasks."bench:wasm"]
-description = "Run benchmarks for wasm"
-run = "wasm-pack test --release --headless --chrome . --test browser_benches -- --bench --nocapture"
+run = "cargo bench --benches"
 
 [tasks."serve:examples:app"]
 description = "Serve the example app with Trunk"
