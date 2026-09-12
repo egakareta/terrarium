@@ -19,6 +19,9 @@ use winit::{
 
 const ANIMATED_PARTS_RATIO: usize = 4;
 const ANIMATION_POOL_CHANGE_INTERVAL: usize = 30;
+const CAMERA_DISTANCE_MIN_SCALE: f32 = 0.05;
+const CAMERA_DISTANCE_MAX_SCALE: f32 = 0.90;
+const CAMERA_ZOOM_SPEED: f32 = 0.45;
 
 #[derive(Clone, Copy)]
 struct Config {
@@ -52,6 +55,7 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     workspace: Workspace,
+    base_camera_position: Vec3,
     part_ids: Vec<PartId>,
     base_parts: Vec<Part>,
     animation_frame: usize,
@@ -64,12 +68,14 @@ impl App {
     fn new(config: Config) -> Self {
         let (workspace, part_ids) =
             create_benchmark_workspace(config.parts, config.width, config.height);
+        let base_camera_position = workspace.current_camera.position;
         let base_parts = workspace.parts().to_vec();
         Self {
             config,
             window: None,
             renderer: None,
             workspace,
+            base_camera_position,
             part_ids,
             base_parts,
             animation_frame: 0,
@@ -127,6 +133,12 @@ impl App {
         }
 
         let time = self.animation_frame as f32 * 0.07;
+        let camera_scale = (CAMERA_DISTANCE_MIN_SCALE + CAMERA_DISTANCE_MAX_SCALE) * 0.5
+            + (CAMERA_DISTANCE_MAX_SCALE - CAMERA_DISTANCE_MIN_SCALE)
+                * 0.5
+                * (time * CAMERA_ZOOM_SPEED).sin();
+        self.workspace.current_camera.position = self.base_camera_position * camera_scale;
+
         for offset in 0..animated_count {
             let index = (self.animation_pool_start + offset) % part_count;
             let id = self.part_ids[index];
