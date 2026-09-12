@@ -1,0 +1,7 @@
+[profile.dev]
+debug = "line-tables-only"
+opt-level = 1
+
+[profile.dev.package."*"]
+debug = 0
+opt-level = 3
