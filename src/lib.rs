@@ -202,6 +202,8 @@ impl Mesh {
     }
 
     /// Creates a cylinder aligned to the Y axis and centered at the origin.
+    ///
+    /// i.e. The top face points toward `+Y` and the bottom face toward `-Y`.
     pub fn cylinder(radius: f32, height: f32, segments: usize, color: [f32; 4]) -> Self {
         let segments = segments.max(3);
         let half_height = height * 0.5;
@@ -267,6 +269,9 @@ impl Mesh {
     }
 
     /// Creates a triangular prism with a sloped top surface.
+    ///
+    /// The tall end is `+X` centered vertically toward `+Y`,
+    /// meaning the wedge "points" or slopes toward `+X`.
     pub fn wedge(color: [f32; 4]) -> Self {
         let h = 0.5;
         let front_bottom_left = [-h, -h, -h];
@@ -328,6 +333,8 @@ impl Mesh {
     }
 
     /// Creates a pyramid-like corner wedge with one high corner and four sloped sides.
+    ///
+    /// The apex direction from the center is `(-X, +Y, -Z)`.
     pub fn corner_wedge(color: [f32; 4]) -> Self {
         let h = 0.5;
         let corners = [[-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h]];
