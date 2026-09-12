@@ -1,8 +1,9 @@
-use std::{num::NonZeroU64, sync::Arc, time::Instant};
+use std::{num::NonZeroU64, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use thiserror::Error;
+use web_time::Instant;
 use wgpu::util::DeviceExt;
 use winit::{
     event::{DeviceEvent, ElementState, WindowEvent},
@@ -746,6 +747,7 @@ pub struct Renderer {
     meshes: Vec<GpuMesh>,
     primitive_meshes: [MeshHandle; PartShape::COUNT],
     clear_color: wgpu::Color,
+    last_frame: Instant,
     fps_timer: Instant,
     frame_count: u32,
     fps: f32,
@@ -940,6 +942,7 @@ impl Renderer {
                 b: 0.065,
                 a: 1.0,
             },
+            last_frame: Instant::now(),
             fps_timer: Instant::now(),
             frame_count: 0,
             fps: 0.0,
@@ -959,6 +962,14 @@ impl Renderer {
     /// measurement interval.
     pub fn fps(&self) -> f32 {
         self.fps
+    }
+
+    /// Returns the elapsed time in seconds since the previous call, capped at 100 milliseconds.
+    pub fn delta_secs(&mut self) -> f32 {
+        let now = Instant::now();
+        let delta_seconds = now.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        delta_seconds.min(0.1)
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {

@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 
 use glam::Vec3;
 use terrarium::{CameraController, Color3, PartId, PartShape, Renderer, Workspace};
@@ -18,7 +18,6 @@ struct App {
     moving_parts: MovingParts,
     controller: CameraController,
     animation_time: f32,
-    last_frame: Instant,
     mouse_captured: bool,
 }
 
@@ -38,7 +37,6 @@ impl App {
             moving_parts,
             controller: CameraController::new(6.0, 0.0025),
             animation_time: 0.0,
-            last_frame: Instant::now(),
             mouse_captured: false,
         }
     }
@@ -124,7 +122,6 @@ impl ApplicationHandler for App {
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.capture_mouse();
-        self.last_frame = Instant::now();
     }
 
     fn window_event(
@@ -163,19 +160,19 @@ impl ApplicationHandler for App {
                 ..
             } if !self.mouse_captured => self.capture_mouse(),
             WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-                let delta = now.duration_since(self.last_frame).as_secs_f32();
-                self.last_frame = now;
-                self.controller
-                    .update_camera(&mut self.workspace.current_camera, delta);
-                self.animate_parts(delta);
+                let delta = self.renderer.as_mut().map(|renderer| renderer.delta_secs());
+                if let Some(delta) = delta {
+                    self.controller
+                        .update_camera(&mut self.workspace.current_camera, delta);
+                    self.animate_parts(delta);
 
-                if let Some(renderer) = &mut self.renderer {
-                    if let Err(error) = renderer.render(&self.workspace) {
-                        eprintln!("rendering stopped: {error}");
-                        event_loop.exit();
-                    } else {
-                        window.set_title(&format!("Courtyard | FPS: {:.0}", renderer.fps()));
+                    if let Some(renderer) = &mut self.renderer {
+                        if let Err(error) = renderer.render(&self.workspace) {
+                            eprintln!("rendering stopped: {error}");
+                            event_loop.exit();
+                        } else {
+                            window.set_title(&format!("Courtyard | FPS: {:.0}", renderer.fps()));
+                        }
                     }
                 }
                 window.request_redraw();

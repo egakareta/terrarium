@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bytemuck = { version = "1.23", features = ["derive"] }
+bytemuck = { version = "1", features = ["derive"] }
 env_logger = "0.11"
 glam = "0.33"
 log = "0.4"
@@ -13,5 +13,6 @@ serde = "1"
 serde_json = "1"
 slotmap = "1"
 thiserror = "2"
+web-time = "1"
 wgpu = "30"
 winit = "0.30"

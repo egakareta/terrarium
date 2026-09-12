@@ -1872,6 +1872,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "thiserror 2.0.20",
+ "web-time",
  "wgpu",
  "winit",
 ]
