@@ -8,7 +8,7 @@ use std::{
 };
 
 use glam::Vec3;
-use terrarium::{Camera, Color3, Part, PartShape, Renderer, RendererError, Workspace};
+use terrarium::{Camera, Color3, Part, PartId, PartShape, Renderer, RendererError, Workspace};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -16,6 +16,9 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
+
+const ANIMATED_PARTS_RATIO: usize = 4;
+const ANIMATION_POOL_CHANGE_INTERVAL: usize = 30;
 
 #[derive(Clone, Copy)]
 struct Config {
@@ -49,29 +52,41 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     workspace: Workspace,
+    part_ids: Vec<PartId>,
+    base_parts: Vec<Part>,
+    animation_frame: usize,
+    animation_pool_start: usize,
     warmup_remaining: usize,
     samples: Vec<Sample>,
 }
 
 impl App {
     fn new(config: Config) -> Self {
-        let workspace = create_benchmark_workspace(config.parts, config.width, config.height);
+        let (workspace, part_ids) =
+            create_benchmark_workspace(config.parts, config.width, config.height);
+        let base_parts = workspace.parts().to_vec();
         Self {
             config,
             window: None,
             renderer: None,
             workspace,
+            part_ids,
+            base_parts,
+            animation_frame: 0,
+            animation_pool_start: 0,
             warmup_remaining: config.warmup_frames,
             samples: Vec::with_capacity(config.measured_frames),
         }
     }
 
     fn render_frame(&mut self, event_loop: &ActiveEventLoop) {
+        let started = Instant::now();
+        self.animate_parts();
+
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
 
-        let started = Instant::now();
         if let Err(error) = renderer.render(&self.workspace) {
             report_renderer_error(error);
             event_loop.exit();
@@ -95,6 +110,64 @@ impl App {
                 print_report(self.config, &self.samples);
                 event_loop.exit();
             }
+        }
+    }
+
+    fn animate_parts(&mut self) {
+        let part_count = self.part_ids.len();
+        let animated_count =
+            part_count / ANIMATED_PARTS_RATIO + usize::from(part_count % ANIMATED_PARTS_RATIO != 0);
+
+        if self.animation_frame != 0 && self.animation_frame % ANIMATION_POOL_CHANGE_INTERVAL == 0 {
+            for offset in 0..animated_count {
+                let index = (self.animation_pool_start + offset) % part_count;
+                self.reset_part(index);
+            }
+            self.animation_pool_start = (self.animation_pool_start + animated_count) % part_count;
+        }
+
+        let time = self.animation_frame as f32 * 0.07;
+        for offset in 0..animated_count {
+            let index = (self.animation_pool_start + offset) % part_count;
+            let id = self.part_ids[index];
+            let base = &self.base_parts[index];
+            let motion = time * 0.8 + index as f32 * 0.013;
+            let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
+            let color_shift = time * 1.7 + index as f32 * 0.017;
+
+            if let Some(part) = self.workspace.part_mut(id) {
+                part.position = base.position
+                    + Vec3::new(
+                        motion.sin() * 0.32,
+                        (motion * 1.7).cos() * 0.16,
+                        motion.cos() * 0.32,
+                    );
+                part.size =
+                    base.size * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35);
+                part.orientation = base.orientation
+                    + Vec3::new(
+                        motion.sin() * 12.0,
+                        motion.cos() * 18.0,
+                        (motion * 0.7).sin() * 10.0,
+                    );
+                part.color = Color3::new(
+                    (base.color.r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
+                    (base.color.g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
+                    (base.color.b + (color_shift + 4.2).sin() * 0.18).clamp(0.0, 1.0),
+                );
+            }
+        }
+        self.animation_frame += 1;
+    }
+
+    fn reset_part(&mut self, index: usize) {
+        let id = self.part_ids[index];
+        let base = &self.base_parts[index];
+        if let Some(part) = self.workspace.part_mut(id) {
+            part.position = base.position;
+            part.size = base.size;
+            part.orientation = base.orientation;
+            part.color = base.color;
         }
     }
 }
@@ -177,7 +250,11 @@ impl ApplicationHandler for App {
     }
 }
 
-fn create_benchmark_workspace(part_count: usize, width: u32, height: u32) -> Workspace {
+fn create_benchmark_workspace(
+    part_count: usize,
+    width: u32,
+    height: u32,
+) -> (Workspace, Vec<PartId>) {
     let side = (part_count as f64).sqrt().ceil() as usize;
     let spacing = 1.2;
     let extent = side as f32 * spacing;
@@ -189,6 +266,7 @@ fn create_benchmark_workspace(part_count: usize, width: u32, height: u32) -> Wor
         width as f32 / height.max(1) as f32,
     );
     workspace.current_camera.zfar = camera_distance * 4.0 + extent;
+    let mut part_ids = Vec::with_capacity(part_count);
 
     for index in 0..part_count {
         let column = index % side;
@@ -213,10 +291,10 @@ fn create_benchmark_workspace(part_count: usize, width: u32, height: u32) -> Wor
             0.32 + (index % 3) as f32 * 0.16,
             0.40 + (index % 4) as f32 * 0.11,
         );
-        workspace.add_part(part);
+        part_ids.push(workspace.add_part(part));
     }
 
-    workspace
+    (workspace, part_ids)
 }
 
 fn print_report(config: Config, samples: &[Sample]) {
@@ -234,6 +312,11 @@ fn print_report(config: Config, samples: &[Sample]) {
     let gpu_average = average(&gpu_complete);
     println!("render benchmark");
     println!("  parts: {}", config.parts);
+    println!(
+        "  animated parts: {} (25%), pool changes every {} frames",
+        config.parts / ANIMATED_PARTS_RATIO + usize::from(config.parts % ANIMATED_PARTS_RATIO != 0),
+        ANIMATION_POOL_CHANGE_INTERVAL
+    );
     println!("  warmup frames: {}", config.warmup_frames);
     println!("  measured frames: {}", samples.len());
     println!("  CPU submission: {}", format_statistics(&cpu_submission));
