@@ -1,9 +1,15 @@
+mod basepart;
 mod camera;
 mod color3;
 mod pv_instance;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
+pub use basepart::*;
 use bytemuck::{Pod, Zeroable};
 pub use camera::*;
 pub use color3::*;
@@ -860,30 +866,19 @@ impl MeshMaterialSlots {
 
 #[derive(Clone, Debug)]
 pub struct Part {
-    pub name: String,
+    base: BasePart,
     pub shape: PartShape,
-    pub pv: PVInstance,
-    pub size: Vec3,
-    /// Tint.
-    pub color: Color3,
     pub material: Material,
     pub material_slots: MeshMaterialSlots,
-    pub anchored: bool,
-    pub can_collide: bool,
 }
 
 impl Part {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name: name.into(),
+            base: BasePart::new(name),
             shape: PartShape::Block,
-            pv: PVInstance::new(),
-            size: Vec3::ONE,
-            color: Color3::WHITE,
             material: Material::default(),
             material_slots: MeshMaterialSlots::default(),
-            anchored: true,
-            can_collide: true,
         }
     }
 
@@ -897,20 +892,22 @@ impl Part {
     }
 }
 
-pub trait Transform {
-    /// Returns the 4x4 transform matrix for this object:
-    /// ```text
-    /// [s_x, 0,   0,   x]
-    /// [0,   s_y, 0,   y]
-    /// [0,   0,   s_z, z]
-    /// [0,   0,   0,   1]
-    /// ```
-    fn transform(&self) -> Mat4;
+impl Deref for Part {
+    type Target = BasePart;
+    fn deref(&self) -> &Self::Target {
+        &self.base
+    }
+}
+
+impl DerefMut for Part {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.base
+    }
 }
 
 impl Transform for Part {
     fn transform(&self) -> Mat4 {
-        self.pv.pivot() * Mat4::from_scale(self.size)
+        self.base.transform()
     }
 }
 
@@ -971,7 +968,7 @@ impl Workspace {
     pub fn find_first_child(&mut self, name: &str) -> Option<(InstanceId, &mut Part)> {
         self.children
             .iter_mut()
-            .position(|part| part.name == name)
+            .position(|part| part.base.name == name)
             .map(|index| (InstanceId(index), &mut self.children[index]))
     }
 
@@ -1524,7 +1521,6 @@ impl Renderer {
                 .to_cols_array_2d(),
             camera_position: workspace
                 .current_camera
-                .pv
                 .pivot()
                 .w_axis
                 .truncate()
@@ -1558,7 +1554,7 @@ impl Renderer {
             let model = part.transform();
             let normal_matrix = model.inverse().transpose().to_cols_array_2d();
             let material = part.material;
-            let tint = part.color.rgba();
+            let tint = part.base.color.rgba();
             batches[batch_index].instances.push(InstanceRaw {
                 model: model.to_cols_array_2d(),
                 normal_0: [
@@ -1765,24 +1761,24 @@ mod tests {
         let orientation = Vec3::new(10.0, 20.0, 30.0);
         let mut part = Part::new("part");
 
-        part.pv.set_position(position);
-        part.pv.set_orientation(orientation);
+        part.base.set_position(position);
+        part.base.set_orientation(orientation);
 
-        assert_eq!(part.pv.position(), position);
-        assert!((part.pv.orientation() - orientation).abs().max_element() < 0.0001);
+        assert_eq!(part.base.position(), position);
+        assert!((part.base.orientation() - orientation).abs().max_element() < 0.0001);
     }
 
     #[test]
     fn camera_mouse_look_rotates_in_place_with_the_expected_horizontal_sign() {
         let mut camera = Camera::default();
-        let original_position = camera.pv.pivot().w_axis.truncate();
+        let original_position = camera.pivot().w_axis.truncate();
         let mut controller = CameraController::new(6.0, 0.1);
         controller.mouse_delta = (1.0, 0.0);
 
         controller.update_camera(&mut camera, 1.0 / 60.0);
 
-        assert_eq!(camera.pv.pivot().w_axis.truncate(), original_position);
-        assert!(camera.pv.forward().x > 0.0);
+        assert_eq!(camera.pivot().w_axis.truncate(), original_position);
+        assert!(camera.forward().x > 0.0);
     }
 
     #[test]

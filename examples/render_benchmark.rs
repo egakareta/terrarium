@@ -68,7 +68,7 @@ impl App {
     fn new(config: Config) -> Self {
         let (workspace, part_ids) =
             create_benchmark_workspace(config.parts, config.width, config.height);
-        let base_camera_pivot = workspace.current_camera.pv.pivot();
+        let base_camera_pivot = workspace.current_camera.pivot();
         let base_parts = workspace.parts().to_vec();
         Self {
             config,
@@ -145,7 +145,6 @@ impl App {
             self.base_camera_pivot.to_scale_rotation_translation();
         self.workspace
             .current_camera
-            .pv
             .pivot_to(Mat4::from_rotation_translation(
                 camera_rotation,
                 camera_position * camera_scale,
@@ -161,7 +160,7 @@ impl App {
 
             if let Some(part) = self.workspace.part_mut(id) {
                 let (_, base_rotation, base_position) =
-                    base.pv.pivot().to_scale_rotation_translation();
+                    base.pivot().to_scale_rotation_translation();
                 let position = base_position
                     + Vec3::new(
                         motion.sin() * 0.32,
@@ -175,8 +174,7 @@ impl App {
                         (motion.cos() * 18.0).to_radians(),
                         ((motion * 0.7).sin() * 10.0).to_radians(),
                     );
-                part.pv
-                    .pivot_to(Mat4::from_rotation_translation(rotation, position));
+                part.pivot_to(Mat4::from_rotation_translation(rotation, position));
                 part.size =
                     base.size * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35);
                 part.color = Color3::new(
@@ -193,7 +191,7 @@ impl App {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
         if let Some(part) = self.workspace.part_mut(id) {
-            part.pv.pivot_to(base.pv.pivot());
+            part.pivot_to(base.pivot());
             part.size = base.size;
             part.color = base.color;
         }
@@ -307,7 +305,7 @@ fn create_benchmark_workspace(
             3 => PartShape::Wedge,
             _ => PartShape::CornerWedge,
         };
-        part.pv.pivot_to(Mat4::from_rotation_translation(
+        part.pivot_to(Mat4::from_rotation_translation(
             Quat::from_rotation_y(((index % 360) as f32).to_radians()),
             Vec3::new(
                 (column as f32 - side as f32 * 0.5) * spacing,

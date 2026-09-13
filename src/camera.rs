@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use winit::{
@@ -47,7 +49,7 @@ impl Camera {
     }
 
     pub fn view_projection_matrix(&self) -> Mat4 {
-        let view = self.pv.pivot().inverse();
+        let view = self.pivot().inverse();
         let projection = glam::camera::rh::proj::directx::perspective(
             self.fovy,
             self.aspect,
@@ -130,7 +132,7 @@ impl CameraController {
 
     pub fn update_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
         let delta_seconds = delta_seconds.min(0.1);
-        let forward = camera.pv.forward();
+        let forward = camera.forward();
         let right = forward.cross(Vec3::Y).normalize_or_zero();
         let horizontal_forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
         let mut movement = Vec3::ZERO;
@@ -155,17 +157,17 @@ impl CameraController {
 
         if movement.length_squared() > 0.0 {
             let speed = self.speed * if self.sprint { 2.5 } else { 1.0 };
-            camera.pv.pivot_to(
-                Mat4::from_translation(movement.normalize() * speed * delta_seconds)
-                    * camera.pv.pivot(),
+            let pivot = camera.pivot();
+            camera.pivot_to(
+                Mat4::from_translation(movement.normalize() * speed * delta_seconds) * pivot,
             );
         }
 
         let yaw_delta = -self.mouse_delta.0 * self.sensitivity;
-        let current_pitch = camera.pv.forward().y.asin();
+        let current_pitch = camera.forward().y.asin();
         let target_pitch = (current_pitch - self.mouse_delta.1 * self.sensitivity)
             .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
-        let mut pivot = camera.pv.pivot();
+        let mut pivot = camera.pivot();
         if yaw_delta != 0.0 {
             let (_, rotation, position) = pivot.to_scale_rotation_translation();
             pivot = Mat4::from_rotation_translation(
@@ -176,7 +178,7 @@ impl CameraController {
         if target_pitch != current_pitch {
             pivot *= Mat4::from_rotation_x(target_pitch - current_pitch);
         }
-        camera.pv.pivot_to(pivot);
+        camera.pivot_to(pivot);
         self.mouse_delta = (0.0, 0.0);
     }
 
@@ -189,6 +191,18 @@ impl CameraController {
         self.down = false;
         self.sprint = false;
         self.mouse_delta = (0.0, 0.0);
+    }
+}
+
+impl Deref for Camera {
+    type Target = PVInstance;
+    fn deref(&self) -> &Self::Target {
+        &self.pv
+    }
+}
+impl DerefMut for Camera {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.pv
     }
 }
 
