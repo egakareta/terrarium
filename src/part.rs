@@ -105,3 +105,23 @@ impl DerefMut for Part {
         &mut self.basepart
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::*;
+
+    #[test]
+    fn part_position_and_orientation_accessors_use_the_pivot() {
+        let position = Vec3::new(1.0, 2.0, 3.0);
+        let orientation = Vec3::new(10.0, 20.0, 30.0);
+        let mut part = Part::new("part");
+
+        part.set_position(position);
+        part.set_orientation(orientation);
+
+        assert_eq!(part.position(), position);
+        assert!((part.orientation() - orientation).abs().max_element() < 0.0001);
+    }
+}

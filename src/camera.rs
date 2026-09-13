@@ -1,6 +1,5 @@
 use std::ops::{Deref, DerefMut};
 
-use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Quat, Vec3};
 use winit::{
     event::{DeviceEvent, ElementState, WindowEvent},
@@ -215,12 +214,20 @@ fn set_key(key: &mut bool, pressed: bool) -> bool {
     true
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-pub struct CameraUniform {
-    pub view_projection: [[f32; 4]; 4],
-    pub camera_position: [f32; 4],
-    pub light_direction: [f32; 4],
-    pub light_color: [f32; 4],
-    pub ambient_color: [f32; 4],
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn camera_mouse_look_rotates_in_place_with_the_expected_horizontal_sign() {
+        let mut camera = Camera::default();
+        let original_position = camera.pivot().w_axis.truncate();
+        let mut controller = CameraController::new(6.0, 0.1);
+        controller.mouse_delta = (1.0, 0.0);
+
+        controller.update_camera(&mut camera, 1.0 / 60.0);
+
+        assert_eq!(camera.pivot().w_axis.truncate(), original_position);
+        assert!(camera.forward().x > 0.0);
+    }
 }

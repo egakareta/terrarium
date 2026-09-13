@@ -358,3 +358,57 @@ impl Mesh {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use glam::Vec3;
+
+    use super::*;
+    use crate::MaterialSlot;
+
+    #[test]
+    fn primitive_meshes_have_valid_tangent_space_attributes() {
+        let meshes = [
+            Mesh::block(1.0, [1.0; 4]),
+            Mesh::ball(1.0, 4, 8, [1.0; 4]),
+            Mesh::cylinder(1.0, 1.0, 8, [1.0; 4]),
+            Mesh::wedge([1.0; 4]),
+            Mesh::corner_wedge([1.0; 4]),
+            Mesh::plane(1.0, [1.0; 4]),
+        ];
+
+        for mesh in meshes {
+            assert!(!mesh.vertices.is_empty());
+            for vertex in mesh.vertices {
+                let normal = Vec3::from_array(vertex.normal);
+                let tangent = Vec3::from_array(vertex.tangent[..3].try_into().unwrap());
+                assert!((normal.length() - 1.0).abs() < 0.0001);
+                assert!((tangent.length() - 1.0).abs() < 0.0001);
+                assert!(normal.dot(tangent).abs() < 0.0001);
+                assert!(vertex.uv.iter().all(|coordinate| coordinate.is_finite()));
+                assert!(vertex.tangent[3] == 1.0 || vertex.tangent[3] == -1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn block_mesh_uses_named_material_slots() {
+        let mesh = Mesh::block(1.0, [1.0; 4]);
+
+        assert!(
+            mesh.vertices[0..4]
+                .iter()
+                .all(|vertex| vertex.material_slot == MaterialSlot::Side as u32)
+        );
+        assert!(
+            mesh.vertices[8..12]
+                .iter()
+                .all(|vertex| vertex.material_slot == MaterialSlot::Top as u32)
+        );
+        assert!(
+            mesh.vertices[12..16]
+                .iter()
+                .all(|vertex| vertex.material_slot == MaterialSlot::Bottom as u32)
+        );
+    }
+}

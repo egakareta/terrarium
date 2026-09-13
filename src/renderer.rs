@@ -7,9 +7,9 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::{
-    CameraUniform, DEPTH_FORMAT, MATERIAL_SLOT_COUNT, Material, MaterialTextures, Mesh,
-    MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
-    Transform, Vertex, Workspace,
+    DEPTH_FORMAT, MATERIAL_SLOT_COUNT, Material, MaterialTextures, Mesh, MeshMaterialSlots, Part,
+    PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
+    Workspace,
 };
 
 /// Errors returned while creating or using a renderer.
@@ -115,6 +115,16 @@ pub struct Renderer {
     fps_timer: Instant,
     frame_count: u32,
     fps: f32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct CameraUniform {
+    pub view_projection: [[f32; 4]; 4],
+    pub camera_position: [f32; 4],
+    pub light_direction: [f32; 4],
+    pub light_color: [f32; 4],
+    pub ambient_color: [f32; 4],
 }
 
 impl Renderer {

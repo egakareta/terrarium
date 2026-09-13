@@ -101,3 +101,61 @@ fn find_part_mut<'a>(
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BasePart, Camera, PartShape};
+
+    #[test]
+    fn isolated_instances_can_be_parented_and_recovered_by_id() {
+        let mut workspace = Workspace::new();
+        let workspace_id = workspace.id();
+        let mut part = Part::new("part");
+        part.shape = PartShape::Ball;
+        let part_id = part.id();
+        let returned_id = part.set_parent(&mut workspace);
+
+        assert_eq!(returned_id, part_id);
+        assert_eq!(workspace.children().len(), 1);
+        assert_eq!(workspace.children()[0].id(), part_id);
+        let child = workspace.instance(part_id).unwrap();
+        assert_eq!(child.class_name(), "Part");
+        assert_eq!(child.parent(), Some(workspace_id));
+        assert_eq!(
+            workspace.get::<Part>(part_id).unwrap().shape,
+            PartShape::Ball
+        );
+
+        let basepart_id = BasePart::new("base").set_parent(&mut workspace);
+        let camera_id = Camera::default().set_parent(&mut workspace);
+        workspace
+            .get_mut::<BasePart>(basepart_id)
+            .unwrap()
+            .set_name("renamed".to_owned());
+        assert_eq!(
+            workspace.get::<BasePart>(basepart_id).unwrap().name(),
+            "renamed"
+        );
+        assert!(workspace.instance(basepart_id).unwrap().is::<BasePart>());
+        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert!(workspace.get::<Part>(camera_id).is_none());
+        assert_eq!(workspace.get_all::<Camera>().count(), 1);
+        assert_eq!(workspace.get_all::<Part>().count(), 1);
+        assert_eq!(
+            workspace
+                .instances()
+                .map(Instance::class_name)
+                .collect::<Vec<_>>(),
+            vec!["Part", "BasePart", "Camera"]
+        );
+
+        let cloned_workspace = workspace.clone();
+        assert_eq!(cloned_workspace.children().len(), 3);
+        assert!(
+            cloned_workspace
+                .instances()
+                .all(|instance| instance.parent() == Some(cloned_workspace.id()))
+        );
+    }
+}

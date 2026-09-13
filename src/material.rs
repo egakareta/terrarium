@@ -246,3 +246,46 @@ impl Texture {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn textures_validate_rgba8_data_and_material_defaults_are_rough_dielectrics() {
+        assert!(matches!(
+            Texture::new(2, 2, vec![0; 3]),
+            Err(TextureError::InvalidData {
+                actual: 3,
+                expected: 16
+            })
+        ));
+        let texture = Texture::linear(1, 1, vec![128, 128, 255, 255]).unwrap();
+        assert_eq!(texture.color_space, TextureColorSpace::Linear);
+
+        let material = Material::default();
+        assert_eq!(material.base_color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(material.metallic, 0.0);
+        assert_eq!(material.roughness, 0.5);
+        assert!(material.textures.base_color.is_none());
+        assert!(material.textures.normal.is_none());
+        assert!(material.textures.metallic_roughness.is_none());
+    }
+
+    #[test]
+    fn material_helpers_configure_a_texture_set() {
+        let texture = TextureHandle(7);
+        let material = Material::textured(texture)
+            .with_normal_texture(TextureHandle(8))
+            .with_metallic_roughness_texture(TextureHandle(9));
+
+        assert_eq!(
+            material.textures,
+            TextureSet {
+                base_color: Some(texture),
+                normal: Some(TextureHandle(8)),
+                metallic_roughness: Some(TextureHandle(9)),
+            }
+        );
+    }
+}

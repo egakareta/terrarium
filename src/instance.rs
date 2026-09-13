@@ -409,3 +409,68 @@ impl PVInstance {
             .normalize_or_zero()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{BasePart, Camera, Part, PartShape, Workspace};
+
+    #[test]
+    fn built_in_objects_implement_instance_and_support_downcasting() {
+        fn assert_instance<T: Instance>() {}
+
+        assert_instance::<Workspace>();
+        assert_instance::<BasePart>();
+        assert_instance::<Camera>();
+        assert_instance::<Part>();
+        assert_eq!(Workspace::new().name(), "Workspace");
+        assert_eq!(BasePart::new("base").name(), "base");
+        assert_eq!(Camera::default().name(), "Camera");
+
+        let mut instance: Box<dyn Instance> = Box::new(BasePart::new("base"));
+        assert!(instance.is::<BasePart>());
+        assert!(!instance.is::<Part>());
+        assert_eq!(instance.downcast_ref::<BasePart>().unwrap().name(), "base");
+        instance
+            .downcast_mut::<BasePart>()
+            .unwrap()
+            .set_name("renamed".to_owned());
+        assert_eq!(instance.name(), "renamed");
+
+        let instance = match instance.downcast::<BasePart>() {
+            Ok(instance) => instance,
+            Err(_) => panic!("expected a BasePart"),
+        };
+        assert_eq!(instance.name(), "renamed");
+    }
+
+    #[test]
+    fn every_instance_can_own_a_nested_instance_tree() {
+        let mut model = BasePart::new("model");
+        let part_id = model.add_child_with(Part::new("part"), |part| {
+            part.shape = PartShape::Ball;
+        });
+        let camera_id = Camera::default().set_parent(&mut model);
+        let model_id = model.id();
+
+        assert_eq!(model.children().len(), 2);
+        assert_eq!(model.children()[0].id(), part_id);
+        assert_eq!(model.children()[1].id(), camera_id);
+        assert_eq!(model.children()[0].parent(), Some(model_id));
+
+        let mut workspace = Workspace::new();
+        model.set_parent(&mut workspace);
+        assert_eq!(workspace.children().len(), 1);
+        assert_eq!(
+            workspace.instance(model_id).unwrap().class_name(),
+            "BasePart"
+        );
+        assert_eq!(
+            workspace.instance(part_id).unwrap().parent(),
+            Some(model_id)
+        );
+        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert_eq!(workspace.get_all::<Part>().count(), 1);
+        assert_eq!(workspace.instances().count(), 3);
+    }
+}
