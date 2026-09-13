@@ -299,7 +299,7 @@ fn create_benchmark_workspace(
     for index in 0..part_count {
         let column = index % side;
         let row = index / side;
-        let mut part = Part::new("");
+        let mut part = Part::unnamed();
         part.shape = match index % 5 {
             0 => PartShape::Block,
             1 => PartShape::Ball,

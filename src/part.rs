@@ -41,6 +41,17 @@ impl BasePart {
             can_collide: true,
         }
     }
+
+    /// Creates a base part without assigning a display name.
+    pub fn unnamed() -> Self {
+        Self::new("")
+    }
+}
+
+impl Default for BasePart {
+    fn default() -> Self {
+        Self::unnamed()
+    }
 }
 
 crate::impl_instance!(BasePart, class_name = "BasePart", data = instance,);
@@ -104,6 +115,11 @@ impl Part {
         }
     }
 
+    /// Creates a visible part without assigning a display name.
+    pub fn unnamed() -> Self {
+        Self::new("")
+    }
+
     /// Assigns a material to a mesh-selected slot.
     pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
         if slot == MaterialSlot::Base {
@@ -111,6 +127,12 @@ impl Part {
         } else {
             self.material_slots.set(slot, material);
         }
+    }
+}
+
+impl Default for Part {
+    fn default() -> Self {
+        Self::unnamed()
     }
 }
 
