@@ -8,7 +8,7 @@ use std::{
 };
 
 use terrarium::{
-    Camera, Color3, InstanceId, Part, PartShape, Renderer, RendererError, Workspace,
+    Camera, Color3, Instance, InstanceId, Part, PartShape, Renderer, RendererError, Workspace,
     glam::{EulerRot, Mat4, Quat, Vec3},
     winit::{
         application::ApplicationHandler,

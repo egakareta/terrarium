@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use terrarium::{
-    Color3, Easing, Material, MaterialSlot, Part, PartShape, Renderer, RendererError, Repeat,
-    Texture, TextureColorSpace, Tween, Workspace, egui,
+    Color3, Easing, Instance, Material, MaterialSlot, Part, PartShape, Renderer, RendererError,
+    Repeat, Texture, TextureColorSpace, Tween, Workspace, egui,
     glam::Vec3,
     winit::{
         application::ApplicationHandler,
@@ -157,7 +157,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         TextureColorSpace::Srgb,
     )?)?;
 
-    workspace.add_child_with(Part::new("Ground"), |part| {
+    let ground = workspace.add_child_with_ref(Part::new("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
@@ -167,7 +167,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        workspace.add_child_with(Part::unnamed(), |part| {
+        ground.add_child_with(Part::unnamed(), |part| {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);

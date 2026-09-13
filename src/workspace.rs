@@ -39,40 +39,6 @@ impl Workspace {
         self.textures.get(handle.0)
     }
 
-    /// Takes ownership of any supported [`Instance`] and parents it here.
-    pub fn add_instance<T>(&mut self, instance: T) -> InstanceId
-    where
-        T: Instance,
-    {
-        self.add_child(instance)
-    }
-
-    /// Takes ownership of any supported [`Instance`], parents it here, and
-    /// returns a mutable reference to it.
-    ///
-    /// The reference borrows the workspace, so copy out the [`InstanceId`]
-    /// with [`Instance::id`] if the handle must outlive the borrow.
-    pub fn add_instance_ref<T>(&mut self, instance: T) -> &mut T
-    where
-        T: Instance,
-    {
-        self.add_child_ref(instance)
-    }
-
-    /// Configures an instance before parenting it here and returns a mutable
-    /// reference to it.
-    ///
-    /// The reference borrows the workspace, so copy out the [`InstanceId`]
-    /// with [`Instance::id`] if the handle must outlive the borrow.
-    pub fn add_instance_with_ref<T, F>(&mut self, mut instance: T, configure: F) -> &mut T
-    where
-        T: Instance,
-        F: FnOnce(&mut T),
-    {
-        configure(&mut instance);
-        self.add_instance_ref(instance)
-    }
-
     /// Returns a descendant by ID, downcast to its concrete instance type.
     pub fn get<T: Instance>(&self, id: InstanceId) -> Option<&T> {
         self.instance(id)?.downcast_ref::<T>()
@@ -170,8 +136,8 @@ mod tests {
     #[test]
     fn find_first_child_matches_the_requested_concrete_type() {
         let mut workspace = Workspace::new();
-        let basepart_id = workspace.add_instance(BasePart::new("shared"));
-        let part_id = workspace.add_instance(Part::new("shared"));
+        let basepart_id = workspace.add_child(BasePart::new("shared"));
+        let part_id = workspace.add_child(Part::new("shared"));
 
         assert_eq!(
             workspace

@@ -29,72 +29,6 @@ macro_rules! impl_instance {
         class_name = $class_name:literal,
         data = $data:ident $(.$data_tail:ident)* $(,)?
     ) => {
-        impl $type {
-            /// Moves this isolated instance into `parent` and returns its stable identifier.
-            pub fn set_parent(
-                self,
-                parent: &mut dyn $crate::Instance,
-            ) -> $crate::InstanceId {
-                let id = $crate::Instance::id(&self);
-                parent.add_child_box(Box::new(self));
-                id
-            }
-
-            /// Adds an owned child and returns the child's stable identifier.
-            pub fn add_child<T>(&mut self, child: T) -> $crate::InstanceId
-            where
-                T: $crate::Instance,
-            {
-                <$type as $crate::Instance>::add_child_box(self, Box::new(child))
-            }
-
-            /// Configures a child before adding it and returns the child's stable identifier.
-            pub fn add_child_with<T, F>(
-                &mut self,
-                mut child: T,
-                configure: F,
-            ) -> $crate::InstanceId
-            where
-                T: $crate::Instance,
-                F: FnOnce(&mut T),
-            {
-                configure(&mut child);
-                self.add_child(child)
-            }
-
-            /// Adds an owned child and returns a mutable reference to it.
-            ///
-            /// The reference borrows the parent, so copy out the [`$crate::InstanceId`]
-            /// with [`$crate::Instance::id`] if the handle must outlive the borrow.
-            pub fn add_child_ref<T>(&mut self, child: T) -> &mut T
-            where
-                T: $crate::Instance,
-            {
-                <$type as $crate::Instance>::add_child_ref(self, child)
-            }
-
-            /// Configures a child before adding it and returns a mutable reference to it.
-            ///
-            /// The reference borrows the parent, so copy out the [`$crate::InstanceId`]
-            /// with [`$crate::Instance::id`] if the handle must outlive the borrow.
-            pub fn add_child_with_ref<T, F>(&mut self, mut child: T, configure: F) -> &mut T
-            where
-                T: $crate::Instance,
-                F: FnOnce(&mut T),
-            {
-                configure(&mut child);
-                self.add_child_ref(child)
-            }
-
-            /// Adds an owned trait-object child and returns a mutable reference to it.
-            pub fn add_child_box_ref(
-                &mut self,
-                child: Box<dyn $crate::Instance>,
-            ) -> &mut dyn $crate::Instance {
-                <$type as $crate::Instance>::add_child_box_ref(self, child)
-            }
-        }
-
         impl $crate::Instance for $type {
             fn class_name(&self) -> &'static str {
                 $class_name
@@ -129,13 +63,6 @@ macro_rules! impl_instance {
                 child: Box<dyn $crate::Instance>,
             ) -> $crate::InstanceId {
                 self.$data $(.$data_tail)*.add_child(child)
-            }
-
-            fn add_child_box_ref(
-                &mut self,
-                child: Box<dyn $crate::Instance>,
-            ) -> &mut dyn $crate::Instance {
-                self.$data $(.$data_tail)*.add_child_ref(child)
             }
 
             fn set_instance_parent(&mut self, parent: Option<$crate::InstanceId>) {
@@ -208,17 +135,11 @@ impl InstanceData {
         &mut self.children
     }
 
-    pub(crate) fn add_child(&mut self, child: Box<dyn Instance>) -> InstanceId {
-        self.add_child_ref(child).id()
-    }
-
-    pub(crate) fn add_child_ref(&mut self, mut child: Box<dyn Instance>) -> &mut dyn Instance {
+    pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
+        let child_id = child.id();
         child.set_instance_parent(Some(self.id));
         self.children.push(child);
-        self.children
-            .last_mut()
-            .expect("just pushed child")
-            .as_mut()
+        child_id
     }
 }
 
@@ -285,6 +206,15 @@ pub trait Instance: Any + Debug + InstanceClone {
             .as_mut()
     }
 
+    /// Adds an owned child and returns the child's stable identifier.
+    fn add_child<T>(&mut self, child: T) -> InstanceId
+    where
+        Self: Sized,
+        T: Instance,
+    {
+        self.add_child_box(Box::new(child))
+    }
+
     /// Configures an isolated child, then adds it and returns its identifier.
     fn add_child_with<T, F>(&mut self, mut child: T, configure: F) -> InstanceId
     where
@@ -293,7 +223,7 @@ pub trait Instance: Any + Debug + InstanceClone {
         F: FnOnce(&mut T),
     {
         configure(&mut child);
-        self.add_child_box(Box::new(child))
+        self.add_child(child)
     }
 
     /// Adds an owned child to this instance and returns a mutable reference to it.

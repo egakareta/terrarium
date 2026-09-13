@@ -510,7 +510,7 @@ impl TweenManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Part;
+    use crate::{Instance, Part};
 
     #[test]
     fn tween_interpolates_and_finishes() {
@@ -544,7 +544,7 @@ mod tests {
     #[test]
     fn manager_applies_and_removes_completed_tracks() {
         let mut workspace = Workspace::new();
-        let id = workspace.add_instance(Part::new("animated"));
+        let id = workspace.add_child(Part::new("animated"));
         let tween_id = workspace
             .tweens_mut()
             .add_position(id, Tween::new(Vec3::ZERO, Vec3::X, 1.0));
