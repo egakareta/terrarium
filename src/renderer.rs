@@ -175,8 +175,10 @@ impl Renderer {
             })
             .await?;
         log::info!("selected wgpu adapter: {:?}", adapter.get_info());
-        let mut required_limits = wgpu::Limits::default();
-        required_limits.max_sampled_textures_per_shader_stage = (MATERIAL_SLOT_COUNT * 3) as u32;
+        let required_limits = wgpu::Limits {
+            max_sampled_textures_per_shader_stage: (MATERIAL_SLOT_COUNT * 3) as u32,
+            ..Default::default()
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("terrarium device"),
@@ -281,9 +283,9 @@ impl Renderer {
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             lod_min_clamp: 0.0,
-            lod_max_clamp: 0.0,
+            lod_max_clamp: 32.0,
             compare: None,
             anisotropy_clamp: 1,
             border_color: None,
@@ -292,9 +294,9 @@ impl Renderer {
         let default_normal = Texture::linear(1, 1, vec![128, 128, 255, 255])?;
         let default_metallic_roughness = Texture::linear(1, 1, vec![0, 255, 0, 255])?;
         let textures = vec![
-            upload_texture(&device, &queue, &default_base_color),
-            upload_texture(&device, &queue, &default_normal),
-            upload_texture(&device, &queue, &default_metallic_roughness),
+            upload_texture(&device, &queue, &default_base_color)?,
+            upload_texture(&device, &queue, &default_normal)?,
+            upload_texture(&device, &queue, &default_metallic_roughness)?,
         ];
         let default_material_textures = MaterialTextures {
             base_color: [TextureHandle(0); MATERIAL_SLOT_COUNT],
@@ -470,15 +472,12 @@ impl Renderer {
         Ok(handle)
     }
 
-    /// Uploads a single-mip RGBA8 texture and returns its GPU handle.
-    ///
-    /// Mipmap generation is intentionally not performed yet. Use sRGB data for
-    /// base-color textures and linear data for normal or metallic-roughness maps.
+    /// Uploads an RGBA8 texture and its complete mip chain, then returns its GPU handle.
     pub fn add_texture(&mut self, texture: &Texture) -> Result<TextureHandle, RendererError> {
         texture.validate()?;
         let handle = TextureHandle(self.textures.len());
         self.textures
-            .push(upload_texture(&self.device, &self.queue, texture));
+            .push(upload_texture(&self.device, &self.queue, texture)?);
         Ok(handle)
     }
 
@@ -757,11 +756,16 @@ impl Renderer {
     }
 }
 
-fn upload_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &Texture) -> GpuTexture {
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &Texture,
+) -> Result<GpuTexture, TextureError> {
     let format = match texture.color_space {
         TextureColorSpace::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
         TextureColorSpace::Linear => wgpu::TextureFormat::Rgba8Unorm,
     };
+    let mip_levels = texture.mip_levels()?;
     let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("material texture"),
         size: wgpu::Extent3d {
@@ -769,38 +773,39 @@ fn upload_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &Texture)
             height: texture.height,
             depth_or_array_layers: 1,
         },
-        // Mipmaps are deliberately deferred; every material texture has one level for now.
-        mip_level_count: 1,
+        mip_level_count: mip_levels.len() as u32,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    queue.write_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: &gpu_texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        &texture.pixels,
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(texture.width * 4),
-            rows_per_image: Some(texture.height),
-        },
-        wgpu::Extent3d {
-            width: texture.width,
-            height: texture.height,
-            depth_or_array_layers: 1,
-        },
-    );
+    for (mip_level, image) in mip_levels.iter().enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &gpu_texture,
+                mip_level: mip_level as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &image.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(image.width * 4),
+                rows_per_image: Some(image.height),
+            },
+            wgpu::Extent3d {
+                width: image.width,
+                height: image.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
     let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
-    GpuTexture {
+    Ok(GpuTexture {
         _texture: gpu_texture,
         view,
-    }
+    })
 }
 
 fn create_depth_texture(
@@ -823,4 +828,20 @@ fn create_depth_texture(
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     (texture, view)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn material_shader_validates_with_explicit_texture_gradients() {
+        let module = wgpu::naga::front::wgsl::parse_str(include_str!("shader.wgsl"))
+            .expect("material shader should parse");
+        let mut validator = wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        );
+        validator
+            .validate(&module)
+            .expect("material shader should validate");
+    }
 }

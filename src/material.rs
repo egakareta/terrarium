@@ -206,9 +206,6 @@ impl Image {
 }
 
 /// CPU-side RGBA8 texture data ready to be uploaded to a [`Renderer`].
-///
-/// Textures are intentionally single-mip resources for now. The renderer does
-/// not generate or upload additional mip levels.
 #[derive(Clone, Debug)]
 pub struct Texture {
     /// Texture width in pixels.
@@ -281,6 +278,58 @@ impl Texture {
         Self::from_image(Image::from_bytes(bytes)?, color_space)
     }
 
+    /// Returns the number of mip levels in the automatically generated chain.
+    pub fn mip_level_count(&self) -> u32 {
+        let max_dimension = self.width.max(self.height);
+        if max_dimension == 0 {
+            0
+        } else {
+            max_dimension.ilog2() + 1
+        }
+    }
+
+    /// Generates the complete mip chain, including the original image at level zero.
+    ///
+    /// RGB channels in sRGB textures are averaged in linear space before being
+    /// encoded again. Linear textures, including normal and metallic-roughness
+    /// maps, are averaged directly. The last row or column is included when a
+    /// dimension is odd.
+    pub fn mip_levels(&self) -> Result<Vec<Image>, TextureError> {
+        self.validate()?;
+
+        let mut levels = Vec::with_capacity(self.mip_level_count() as usize);
+        let mut width = self.width;
+        let mut height = self.height;
+        let mut pixels = self.pixels.clone();
+        levels.push(Image {
+            width,
+            height,
+            pixels: pixels.clone(),
+        });
+
+        while width > 1 || height > 1 {
+            let next_width = (width / 2).max(1);
+            let next_height = (height / 2).max(1);
+            pixels = downsample_rgba8(
+                width,
+                height,
+                next_width,
+                next_height,
+                &pixels,
+                self.color_space,
+            );
+            width = next_width;
+            height = next_height;
+            levels.push(Image {
+                width,
+                height,
+                pixels: pixels.clone(),
+            });
+        }
+
+        Ok(levels)
+    }
+
     /// Checks dimensions and verifies that the pixel buffer is tightly packed RGBA8.
     pub fn validate(&self) -> Result<(), TextureError> {
         if self.width == 0 || self.height == 0 {
@@ -298,6 +347,76 @@ impl Texture {
         }
         Ok(())
     }
+}
+
+fn downsample_rgba8(
+    source_width: u32,
+    source_height: u32,
+    width: u32,
+    height: u32,
+    source: &[u8],
+    color_space: TextureColorSpace,
+) -> Vec<u8> {
+    let mut pixels = vec![0; width as usize * height as usize * 4];
+    for y in 0..height {
+        let source_y_start = (y as u64 * source_height as u64 / height as u64) as u32;
+        let source_y_end = ((y as u64 + 1) * source_height as u64)
+            .div_ceil(height as u64)
+            .min(source_height as u64) as u32;
+        for x in 0..width {
+            let source_x_start = (x as u64 * source_width as u64 / width as u64) as u32;
+            let source_x_end = ((x as u64 + 1) * source_width as u64)
+                .div_ceil(width as u64)
+                .min(source_width as u64) as u32;
+            let mut sums = [0.0; 4];
+            let mut sample_count = 0.0;
+            for source_y in source_y_start..source_y_end {
+                for source_x in source_x_start..source_x_end {
+                    let source_index =
+                        (source_y as usize * source_width as usize + source_x as usize) * 4;
+                    for channel in 0..4 {
+                        let value = source[source_index + channel];
+                        sums[channel] += if color_space == TextureColorSpace::Srgb && channel < 3 {
+                            srgb_to_linear(value)
+                        } else {
+                            value as f32 / 255.0
+                        };
+                    }
+                    sample_count += 1.0;
+                }
+            }
+
+            let destination_index = (y as usize * width as usize + x as usize) * 4;
+            for channel in 0..4 {
+                let value = sums[channel] / sample_count;
+                pixels[destination_index + channel] =
+                    if color_space == TextureColorSpace::Srgb && channel < 3 {
+                        linear_to_srgb(value)
+                    } else {
+                        (value * 255.0).round() as u8
+                    };
+            }
+        }
+    }
+    pixels
+}
+
+fn srgb_to_linear(value: u8) -> f32 {
+    let value = value as f32 / 255.0;
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn linear_to_srgb(value: f32) -> u8 {
+    let value = if value <= 0.0031308 {
+        value * 12.92
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    };
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 #[cfg(test)]
@@ -340,5 +459,32 @@ mod tests {
                 metallic_roughness: Some(TextureHandle(9)),
             }
         );
+    }
+
+    #[test]
+    fn texture_mip_levels_downsample_odd_dimensions_and_retain_alpha() {
+        let texture = Texture::linear(
+            3,
+            2,
+            vec![
+                0, 10, 20, 30, 10, 20, 30, 40, 20, 30, 40, 50, 30, 40, 50, 60, 40, 50, 60, 70, 50,
+                60, 70, 80,
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(texture.mip_level_count(), 2);
+        let levels = texture.mip_levels().unwrap();
+        assert_eq!(levels.len(), 2);
+        assert_eq!((levels[1].width, levels[1].height), (1, 1));
+        assert_eq!(levels[1].pixels, vec![25, 35, 45, 55]);
+    }
+
+    #[test]
+    fn srgb_mip_levels_average_rgb_in_linear_space() {
+        let texture = Texture::new(2, 1, vec![0, 0, 0, 0, 255, 255, 255, 255]).unwrap();
+
+        let levels = texture.mip_levels().unwrap();
+        assert_eq!(levels[1].pixels, vec![188, 188, 188, 128]);
     }
 }
