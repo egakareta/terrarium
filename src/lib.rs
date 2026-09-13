@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, sync::Arc};
+use std::sync::Arc;
 
 use bytemuck::{Pod, Zeroable};
 use glam::{EulerRot, Mat4, Quat, Vec3};
@@ -54,6 +54,31 @@ impl Vertex {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: ATTRIBUTES,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    color: [f32; 4],
+}
+
+impl InstanceRaw {
+    fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+            2 => Float32x4,
+            3 => Float32x4,
+            4 => Float32x4,
+            5 => Float32x4,
+            6 => Float32x4,
+        ];
+
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
             attributes: ATTRIBUTES,
         }
     }
@@ -718,13 +743,6 @@ struct CameraUniform {
     view_projection: [[f32; 4]; 4],
 }
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct ModelUniform {
-    model: [[f32; 4]; 4],
-    color: [f32; 4],
-}
-
 struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -742,10 +760,8 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    model_buffer: wgpu::Buffer,
-    model_bind_group_layout: wgpu::BindGroupLayout,
-    model_bind_group: wgpu::BindGroup,
-    model_stride: u64,
+    instance_buffer: wgpu::Buffer,
+    instance_data: Vec<InstanceRaw>,
     meshes: Vec<GpuMesh>,
     primitive_meshes: [MeshHandle; PartShape::COUNT],
     clear_color: wgpu::Color,
@@ -818,20 +834,16 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let (depth_texture, depth_view) = create_depth_texture(&device, &config);
-        let model_stride = aligned_uniform_size(
-            std::mem::size_of::<ModelUniform>() as u64,
-            device.limits().min_uniform_buffer_offset_alignment as u64,
-        );
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera uniform buffer"),
             size: std::mem::size_of::<CameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let model_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("model uniform buffer"),
-            size: model_stride,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        let instance_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("part instance buffer"),
+            size: std::mem::size_of::<InstanceRaw>() as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -849,22 +861,6 @@ impl Renderer {
                     count: None,
                 }],
             });
-        let model_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("model bind group layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: NonZeroU64::new(
-                            std::mem::size_of::<ModelUniform>() as u64
-                        ),
-                    },
-                    count: None,
-                }],
-            });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera bind group"),
             layout: &camera_bind_group_layout,
@@ -873,29 +869,13 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
-        let model_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("model bind group"),
-            layout: &model_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &model_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(std::mem::size_of::<ModelUniform>() as u64),
-                }),
-            }],
-        });
-
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("colored mesh shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh pipeline layout"),
-            bind_group_layouts: &[
-                Some(&camera_bind_group_layout),
-                Some(&model_bind_group_layout),
-            ],
+            bind_group_layouts: &[Some(&camera_bind_group_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -905,7 +885,7 @@ impl Renderer {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Some(Vertex::layout())],
+                buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -948,10 +928,8 @@ impl Renderer {
             pipeline,
             camera_buffer,
             camera_bind_group,
-            model_buffer,
-            model_bind_group_layout,
-            model_bind_group,
-            model_stride,
+            instance_buffer,
+            instance_data: Vec::new(),
             meshes: Vec::new(),
             primitive_meshes: [MeshHandle(usize::MAX); PartShape::COUNT],
             clear_color: wgpu::Color {
@@ -1050,29 +1028,18 @@ impl Renderer {
         Ok(handle)
     }
 
-    fn ensure_model_capacity(&mut self, object_count: usize) {
-        let required_size = self.model_stride * object_count.max(1) as u64;
-        if self.model_buffer.size() >= required_size {
+    fn ensure_instance_capacity(&mut self, instance_count: usize) {
+        let required_size =
+            std::mem::size_of::<InstanceRaw>() as u64 * instance_count.max(1) as u64;
+        if self.instance_buffer.size() >= required_size {
             return;
         }
 
-        self.model_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("model uniform buffer"),
+        self.instance_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("part instance buffer"),
             size: required_size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
-        self.model_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("model bind group"),
-            layout: &self.model_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &self.model_buffer,
-                    offset: 0,
-                    size: NonZeroU64::new(std::mem::size_of::<ModelUniform>() as u64),
-                }),
-            }],
         });
     }
 
@@ -1102,16 +1069,37 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
-        self.ensure_model_capacity(workspace.parts().len());
-        for (index, part) in workspace.parts().iter().enumerate() {
-            let model_uniform = ModelUniform {
+        let parts = workspace.parts();
+        let mut shape_counts = [0usize; PartShape::COUNT];
+        for part in parts {
+            shape_counts[part.shape.index()] += 1;
+        }
+
+        let mut shape_offsets = [0usize; PartShape::COUNT];
+        let mut instance_count = 0;
+        for (offset, count) in shape_offsets.iter_mut().zip(shape_counts) {
+            *offset = instance_count;
+            instance_count += count;
+        }
+
+        self.ensure_instance_capacity(instance_count);
+        self.instance_data.clear();
+        self.instance_data
+            .resize(instance_count, InstanceRaw::zeroed());
+        let mut next_offsets = shape_offsets;
+        for part in parts {
+            let shape_index = part.shape.index();
+            self.instance_data[next_offsets[shape_index]] = InstanceRaw {
                 model: part.transform().to_cols_array_2d(),
                 color: part.color.rgba(),
             };
+            next_offsets[shape_index] += 1;
+        }
+        if instance_count != 0 {
             self.queue.write_buffer(
-                &self.model_buffer,
-                index as u64 * self.model_stride,
-                bytemuck::bytes_of(&model_uniform),
+                &self.instance_buffer,
+                0,
+                bytemuck::cast_slice(&self.instance_data),
             );
         }
 
@@ -1151,19 +1139,24 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            for (index, part) in workspace.parts().iter().enumerate() {
-                let mesh_handle = self.primitive_meshes[part.shape.index()];
+            for shape in PartShape::ALL {
+                let shape_index = shape.index();
+                let instance_count = shape_counts[shape_index];
+                if instance_count == 0 {
+                    continue;
+                }
+                let mesh_handle = self.primitive_meshes[shape_index];
                 let Some(mesh) = self.meshes.get(mesh_handle.0) else {
                     continue;
                 };
-                pass.set_bind_group(
-                    1,
-                    &self.model_bind_group,
-                    &[index as u32 * self.model_stride as u32],
-                );
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+                let instance_start =
+                    shape_offsets[shape_index] as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+                let instance_end = instance_start
+                    + instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+                pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
+                pass.draw_indexed(0..mesh.index_count, 0, 0..instance_count as u32);
             }
         }
         self.queue.submit(Some(encoder.finish()));
@@ -1177,11 +1170,6 @@ impl Renderer {
         }
         Ok(())
     }
-}
-
-fn aligned_uniform_size(size: u64, alignment: u64) -> u64 {
-    let alignment = alignment.max(1);
-    size.div_ceil(alignment) * alignment
 }
 
 fn create_depth_texture(
