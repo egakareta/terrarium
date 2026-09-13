@@ -866,7 +866,7 @@ impl MeshMaterialSlots {
 
 #[derive(Clone, Debug)]
 pub struct Part {
-    base: BasePart,
+    basepart: BasePart,
     pub shape: PartShape,
     pub material: Material,
     pub material_slots: MeshMaterialSlots,
@@ -875,7 +875,7 @@ pub struct Part {
 impl Part {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            base: BasePart::new(name),
+            basepart: BasePart::new(name),
             shape: PartShape::Block,
             material: Material::default(),
             material_slots: MeshMaterialSlots::default(),
@@ -895,19 +895,19 @@ impl Part {
 impl Deref for Part {
     type Target = BasePart;
     fn deref(&self) -> &Self::Target {
-        &self.base
+        &self.basepart
     }
 }
 
 impl DerefMut for Part {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.base
+        &mut self.basepart
     }
 }
 
 impl Transform for Part {
     fn transform(&self) -> Mat4 {
-        self.base.transform()
+        self.basepart.transform()
     }
 }
 
@@ -968,7 +968,7 @@ impl Workspace {
     pub fn find_first_child(&mut self, name: &str) -> Option<(InstanceId, &mut Part)> {
         self.children
             .iter_mut()
-            .position(|part| part.base.name == name)
+            .position(|part| part.name == name)
             .map(|index| (InstanceId(index), &mut self.children[index]))
     }
 
@@ -1554,7 +1554,7 @@ impl Renderer {
             let model = part.transform();
             let normal_matrix = model.inverse().transpose().to_cols_array_2d();
             let material = part.material;
-            let tint = part.base.color.rgba();
+            let tint = part.color.rgba();
             batches[batch_index].instances.push(InstanceRaw {
                 model: model.to_cols_array_2d(),
                 normal_0: [
@@ -1761,11 +1761,11 @@ mod tests {
         let orientation = Vec3::new(10.0, 20.0, 30.0);
         let mut part = Part::new("part");
 
-        part.base.set_position(position);
-        part.base.set_orientation(orientation);
+        part.set_position(position);
+        part.set_orientation(orientation);
 
-        assert_eq!(part.base.position(), position);
-        assert!((part.base.orientation() - orientation).abs().max_element() < 0.0001);
+        assert_eq!(part.position(), position);
+        assert!((part.orientation() - orientation).abs().max_element() < 0.0001);
     }
 
     #[test]

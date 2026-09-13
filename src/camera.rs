@@ -12,7 +12,7 @@ use crate::PVInstance;
 /// A perspective camera with a world-space pivot.
 #[derive(Clone, Debug)]
 pub struct Camera {
-    pub pv: PVInstance,
+    pv_instance: PVInstance,
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -31,7 +31,7 @@ impl Camera {
         let yaw = direction.x.atan2(-direction.z);
         let pitch = direction.y.asin();
         Self {
-            pv: PVInstance::from_world_transform(Mat4::from_rotation_translation(
+            pv_instance: PVInstance::from_world_transform(Mat4::from_rotation_translation(
                 Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
                 position,
             )),
@@ -197,12 +197,12 @@ impl CameraController {
 impl Deref for Camera {
     type Target = PVInstance;
     fn deref(&self) -> &Self::Target {
-        &self.pv
+        &self.pv_instance
     }
 }
 impl DerefMut for Camera {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.pv
+        &mut self.pv_instance
     }
 }
 

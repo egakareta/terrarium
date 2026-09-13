@@ -7,7 +7,7 @@ use crate::{Color3, PVInstance};
 #[derive(Clone, Debug)]
 pub struct BasePart {
     pub name: String,
-    pv: PVInstance,
+    pv_instance: PVInstance,
     pub size: Vec3,
     /// Tint.
     pub color: Color3,
@@ -19,7 +19,7 @@ impl BasePart {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            pv: PVInstance::new(),
+            pv_instance: PVInstance::new(),
             size: Vec3::ONE,
             color: Color3::WHITE,
             anchored: true,
@@ -31,12 +31,12 @@ impl BasePart {
 impl Deref for BasePart {
     type Target = PVInstance;
     fn deref(&self) -> &Self::Target {
-        &self.pv
+        &self.pv_instance
     }
 }
 impl DerefMut for BasePart {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.pv
+        &mut self.pv_instance
     }
 }
 
