@@ -38,8 +38,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             parts: 20_000,
-            warmup_frames: 10,
-            measured_frames: 240,
+            warmup_frames: 60,
+            measured_frames: 2400,
             width: 1280,
             height: 720,
         }
