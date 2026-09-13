@@ -3,13 +3,11 @@ use std::{collections::HashMap, sync::Arc};
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 use web_time::Instant;
-use wgpu::util::DeviceExt;
-use winit::window::Window;
 
 use crate::{
     DEPTH_FORMAT, MATERIAL_SLOT_COUNT, Material, MaterialTextures, Mesh, MeshMaterialSlots, Part,
     PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
-    Workspace,
+    Workspace, wgpu::util::DeviceExt, winit::window::Window,
 };
 
 /// Errors returned while creating or using a renderer.

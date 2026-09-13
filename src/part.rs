@@ -1,9 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
-use glam::{Mat4, Vec3};
-
 use crate::{
     Color3, InstanceData, Material, MaterialSlot, MeshMaterialSlots, PVInstance, PartShape,
+    glam::{Mat4, Vec3},
 };
 
 /// A named, transformable scene node with optional collision metadata.

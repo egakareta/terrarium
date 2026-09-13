@@ -7,14 +7,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use glam::{EulerRot, Mat4, Quat, Vec3};
-use terrarium::{Camera, Color3, InstanceId, Part, PartShape, Renderer, RendererError, Workspace};
-use winit::{
-    application::ApplicationHandler,
-    dpi::PhysicalSize,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
+use terrarium::{
+    Camera, Color3, InstanceId, Part, PartShape, Renderer, RendererError, Workspace,
+    glam::{EulerRot, Mat4, Quat, Vec3},
+    winit::{
+        application::ApplicationHandler,
+        dpi::PhysicalSize,
+        event::WindowEvent,
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+        window::{Window, WindowId},
+    },
 };
 
 const ANIMATED_PARTS_RATIO: usize = 4;

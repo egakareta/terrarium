@@ -4,7 +4,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use glam::{EulerRot, Mat4, Quat, Vec3};
+use crate::glam::{EulerRot, Mat4, Quat, Vec3};
 
 static NEXT_INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
 

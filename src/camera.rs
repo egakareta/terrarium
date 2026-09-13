@@ -1,12 +1,13 @@
 use std::ops::{Deref, DerefMut};
 
-use glam::{Mat4, Quat, Vec3};
-use winit::{
-    event::{DeviceEvent, ElementState, WindowEvent},
-    keyboard::{KeyCode, PhysicalKey},
+use crate::{
+    InstanceData, PVInstance,
+    glam::{Mat4, Quat, Vec3},
+    winit::{
+        event::{DeviceEvent, ElementState, WindowEvent},
+        keyboard::{KeyCode, PhysicalKey},
+    },
 };
-
-use crate::{InstanceData, PVInstance};
 
 /// A perspective camera with a world-space pivot.
 #[derive(Clone, Debug)]

@@ -1,7 +1,5 @@
-use glam::Vec3;
-
 use crate::{
-    MaterialSlot, Vertex, push_quad, push_quad_with_material_slot, push_quad_with_uv,
+    MaterialSlot, Vertex, glam::Vec3, push_quad, push_quad_with_material_slot, push_quad_with_uv,
     push_triangle, push_triangle_with_uv,
 };
 

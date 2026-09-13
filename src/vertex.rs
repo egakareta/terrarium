@@ -1,7 +1,6 @@
 use bytemuck::{Pod, Zeroable};
-use glam::Vec3;
 
-use crate::MaterialSlot;
+use crate::{MaterialSlot, glam::Vec3};
 
 /// A vertex consumed by the built-in PBR pipeline.
 ///

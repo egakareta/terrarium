@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
-use glam::Vec3;
 use terrarium::{
     Color3, InstanceId, Material, MaterialSlot, Part, PartShape, Renderer, RendererError, Texture,
     TextureColorSpace, Workspace,
-};
-use winit::{
-    application::ApplicationHandler,
-    dpi::PhysicalSize,
-    event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    glam::Vec3,
+    winit::{
+        application::ApplicationHandler,
+        dpi::PhysicalSize,
+        event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+        keyboard::{KeyCode, PhysicalKey},
+        window::{CursorGrabMode, Window, WindowId},
+    },
 };
 
 struct App {
