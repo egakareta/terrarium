@@ -464,7 +464,7 @@ pub struct Part {
     pub shape: PartShape,
     pub position: Vec3,
     pub size: Vec3,
-    /// Euler angles in degrees, matching Roblox's `Orientation` property.
+    /// Euler angles in degrees.
     pub orientation: Vec3,
     pub color: Color3,
     pub anchored: bool,
@@ -484,8 +484,21 @@ impl Part {
             can_collide: true,
         }
     }
+}
 
-    pub fn transform(&self) -> Mat4 {
+pub trait Transform {
+    /// Returns the 4x4 transform matrix for this object:
+    /// ```text
+    /// [s_x, 0,   0,   x]
+    /// [0,   s_y, 0,   y]
+    /// [0,   0,   s_z, z]
+    /// [0,   0,   0,   1]
+    /// ```
+    fn transform(&self) -> Mat4;
+}
+
+impl Transform for Part {
+    fn transform(&self) -> Mat4 {
         let rotation = Quat::from_euler(
             EulerRot::XYZ,
             self.orientation.x.to_radians(),
