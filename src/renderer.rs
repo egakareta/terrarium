@@ -15,22 +15,34 @@ use crate::{
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
 pub enum RendererError {
+    /// The window surface could not be created.
     #[error("could not create the rendering surface: {0}")]
     SurfaceCreation(#[from] wgpu::CreateSurfaceError),
+    /// No compatible GPU adapter was available.
     #[error("could not find a compatible GPU adapter: {0}")]
     AdapterRequest(#[from] wgpu::RequestAdapterError),
+    /// The selected adapter could not create a device and queue.
     #[error("could not create the GPU device: {0}")]
     DeviceRequest(#[from] wgpu::RequestDeviceError),
+    /// The window surface exposed no texture format.
     #[error("the window surface did not expose any texture formats")]
     NoSurfaceFormat,
+    /// A custom mesh had no vertices or indices.
     #[error("mesh must contain at least one vertex and one index")]
     EmptyMesh,
+    /// A custom mesh index was not present in its vertex list.
     #[error("mesh index {index} is outside the vertex range")]
-    InvalidMeshIndex { index: u16 },
+    InvalidMeshIndex {
+        /// The invalid index value.
+        index: u16,
+    },
+    /// A texture failed validation.
     #[error("invalid texture: {0}")]
     InvalidTexture(#[from] TextureError),
+    /// The surface reported a validation error while acquiring a frame.
     #[error("the surface reported a validation error while acquiring a frame")]
     SurfaceValidation,
+    /// Waiting for GPU work failed.
     #[error("could not wait for submitted GPU work: {0}")]
     DevicePoll(#[from] wgpu::PollError),
 }
@@ -118,12 +130,18 @@ pub struct Renderer {
 }
 
 #[repr(C)]
+/// The camera and fixed lighting values consumed by the built-in shader.
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct CameraUniform {
+    /// Camera view-projection matrix in column-major form.
     pub view_projection: [[f32; 4]; 4],
+    /// Camera world position as an XYZ vector with an unused fourth component.
     pub camera_position: [f32; 4],
+    /// World-space direction toward the fixed key light.
     pub light_direction: [f32; 4],
+    /// RGB intensity of the fixed key light.
     pub light_color: [f32; 4],
+    /// RGB intensity of the fixed ambient light.
     pub ambient_color: [f32; 4],
 }
 
@@ -371,6 +389,7 @@ impl Renderer {
         Ok(renderer)
     }
 
+    /// Sets the color used to clear the color attachment before each frame.
     pub fn set_clear_color(&mut self, color: wgpu::Color) {
         self.clear_color = color;
     }
@@ -403,6 +422,10 @@ impl Renderer {
             .map_err(RendererError::DevicePoll)
     }
 
+    /// Reconfigures the surface and depth buffer for a new non-zero size.
+    ///
+    /// Zero dimensions are ignored, which is useful while a window is
+    /// minimized.
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;

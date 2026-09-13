@@ -19,6 +19,7 @@ macro_rules! impl_instance {
         data = $data:ident $(.$data_tail:ident)* $(,)?
     ) => {
         impl $type {
+            /// Moves this isolated instance into `parent` and returns its stable identifier.
             pub fn set_parent(
                 self,
                 parent: &mut dyn $crate::Instance,
@@ -28,6 +29,7 @@ macro_rules! impl_instance {
                 id
             }
 
+            /// Adds an owned child and returns the child's stable identifier.
             pub fn add_child<T>(&mut self, child: T) -> $crate::InstanceId
             where
                 T: $crate::Instance,
@@ -35,6 +37,7 @@ macro_rules! impl_instance {
                 <$type as $crate::Instance>::add_child_box(self, Box::new(child))
             }
 
+            /// Configures a child before adding it and returns the child's stable identifier.
             pub fn add_child_with<T, F>(
                 &mut self,
                 mut child: T,
@@ -295,6 +298,7 @@ impl<'a> Iterator for Descendants<'a> {
 
 /// The object-safe portion used to clone heterogeneous instance collections.
 pub trait InstanceClone {
+    /// Clones an instance behind a trait object.
     fn clone_box(&self) -> Box<dyn Instance>;
 }
 
@@ -354,6 +358,7 @@ impl Default for PVInstance {
 }
 
 impl PVInstance {
+    /// Creates an instance at the identity transform.
     pub fn new() -> Self {
         Self {
             pivot: Mat4::IDENTITY,
@@ -375,15 +380,18 @@ impl PVInstance {
         self.pivot = pivot;
     }
 
+    /// Returns the translation component of the pivot.
     pub fn position(&self) -> Vec3 {
         self.pivot.w_axis.truncate()
     }
 
+    /// Replaces the translation while preserving the current rotation.
     pub fn set_position(&mut self, position: Vec3) {
         let (_, rotation, _) = self.pivot.to_scale_rotation_translation();
         self.pivot = Mat4::from_rotation_translation(rotation, position);
     }
 
+    /// Returns XYZ Euler orientation angles in degrees.
     pub fn orientation(&self) -> Vec3 {
         let (_, rotation, _) = self.pivot.to_scale_rotation_translation();
         let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
@@ -391,6 +399,7 @@ impl PVInstance {
         Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
     }
 
+    /// Replaces the XYZ Euler orientation in degrees while preserving position.
     pub fn set_orientation(&mut self, orientation: Vec3) {
         self.pivot = Mat4::from_rotation_translation(
             Quat::from_euler(
@@ -403,6 +412,7 @@ impl PVInstance {
         );
     }
 
+    /// Returns the normalized world-space direction of local `-Z`.
     pub fn forward(&self) -> Vec3 {
         self.pivot()
             .transform_vector3(Vec3::NEG_Z)

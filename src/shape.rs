@@ -5,14 +5,19 @@ use crate::{
     push_triangle, push_triangle_with_uv,
 };
 
-/// The primitive geometry available to a [`Part`].
+/// The primitive geometry available to a [`crate::Part`].
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum PartShape {
     #[default]
+    /// A six-sided box.
     Block,
+    /// A UV sphere.
     Ball,
+    /// A cylinder aligned to the Y axis.
     Cylinder,
+    /// A triangular prism with a sloped top.
     Wedge,
+    /// A four-sided wedge with one high corner.
     CornerWedge,
 }
 
@@ -48,24 +53,36 @@ impl PartShape {
     }
 }
 
-/// CPU-side mesh data ready to be uploaded to a [`Renderer`].
+/// CPU-side mesh data ready to be uploaded to a [`crate::Renderer`].
+///
+/// Indices are `u16`, so a custom mesh must address fewer than `u16::MAX + 1`
+/// vertices. The renderer validates that the mesh is non-empty and that every
+/// index refers to an existing vertex before uploading it.
 #[derive(Clone, Debug)]
 pub struct Mesh {
+    /// Vertex attributes consumed by the built-in PBR pipeline.
     pub vertices: Vec<Vertex>,
+    /// Triangle-list indices into [`Self::vertices`].
     pub indices: Vec<u16>,
 }
 
 impl Mesh {
+    /// Creates mesh data from caller-owned vertices and triangle-list indices.
     pub fn new(vertices: Vec<Vertex>, indices: Vec<u16>) -> Self {
         Self { vertices, indices }
     }
 
     /// Creates a block centered at the origin.
+    ///
+    /// This is an alias for [`Mesh::block`].
     pub fn cube(size: f32, color: [f32; 4]) -> Self {
         Self::block(size, color)
     }
 
     /// Creates a box centered at the origin.
+    ///
+    /// The generated mesh labels its faces as [`MaterialSlot::Top`],
+    /// [`MaterialSlot::Bottom`], or [`MaterialSlot::Side`].
     pub fn block(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         let faces = [
@@ -98,6 +115,10 @@ impl Mesh {
     }
 
     /// Creates a UV sphere centered at the origin.
+    ///
+    /// `latitude_segments` and `longitude_segments` are clamped to at least
+    /// 2 and 3 respectively. Higher values produce smoother geometry and more
+    /// vertices. The sphere's radius is applied directly to its positions.
     pub fn ball(
         radius: f32,
         latitude_segments: usize,
@@ -152,6 +173,7 @@ impl Mesh {
     /// Creates a cylinder aligned to the Y axis and centered at the origin.
     ///
     /// i.e. The top face points toward `+Y` and the bottom face toward `-Y`.
+    /// `segments` is clamped to at least 3.
     pub fn cylinder(radius: f32, height: f32, segments: usize, color: [f32; 4]) -> Self {
         let segments = segments.max(3);
         let half_height = height * 0.5;
@@ -232,6 +254,9 @@ impl Mesh {
     ///
     /// The tall end is `+X` centered vertically toward `+Y`,
     /// meaning the wedge "points" or slopes toward `+X`.
+    ///
+    /// The geometry occupies a unit cube centered at the origin and is meant
+    /// to be scaled through [`crate::BasePart::size`].
     pub fn wedge(color: [f32; 4]) -> Self {
         let h = 0.5;
         let front_bottom_left = [-h, -h, -h];
@@ -295,6 +320,9 @@ impl Mesh {
     /// Creates a pyramid-like corner wedge with one high corner and four sloped sides.
     ///
     /// The apex direction from the center is `(-X, +Y, -Z)`.
+    ///
+    /// The geometry occupies a unit cube centered at the origin and is meant
+    /// to be scaled through [`crate::BasePart::size`].
     pub fn corner_wedge(color: [f32; 4]) -> Self {
         let h = 0.5;
         let corners = [[-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h]];
@@ -321,6 +349,8 @@ impl Mesh {
     }
 
     /// Creates a square on the XZ plane, centered at the origin.
+    ///
+    /// The plane's normal points toward `+Y`.
     pub fn plane(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         Self {

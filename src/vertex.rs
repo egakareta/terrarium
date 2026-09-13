@@ -10,9 +10,13 @@ use crate::MaterialSlot;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct Vertex {
+    /// Object-space position.
     pub position: [f32; 3],
+    /// Object-space unit normal.
     pub normal: [f32; 3],
+    /// UV coordinates used to sample material textures.
     pub uv: [f32; 2],
+    /// Object-space tangent; `.w` stores bitangent handedness.
     pub tangent: [f32; 4],
     /// A per-vertex color multiplier retained for custom mesh tinting.
     pub color: [f32; 4],
@@ -21,6 +25,7 @@ pub struct Vertex {
 }
 
 impl Vertex {
+    /// Creates a vertex using the base material slot.
     pub fn with_attributes(
         position: [f32; 3],
         normal: [f32; 3],
@@ -31,6 +36,7 @@ impl Vertex {
         Self::with_material_slot(position, normal, uv, tangent, color, MaterialSlot::Base)
     }
 
+    /// Creates a vertex with an explicit material slot.
     pub fn with_material_slot(
         position: [f32; 3],
         normal: [f32; 3],
@@ -67,6 +73,10 @@ impl Vertex {
     }
 }
 
+/// Appends one triangle using default UVs and the base material slot.
+///
+/// The triangle normal and tangent are derived from the supplied positions and
+/// UVs. Indices are appended relative to the existing vertex count.
 pub fn push_triangle(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -82,6 +92,7 @@ pub fn push_triangle(
     );
 }
 
+/// Appends one triangle with explicit UVs and the base material slot.
 pub fn push_triangle_with_uv(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -99,6 +110,7 @@ pub fn push_triangle_with_uv(
     );
 }
 
+/// Appends one triangle with explicit UVs and material slot.
 pub fn push_triangle_with_uv_and_material_slot(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -116,6 +128,7 @@ pub fn push_triangle_with_uv_and_material_slot(
     indices.extend([start, start + 1, start + 2]);
 }
 
+/// Appends one quad as two triangles using default UVs and the base material slot.
 pub fn push_quad(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -131,6 +144,7 @@ pub fn push_quad(
     );
 }
 
+/// Appends one quad as two triangles with explicit UVs and the base material slot.
 pub fn push_quad_with_uv(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -148,6 +162,7 @@ pub fn push_quad_with_uv(
     );
 }
 
+/// Appends one quad as two triangles using default UVs and an explicit material slot.
 pub fn push_quad_with_material_slot(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -165,6 +180,7 @@ pub fn push_quad_with_material_slot(
     );
 }
 
+/// Appends one quad as two triangles with explicit UVs and material slot.
 pub fn push_quad_with_uv_and_material_slot(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -186,12 +202,20 @@ pub fn push_quad_with_uv_and_material_slot(
     indices.extend([start, start + 1, start + 2, start + 2, start + 3, start]);
 }
 
+/// Computes a normalized counter-clockwise triangle normal.
+///
+/// Degenerate triangles return the zero vector.
 pub fn triangle_normal(positions: [[f32; 3]; 3]) -> [f32; 3] {
     let edge_a = Vec3::from_array(positions[1]) - Vec3::from_array(positions[0]);
     let edge_b = Vec3::from_array(positions[2]) - Vec3::from_array(positions[0]);
     edge_a.cross(edge_b).normalize_or_zero().to_array()
 }
 
+/// Computes a tangent and its glTF-compatible bitangent handedness.
+///
+/// The returned value is `[x, y, z, w]`, where the bitangent is
+/// `cross(normal, tangent) * w`. If the UV triangle is degenerate, the first
+/// position edge is used as a fallback before orthogonalization.
 pub fn tangent_from_uv(positions: [[f32; 3]; 3], uvs: [[f32; 2]; 3], normal: [f32; 3]) -> [f32; 4] {
     let position_a = Vec3::from_array(positions[1]) - Vec3::from_array(positions[0]);
     let position_b = Vec3::from_array(positions[2]) - Vec3::from_array(positions[0]);

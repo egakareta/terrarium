@@ -10,6 +10,7 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// Creates an empty workspace with the default camera and controller.
     pub fn new() -> Self {
         Self {
             instance: InstanceData::new("Workspace"),
@@ -42,6 +43,7 @@ impl Workspace {
             .filter_map(|instance| instance.downcast_ref::<T>())
     }
 
+    /// Finds the first descendant [`Part`] with `name` in depth-first order.
     pub fn find_first_child(&mut self, name: &str) -> Option<(InstanceId, &mut Part)> {
         find_part_mut(self, name)
     }
@@ -61,15 +63,18 @@ impl Workspace {
         self.find_descendant_mut(id)
     }
 
+    /// Applies the controller's accumulated input to the active camera.
     pub fn update_camera(&mut self, delta: f32) {
         self.camera_controller
             .update_camera(&mut self.current_camera, delta);
     }
 
+    /// Forwards a raw device event to the active camera controller.
     pub fn process_device_event(&mut self, event: &winit::event::DeviceEvent) {
         self.camera_controller.process_device_event(event);
     }
 
+    /// Forwards a window event to the active camera controller.
     pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) {
         self.camera_controller.process_window_event(event);
     }

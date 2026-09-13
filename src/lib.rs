@@ -1,3 +1,6 @@
+//! A small, data-oriented 3D library built around `wgpu`.
+#![deny(missing_docs)]
+
 mod camera;
 mod color3;
 mod instance;
@@ -10,10 +13,13 @@ mod workspace;
 
 pub use camera::*;
 pub use color3::*;
+pub use glam;
 pub use instance::*;
 pub use material::*;
 pub use part::*;
 pub use renderer::*;
 pub use shape::*;
 pub use vertex::*;
+pub use wgpu;
+pub use winit;
 pub use workspace::*;

@@ -13,9 +13,13 @@ use crate::{InstanceData, PVInstance};
 pub struct Camera {
     pub(crate) instance: InstanceData,
     pub(crate) pv_instance: PVInstance,
+    /// Viewport width divided by viewport height.
     pub aspect: f32,
+    /// Vertical field of view in radians.
     pub fovy: f32,
+    /// Near clipping plane distance.
     pub znear: f32,
+    /// Far clipping plane distance.
     pub zfar: f32,
 }
 
@@ -26,6 +30,11 @@ impl Default for Camera {
 }
 
 impl Camera {
+    /// Creates a camera at `position` looking toward `target`.
+    ///
+    /// `aspect` is clamped to a small positive value. The default projection
+    /// uses a 60-degree vertical field of view, a near plane at `0.1`, and a
+    /// far plane at `200.0`.
     pub fn new(position: Vec3, target: Vec3, aspect: f32) -> Self {
         let direction = (target - position).normalize_or_zero();
         let yaw = direction.x.atan2(-direction.z);
@@ -43,12 +52,17 @@ impl Camera {
         }
     }
 
+    /// Updates the aspect ratio from a physical window size.
+    ///
+    /// A height of zero is ignored, which makes this safe to call for minimized
+    /// windows.
     pub fn resize(&mut self, width: u32, height: u32) {
         if height != 0 {
             self.aspect = width as f32 / height as f32;
         }
     }
 
+    /// Returns the right-handed DirectX view-projection matrix for this camera.
     pub fn view_projection_matrix(&self) -> Mat4 {
         let view = self.pivot().inverse();
         let projection = glam::camera::rh::proj::directx::perspective(
@@ -66,15 +80,25 @@ crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
 /// First-person keyboard and raw mouse input for a [`Camera`].
 #[derive(Clone, Debug)]
 pub struct CameraController {
+    /// Movement speed in world units per second.
     pub speed: f32,
+    /// Mouse-look sensitivity in radians per raw mouse unit.
     pub sensitivity: f32,
+    /// Whether `W` is currently held.
     pub forward: bool,
+    /// Whether `S` is currently held.
     pub backward: bool,
+    /// Whether `A` is currently held.
     pub left: bool,
+    /// Whether `D` is currently held.
     pub right: bool,
+    /// Whether `Space` is currently held.
     pub up: bool,
+    /// Whether either Control key is currently held.
     pub down: bool,
+    /// Whether either Shift key is currently held.
     pub sprint: bool,
+    /// Accumulated raw mouse delta as `(x, y)` until the next update.
     pub mouse_delta: (f32, f32),
 }
 
@@ -85,6 +109,7 @@ impl Default for CameraController {
 }
 
 impl CameraController {
+    /// Creates a first-person controller with the given speed and sensitivity.
     pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self {
             speed,
@@ -101,6 +126,10 @@ impl CameraController {
     }
 
     /// Feeds a winit window event into the controller. Returns true when it was used.
+    /// Applies a keyboard window event and returns whether it controls movement.
+    ///
+    /// The controller recognizes physical `WASD`, Space, Control, and Shift
+    /// keys. Losing window focus clears all held keys.
     pub fn process_window_event(&mut self, event: &WindowEvent) -> bool {
         let WindowEvent::KeyboardInput { event, .. } = event else {
             if matches!(event, WindowEvent::Focused(false)) {
@@ -126,6 +155,7 @@ impl CameraController {
     }
 
     /// Feeds raw device events into the controller for mouse-look.
+    /// Accumulates a raw mouse-motion event for the next camera update.
     pub fn process_device_event(&mut self, event: &DeviceEvent) {
         if let DeviceEvent::MouseMotion { delta } = event {
             self.mouse_delta.0 += delta.0 as f32;
@@ -133,6 +163,11 @@ impl CameraController {
         }
     }
 
+    /// Moves and rotates `camera` using accumulated input, then clears the mouse delta.
+    ///
+    /// Movement is frame-rate independent. The delta is capped at 100 ms,
+    /// sprinting multiplies movement speed by `2.5`, and pitch is clamped to
+    /// 89 degrees from the horizon.
     pub fn update_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
         let delta_seconds = delta_seconds.min(0.1);
         let forward = camera.forward();
