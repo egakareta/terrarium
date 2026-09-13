@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use terrarium::{
     Color3, InstanceId, Material, MaterialSlot, Part, PartShape, Renderer, RendererError, Texture,
-    TextureColorSpace, Workspace,
+    TextureColorSpace, Workspace, egui,
     glam::Vec3,
     winit::{
         application::ApplicationHandler,
@@ -150,6 +150,9 @@ impl ApplicationHandler for App {
             return;
         }
 
+        if let Some(renderer) = &mut self.renderer {
+            let _ = renderer.on_window_event(&event);
+        }
         self.workspace.process_window_event(&event);
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
@@ -178,12 +181,29 @@ impl ApplicationHandler for App {
                     self.workspace.update_camera(delta);
                     self.animate_parts(delta);
 
+                    let fps = self
+                        .renderer
+                        .as_ref()
+                        .map(Renderer::fps)
+                        .unwrap_or_default();
                     if let Some(renderer) = &mut self.renderer {
-                        if let Err(error) = renderer.render(&self.workspace) {
+                        let render_result = renderer.render_egui(&self.workspace, |ui| {
+                            egui::Area::new("fps_counter".into())
+                                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
+                                .order(egui::Order::Foreground)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::new()
+                                        .fill(egui::Color32::from_black_alpha(180))
+                                        .corner_radius(egui::CornerRadius::same(6))
+                                        .inner_margin(egui::Margin::same(8))
+                                        .show(ui, |ui| {
+                                            ui.label(format!("FPS: {fps:.0}"));
+                                        });
+                                });
+                        });
+                        if let Err(error) = render_result {
                             eprintln!("rendering stopped: {error}");
                             event_loop.exit();
-                        } else {
-                            window.set_title(&format!("Courtyard | FPS: {:.0}", renderer.fps()));
                         }
                     }
                 }

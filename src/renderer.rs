@@ -4,6 +4,10 @@ use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 use web_time::Instant;
 
+#[cfg(feature = "egui")]
+use crate::egui_integration::EguiIntegration;
+#[cfg(feature = "egui")]
+use crate::winit::event::WindowEvent;
 use crate::{
     DEPTH_FORMAT, MATERIAL_SLOT_COUNT, Material, MaterialTextures, Mesh, MeshMaterialSlots, Part,
     PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
@@ -103,6 +107,8 @@ struct GpuMesh {
 
 /// The wgpu state and built-in PBR mesh pipeline.
 pub struct Renderer {
+    #[cfg(feature = "egui")]
+    window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -125,6 +131,8 @@ pub struct Renderer {
     fps_timer: Instant,
     frame_count: u32,
     fps: f32,
+    #[cfg(feature = "egui")]
+    egui: EguiIntegration,
 }
 
 #[repr(C)]
@@ -165,7 +173,7 @@ impl Renderer {
             display: Default::default(),
             memory_budget_thresholds: Default::default(),
         });
-        let surface = instance.create_surface(window)?;
+        let surface = instance.create_surface(window.clone())?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -356,6 +364,8 @@ impl Renderer {
         });
 
         let mut renderer = Self {
+            #[cfg(feature = "egui")]
+            window: window.clone(),
             surface,
             device,
             queue,
@@ -383,6 +393,8 @@ impl Renderer {
             fps_timer: Instant::now(),
             frame_count: 0,
             fps: 0.0,
+            #[cfg(feature = "egui")]
+            egui: EguiIntegration::new(window.as_ref()),
         };
         for shape in PartShape::ALL {
             let mesh = renderer.add_mesh(&shape.mesh([1.0; 4]))?;
@@ -436,6 +448,48 @@ impl Renderer {
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
         (self.depth_texture, self.depth_view) = create_depth_texture(&self.device, &self.config);
+    }
+
+    /// Returns the egui context used by this renderer.
+    #[cfg(feature = "egui")]
+    pub fn egui_context(&self) -> &egui::Context {
+        self.egui.context()
+    }
+
+    /// Returns the egui context used by this renderer for configuration.
+    #[cfg(feature = "egui")]
+    pub fn egui_context_mut(&mut self) -> &mut egui::Context {
+        self.egui.context_mut()
+    }
+
+    /// Forwards a window event to egui and returns whether egui consumed it.
+    #[cfg(feature = "egui")]
+    pub fn on_window_event(&mut self, event: &WindowEvent) -> bool {
+        self.egui.on_window_event(&self.window, event)
+    }
+
+    /// Renders a workspace with an egui overlay.
+    ///
+    /// The UI closure runs once per frame. This renderer handles egui input,
+    /// platform output, tessellation, texture uploads, GPU buffer updates, and
+    /// the overlay render pass.
+    #[cfg(feature = "egui")]
+    pub fn render_egui<F>(&mut self, workspace: &Workspace, run_ui: F) -> Result<(), RendererError>
+    where
+        F: FnMut(&mut egui::Ui),
+    {
+        let frame = self.egui.begin_frame(&self.window, run_ui);
+        self.render_with_overlay_internal(workspace, |renderer, encoder, view| {
+            renderer.egui.render_frame(
+                frame,
+                &renderer.device,
+                &renderer.queue,
+                encoder,
+                view,
+                renderer.config.format,
+                [renderer.config.width, renderer.config.height],
+            )
+        })
     }
 
     /// Uploads a custom mesh and returns its GPU handle.
@@ -572,6 +626,55 @@ impl Renderer {
     /// Renders a workspace using its current camera. A lost or outdated surface is reconfigured
     /// and retried on the next frame; minimized and occluded windows simply skip their frame.
     pub fn render(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
+        self.render_with_overlay(
+            workspace,
+            |_device, _queue, _encoder, _view, _format, _size| Vec::new(),
+        )
+    }
+
+    /// Renders a workspace and gives an overlay access to the frame before it is presented.
+    ///
+    /// The callback can encode additional commands into the frame, such as an egui render pass,
+    /// and return command buffers that must be submitted alongside the scene command buffer.
+    pub fn render_with_overlay<F>(
+        &mut self,
+        workspace: &Workspace,
+        draw_overlay: F,
+    ) -> Result<(), RendererError>
+    where
+        F: FnOnce(
+            &wgpu::Device,
+            &wgpu::Queue,
+            &mut wgpu::CommandEncoder,
+            &wgpu::TextureView,
+            wgpu::TextureFormat,
+            [u32; 2],
+        ) -> Vec<wgpu::CommandBuffer>,
+    {
+        self.render_with_overlay_internal(workspace, |renderer, encoder, view| {
+            draw_overlay(
+                &renderer.device,
+                &renderer.queue,
+                encoder,
+                view,
+                renderer.config.format,
+                [renderer.config.width, renderer.config.height],
+            )
+        })
+    }
+
+    pub(crate) fn render_with_overlay_internal<F>(
+        &mut self,
+        workspace: &Workspace,
+        draw_overlay: F,
+    ) -> Result<(), RendererError>
+    where
+        F: FnOnce(
+            &mut Self,
+            &mut wgpu::CommandEncoder,
+            &wgpu::TextureView,
+        ) -> Vec<wgpu::CommandBuffer>,
+    {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -743,7 +846,12 @@ impl Renderer {
                 pass.draw_indexed(0..mesh.index_count, 0, 0..batch.instances.len() as u32);
             }
         }
-        self.queue.submit(Some(encoder.finish()));
+        let overlay_command_buffers = draw_overlay(self, &mut encoder, &view);
+        self.queue.submit(
+            overlay_command_buffers
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
         self.queue.present(frame);
         self.frame_count += 1;
         let elapsed = self.fps_timer.elapsed().as_secs_f32();
