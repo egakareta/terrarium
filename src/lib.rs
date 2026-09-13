@@ -13,7 +13,7 @@ pub use basepart::*;
 use bytemuck::{Pod, Zeroable};
 pub use camera::*;
 pub use color3::*;
-use glam::{Mat4, Vec3};
+use glam::Vec3;
 pub use instance::*;
 use thiserror::Error;
 use web_time::Instant;
@@ -902,12 +902,6 @@ impl Deref for Part {
 impl DerefMut for Part {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.basepart
-    }
-}
-
-impl Transform for Part {
-    fn transform(&self) -> Mat4 {
-        self.basepart.transform()
     }
 }
 
