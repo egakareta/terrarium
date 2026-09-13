@@ -4,7 +4,7 @@ use crate::{
     InstanceData, PVInstance,
     glam::{Mat4, Quat, Vec3},
     winit::{
-        event::{DeviceEvent, ElementState, WindowEvent},
+        event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
         keyboard::{KeyCode, PhysicalKey},
     },
 };
@@ -111,7 +111,7 @@ impl Default for CameraKeyBindings {
     }
 }
 
-/// First-person keyboard and raw mouse input for a [`Camera`].
+/// First-person keyboard and mouse input for a [`Camera`].
 #[derive(Clone, Debug)]
 pub struct CameraController {
     /// Movement speed in world units per second.
@@ -134,8 +134,12 @@ pub struct CameraController {
     pub down: bool,
     /// Whether a sprint key is currently held.
     pub sprint: bool,
-    /// Accumulated raw mouse delta as `(x, y)` until the next update.
+    /// Accumulated mouse delta as `(x, y)` until the next update.
     pub mouse_delta: (f32, f32),
+    /// Mouse button that activates drag-to-look.
+    pub mouse_drag_button: MouseButton,
+    mouse_dragging: bool,
+    last_cursor_position: Option<(f64, f64)>,
 }
 
 impl Default for CameraController {
@@ -168,27 +172,52 @@ impl CameraController {
             down: false,
             sprint: false,
             mouse_delta: (0.0, 0.0),
+            mouse_drag_button: MouseButton::Left,
+            mouse_dragging: false,
+            last_cursor_position: None,
         }
     }
 
     /// Feeds a winit window event into the controller. Returns true when it was used.
-    /// Applies a keyboard window event and returns whether it controls movement.
+    /// Applies keyboard movement and left-button mouse-drag look input.
     ///
     /// The controller recognizes the physical keys in [`CameraKeyBindings`].
-    /// Losing window focus clears all held keys.
+    /// Losing window focus clears all held keys and ends an active mouse drag.
     pub fn process_window_event(&mut self, event: &WindowEvent) -> bool {
-        let WindowEvent::KeyboardInput { event, .. } = event else {
-            if matches!(event, WindowEvent::Focused(false)) {
-                self.clear_keys();
+        match event {
+            WindowEvent::KeyboardInput { event, .. } => {
+                let PhysicalKey::Code(key) = event.physical_key else {
+                    return false;
+                };
+                let pressed = event.state == ElementState::Pressed;
+                self.process_key(key, pressed)
             }
-            return false;
-        };
-
-        let PhysicalKey::Code(key) = event.physical_key else {
-            return false;
-        };
-        let pressed = event.state == ElementState::Pressed;
-        self.process_key(key, pressed)
+            WindowEvent::MouseInput { state, button, .. } if *button == self.mouse_drag_button => {
+                self.mouse_dragging = *state == ElementState::Pressed;
+                self.last_cursor_position = None;
+                true
+            }
+            WindowEvent::CursorMoved { position, .. } if self.mouse_dragging => {
+                if let Some((last_x, last_y)) = self.last_cursor_position {
+                    self.process_mouse_motion((
+                        (position.x - last_x) as f32,
+                        (position.y - last_y) as f32,
+                    ));
+                }
+                self.last_cursor_position = Some((position.x, position.y));
+                true
+            }
+            WindowEvent::CursorLeft { .. } => {
+                let was_dragging = self.mouse_dragging;
+                self.stop_mouse_drag();
+                was_dragging
+            }
+            WindowEvent::Focused(false) => {
+                self.clear_keys();
+                false
+            }
+            _ => false,
+        }
     }
 
     fn process_key(&mut self, key: KeyCode, pressed: bool) -> bool {
@@ -215,9 +244,14 @@ impl CameraController {
     /// Accumulates a raw mouse-motion event for the next camera update.
     pub fn process_device_event(&mut self, event: &DeviceEvent) {
         if let DeviceEvent::MouseMotion { delta } = event {
-            self.mouse_delta.0 += delta.0 as f32;
-            self.mouse_delta.1 += delta.1 as f32;
+            self.process_mouse_motion((delta.0 as f32, delta.1 as f32));
         }
+    }
+
+    /// Accumulates a mouse-motion delta for the next camera update.
+    pub fn process_mouse_motion(&mut self, delta: (f32, f32)) {
+        self.mouse_delta.0 += delta.0;
+        self.mouse_delta.1 += delta.1;
     }
 
     /// Moves and rotates `camera` using accumulated input, then clears the mouse delta.
@@ -286,6 +320,12 @@ impl CameraController {
         self.down = false;
         self.sprint = false;
         self.mouse_delta = (0.0, 0.0);
+        self.stop_mouse_drag();
+    }
+
+    fn stop_mouse_drag(&mut self) {
+        self.mouse_dragging = false;
+        self.last_cursor_position = None;
     }
 }
 

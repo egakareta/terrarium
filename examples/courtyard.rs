@@ -7,10 +7,9 @@ use terrarium::{
     winit::{
         application::ApplicationHandler,
         dpi::PhysicalSize,
-        event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+        event::WindowEvent,
         event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-        keyboard::{KeyCode, PhysicalKey},
-        window::{CursorGrabMode, Window, WindowId},
+        window::{Window, WindowId},
     },
 };
 
@@ -19,7 +18,6 @@ struct App {
     renderer: Option<Renderer>,
     workspace: Workspace,
     moving_parts: MovingParts,
-    mouse_captured: bool,
 }
 
 struct MovingParts {
@@ -40,28 +38,7 @@ impl App {
             renderer: None,
             workspace,
             moving_parts,
-            mouse_captured: false,
         }
-    }
-
-    fn capture_mouse(&mut self) {
-        let Some(window) = &self.window else {
-            return;
-        };
-        let grabbed = window
-            .set_cursor_grab(CursorGrabMode::Locked)
-            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-            .is_ok();
-        window.set_cursor_visible(!grabbed);
-        self.mouse_captured = grabbed;
-    }
-
-    fn release_mouse(&mut self) {
-        if let Some(window) = &self.window {
-            let _ = window.set_cursor_grab(CursorGrabMode::None);
-            window.set_cursor_visible(true);
-        }
-        self.mouse_captured = false;
     }
 }
 
@@ -104,7 +81,6 @@ impl ApplicationHandler for App {
 
         self.window = Some(window);
         self.renderer = Some(renderer);
-        self.capture_mouse();
     }
 
     fn window_event(
@@ -134,17 +110,6 @@ impl ApplicationHandler for App {
                     renderer.resize(size.width, size.height);
                 }
             }
-            WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed
-                    && event.physical_key == PhysicalKey::Code(KeyCode::Escape) =>
-            {
-                self.release_mouse();
-            }
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button: MouseButton::Left,
-                ..
-            } if !self.mouse_captured => self.capture_mouse(),
             WindowEvent::RedrawRequested => {
                 let delta = self.renderer.as_mut().map(|renderer| renderer.delta_secs());
                 if let Some(delta) = delta {
@@ -179,17 +144,6 @@ impl ApplicationHandler for App {
                 window.request_redraw();
             }
             _ => {}
-        }
-    }
-
-    fn device_event(
-        &mut self,
-        _event_loop: &ActiveEventLoop,
-        _device_id: winit::event::DeviceId,
-        event: DeviceEvent,
-    ) {
-        if self.mouse_captured {
-            self.workspace.process_device_event(&event);
         }
     }
 
@@ -420,7 +374,7 @@ fn apply_courtyard_textures(
 fn main() {
     env_logger::init();
     println!(
-        "WASD move | mouse look | Space/Ctrl rise and descend | Shift sprint | Esc release mouse"
+        "WASD move | drag with left mouse to look | Space/Ctrl rise and descend | Shift sprint"
     );
     let event_loop = EventLoop::new().expect("create event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
