@@ -1,7 +1,7 @@
 mod basepart;
 mod camera;
 mod color3;
-mod pv_instance;
+mod instance;
 
 use std::{
     collections::HashMap,
@@ -14,7 +14,7 @@ use bytemuck::{Pod, Zeroable};
 pub use camera::*;
 pub use color3::*;
 use glam::{Mat4, Vec3};
-pub use pv_instance::*;
+pub use instance::*;
 use thiserror::Error;
 use web_time::Instant;
 use wgpu::util::DeviceExt;
