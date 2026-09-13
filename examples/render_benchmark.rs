@@ -132,7 +132,7 @@ impl App {
             self.animation_pool_start = (self.animation_pool_start + animated_count) % part_count;
         }
 
-        let time = self.animation_frame as f32 * 0.07;
+        let time = self.animation_frame as f32 * 0.02;
         let camera_scale = (CAMERA_DISTANCE_MIN_SCALE + CAMERA_DISTANCE_MAX_SCALE) * 0.5
             + (CAMERA_DISTANCE_MAX_SCALE - CAMERA_DISTANCE_MIN_SCALE)
                 * 0.5
