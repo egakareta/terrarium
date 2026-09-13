@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use terrarium::{
-    Color3, Easing, InstanceId, Material, MaterialSlot, Part, PartShape, Renderer, RendererError,
-    Repeat, Texture, TextureColorSpace, Tween, Workspace, egui,
+    Color3, Easing, Material, MaterialSlot, Part, PartShape, Renderer, RendererError, Repeat,
+    Texture, TextureColorSpace, Tween, Workspace, egui,
     glam::Vec3,
     winit::{
         application::ApplicationHandler,
@@ -157,23 +157,23 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         TextureColorSpace::Srgb,
     )?)?;
 
-    let ground = workspace.add_child_with(Part::new("Ground"), |part| {
+    workspace.add_child_with(Part::new("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
-        part.color = Color3::new(0.07, 0.12, 0.13);
+        part.material = Material::textured(dirt);
+        part.material.roughness = 0.9;
     });
-    let mut stone_blocks = Vec::new();
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        let stone_block = workspace.add_child_with(Part::unnamed(), |part| {
+        workspace.add_child_with(Part::unnamed(), |part| {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
-            part.color = Color3::new(0.29, 0.34, 0.39);
+            part.material = Material::textured(cobblestone);
+            part.material.roughness = 0.82;
         });
-        stone_blocks.push(stone_block);
     }
 
     let tower = workspace.add_child_with(Part::new("CopperTower"), |part| {
@@ -189,25 +189,29 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
     });
 
-    let grass_block = workspace.add_child_with(Part::new("GrassBlock"), |part| {
+    workspace.add_child_with(Part::new("GrassBlock"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
-        part.color = Color3::new(0.10, 0.48, 0.47);
         part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
+        part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
+        part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
+        part.set_material_slot(MaterialSlot::Front, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Back, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Left, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
+        part.material.roughness = 0.82;
     });
 
-    workspace.add_child_with(Part::new("PalePlatform"), |part| {
+    let platform = workspace.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
         part.color = Color3::new(0.60, 0.68, 0.50);
+        part.material = Material::textured(festival_lantern);
+        part.material.roughness = 0.82;
     });
-
-    let platform = workspace
-        .find_first_child::<Part>("PalePlatform")
-        .map(|(id, _)| id)
-        .expect("PalePlatform was just created");
 
     let orb = workspace.add_child_with(Part::new("OrbitingOrb"), |part| {
         part.shape = PartShape::Ball;
@@ -233,36 +237,6 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.color = Color3::new(0.10, 0.48, 0.47);
         part.set_orientation(Vec3::new(0.0, -46.0, 0.0));
     });
-
-    let mut set_material = |part_id: InstanceId, material: Material| {
-        if let Some(part) = workspace.get_mut::<Part>(part_id) {
-            part.color = Color3::WHITE;
-            part.material = material;
-            part.material.roughness = 0.82;
-        }
-    };
-    set_material(ground, Material::textured(dirt));
-    for &part_id in &stone_blocks {
-        set_material(part_id, Material::textured(cobblestone));
-    }
-
-    if let Some(part) = workspace.get_mut::<Part>(grass_block) {
-        part.color = Color3::WHITE;
-        part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
-        part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
-        part.set_material_slot(MaterialSlot::Front, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Back, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Left, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
-        part.material.roughness = 0.82;
-    }
-
-    if let Some((_, part)) = workspace.find_first_child::<Part>("PalePlatform") {
-        part.color = Color3::WHITE;
-        part.material = Material::textured(festival_lantern);
-        part.material.roughness = 0.82;
-    }
 
     let platform_position = Tween::path(
         [
