@@ -2,7 +2,9 @@ use std::ops::{Deref, DerefMut};
 
 use glam::{Mat4, Vec3};
 
-use crate::{Color3, InstanceData, PVInstance};
+use crate::{
+    Color3, InstanceData, Material, MaterialSlot, MeshMaterialSlots, PVInstance, PartShape,
+};
 
 #[derive(Clone, Debug)]
 pub struct BasePart {
@@ -58,5 +60,48 @@ pub trait Transform {
 impl Transform for BasePart {
     fn transform(&self) -> Mat4 {
         self.pivot() * Mat4::from_scale(self.size)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Part {
+    basepart: BasePart,
+    pub shape: PartShape,
+    pub material: Material,
+    pub material_slots: MeshMaterialSlots,
+}
+
+impl Part {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            basepart: BasePart::new(name),
+            shape: PartShape::Block,
+            material: Material::default(),
+            material_slots: MeshMaterialSlots::default(),
+        }
+    }
+
+    /// Assigns a material to a mesh-selected slot.
+    pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
+        if slot == MaterialSlot::Base {
+            self.material = material;
+        } else {
+            self.material_slots.set(slot, material);
+        }
+    }
+}
+
+crate::impl_instance!(Part, class_name = "Part", data = basepart.instance,);
+
+impl Deref for Part {
+    type Target = BasePart;
+    fn deref(&self) -> &Self::Target {
+        &self.basepart
+    }
+}
+
+impl DerefMut for Part {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.basepart
     }
 }
