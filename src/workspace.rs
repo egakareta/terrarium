@@ -18,36 +18,12 @@ impl Workspace {
         }
     }
 
-    /// Creates and parents a new Part to this workspace.
-    pub fn create_part(&mut self, name: impl Into<String>) -> InstanceId {
-        self.add_part(Part::new(name))
-    }
-
-    pub fn create_part_with(
-        &mut self,
-        name: impl Into<String>,
-        configure: impl FnOnce(&mut Part),
-    ) -> InstanceId {
-        self.add_child_with(Part::new(name), configure)
-    }
-
-    pub fn add_part(&mut self, part: Part) -> InstanceId {
-        self.add_instance(part)
-    }
-
     /// Takes ownership of any supported [`Instance`] and parents it here.
     pub fn add_instance<T>(&mut self, instance: T) -> InstanceId
     where
         T: Instance,
     {
         self.add_child(instance)
-    }
-
-    pub fn add_parts<I>(&mut self, parts: I) -> Vec<InstanceId>
-    where
-        I: IntoIterator<Item = Part>,
-    {
-        parts.into_iter().map(|part| self.add_part(part)).collect()
     }
 
     /// Returns a descendant by ID, downcast to its concrete instance type.
