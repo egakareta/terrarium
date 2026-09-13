@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use terrarium::{
-    Color3, InstanceId, Material, MaterialSlot, Part, PartShape, Renderer, RendererError, Texture,
-    TextureColorSpace, Workspace, egui,
+    Color3, Easing, InstanceId, Material, MaterialSlot, Part, PartShape, Renderer, RendererError,
+    Repeat, Texture, TextureColorSpace, Tween, Workspace, egui,
     glam::Vec3,
     winit::{
         application::ApplicationHandler,
@@ -19,7 +19,6 @@ struct App {
     renderer: Option<Renderer>,
     workspace: Workspace,
     moving_parts: MovingParts,
-    animation_time: f32,
     mouse_captured: bool,
 }
 
@@ -29,48 +28,19 @@ struct MovingParts {
     grass_block: InstanceId,
     tower: InstanceId,
     orb: InstanceId,
+    platform: InstanceId,
 }
 
 impl App {
     fn new() -> Self {
-        let (workspace, moving_parts) = create_workspace();
+        let (mut workspace, moving_parts) = create_workspace();
+        configure_animations(&mut workspace, &moving_parts);
         Self {
             window: None,
             renderer: None,
             workspace,
             moving_parts,
-            animation_time: 0.0,
             mouse_captured: false,
-        }
-    }
-
-    fn animate_parts(&mut self, delta_seconds: f32) {
-        self.animation_time =
-            (self.animation_time + delta_seconds.min(0.1)).rem_euclid(std::f32::consts::TAU);
-        let time = self.animation_time;
-
-        if let Some((_, part)) = self.workspace.find_first_child::<Part>("PalePlatform") {
-            part.set_position(Vec3::new(
-                -1.0 + time.sin() * 2.2,
-                0.55 + (time * 2.0).sin() * 0.12,
-                1.6,
-            ));
-            part.set_orientation(Vec3::new(0.0, time.to_degrees() * 18.0, 0.0));
-        }
-
-        if let Some(part) = self.workspace.get_mut::<Part>(self.moving_parts.tower) {
-            part.set_position(Vec3::new(-3.4, 1.0 + (time * 1.5).sin() * 0.35, -1.8));
-            part.set_orientation(Vec3::new(0.0, -33.0 + time.to_degrees() * 0.85, 0.0));
-        }
-
-        if let Some(part) = self.workspace.get_mut::<Part>(self.moving_parts.orb) {
-            let orbit_angle = time * 0.8;
-            part.set_position(Vec3::new(
-                orbit_angle.cos() * 3.3,
-                2.8 + (time * 1.7).sin() * 0.45,
-                orbit_angle.sin() * 3.3,
-            ));
-            part.set_orientation(Vec3::new(0.0, orbit_angle.to_degrees(), 0.0));
         }
     }
 
@@ -178,8 +148,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let delta = self.renderer.as_mut().map(|renderer| renderer.delta_secs());
                 if let Some(delta) = delta {
-                    self.workspace.update_camera(delta);
-                    self.animate_parts(delta);
+                    self.workspace.update(delta);
 
                     let fps = self
                         .renderer
@@ -280,6 +249,11 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.color = Color3::new(0.60, 0.68, 0.50);
     });
 
+    let platform = workspace
+        .find_first_child::<Part>("PalePlatform")
+        .map(|(id, _)| id)
+        .expect("PalePlatform was just created");
+
     let orb = workspace.add_child_with(Part::new("OrbitingOrb"), |part| {
         part.shape = PartShape::Ball;
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
@@ -313,8 +287,76 @@ fn create_workspace() -> (Workspace, MovingParts) {
             grass_block: teal_block,
             tower,
             orb,
+            platform,
         },
     )
+}
+
+fn configure_animations(workspace: &mut Workspace, moving_parts: &MovingParts) {
+    let platform_position = Tween::path(
+        [
+            Vec3::new(-1.0, 0.55, 1.6),
+            Vec3::new(0.1, 0.67, 1.6),
+            Vec3::new(1.2, 0.55, 1.6),
+            Vec3::new(0.1, 0.43, 1.6),
+            Vec3::new(-1.0, 0.55, 1.6),
+        ],
+        6.0,
+    )
+    .easing(Easing::EaseInOut)
+    .repeat(Repeat::Forever);
+    workspace
+        .tweens_mut()
+        .add_position(moving_parts.platform, platform_position);
+    workspace.tweens_mut().add_orientation(
+        moving_parts.platform,
+        Tween::new(Vec3::ZERO, Vec3::new(0.0, 6480.0, 0.0), 6.0).repeat_forever(),
+    );
+
+    workspace.tweens_mut().add_position(
+        moving_parts.tower,
+        Tween::path(
+            [
+                Vec3::new(-3.4, 1.0, -1.8),
+                Vec3::new(-3.4, 1.35, -1.8),
+                Vec3::new(-3.4, 1.0, -1.8),
+            ],
+            4.2,
+        )
+        .easing(Easing::EaseInOut)
+        .repeat_forever(),
+    );
+    workspace.tweens_mut().add_orientation(
+        moving_parts.tower,
+        Tween::new(Vec3::new(0.0, -33.0, 0.0), Vec3::new(0.0, 273.0, 0.0), 8.4)
+            .easing(Easing::Linear)
+            .repeat_forever()
+            .yoyo(),
+    );
+
+    let orbit_points = (0..=8).map(|step| {
+        let angle = step as f32 * std::f32::consts::TAU / 8.0;
+        Vec3::new(
+            angle.cos() * 3.3,
+            2.8 + (angle * 1.7 / 0.8).sin() * 0.45,
+            angle.sin() * 3.3,
+        )
+    });
+    workspace.tweens_mut().add_position(
+        moving_parts.orb,
+        Tween::path(orbit_points, std::f32::consts::TAU / 0.8)
+            .easing(Easing::EaseInOut)
+            .repeat_forever(),
+    );
+    workspace.tweens_mut().add_orientation(
+        moving_parts.orb,
+        Tween::new(
+            Vec3::ZERO,
+            Vec3::new(0.0, 360.0, 0.0),
+            std::f32::consts::TAU / 0.8,
+        )
+        .repeat_forever(),
+    );
 }
 
 fn apply_courtyard_textures(

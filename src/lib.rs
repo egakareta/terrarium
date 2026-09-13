@@ -10,6 +10,7 @@ mod material;
 mod part;
 mod renderer;
 mod shape;
+mod tween;
 mod vertex;
 mod workspace;
 
@@ -23,6 +24,7 @@ pub use material::*;
 pub use part::*;
 pub use renderer::*;
 pub use shape::*;
+pub use tween::*;
 pub use vertex::*;
 pub use wgpu;
 pub use winit;

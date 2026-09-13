@@ -1,4 +1,4 @@
-use crate::{Camera, CameraController, Instance, InstanceData, InstanceId};
+use crate::{Camera, CameraController, Instance, InstanceData, InstanceId, TweenManager};
 
 /// The 3D root that owns its child [`Instance`] values and its active camera.
 #[derive(Clone, Debug)]
@@ -7,6 +7,7 @@ pub struct Workspace {
     /// The camera used when this workspace is rendered.
     pub current_camera: Camera,
     camera_controller: CameraController,
+    tween_manager: TweenManager,
 }
 
 impl Workspace {
@@ -16,6 +17,7 @@ impl Workspace {
             instance: InstanceData::new("Workspace"),
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
+            tween_manager: TweenManager::default(),
         }
     }
 
@@ -67,6 +69,29 @@ impl Workspace {
     pub fn update_camera(&mut self, delta: f32) {
         self.camera_controller
             .update_camera(&mut self.current_camera, delta);
+    }
+
+    /// Advances camera input and all registered scene tweens.
+    pub fn update(&mut self, delta_seconds: f32) {
+        self.update_camera(delta_seconds);
+        self.update_tweens(delta_seconds);
+    }
+
+    /// Advances all registered scene tweens without updating the camera.
+    pub fn update_tweens(&mut self, delta_seconds: f32) {
+        let mut tween_manager = std::mem::take(&mut self.tween_manager);
+        tween_manager.update(delta_seconds, self);
+        self.tween_manager = tween_manager;
+    }
+
+    /// Returns the workspace's scene tween manager.
+    pub fn tweens(&self) -> &TweenManager {
+        &self.tween_manager
+    }
+
+    /// Returns the workspace's scene tween manager for registration and control.
+    pub fn tweens_mut(&mut self) -> &mut TweenManager {
+        &mut self.tween_manager
     }
 
     /// Returns the active camera controller.
