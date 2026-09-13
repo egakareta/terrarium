@@ -7,7 +7,7 @@ use crate::{Color3, PVInstance};
 #[derive(Clone, Debug)]
 pub struct BasePart {
     pub name: String,
-    pub pv: PVInstance,
+    pv: PVInstance,
     pub size: Vec3,
     /// Tint.
     pub color: Color3,
