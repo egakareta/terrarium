@@ -48,6 +48,8 @@ pub trait Transform {
     /// [0,   0,   s_z, z]
     /// [0,   0,   0,   1]
     /// ```
+    ///
+    /// Unlike [`PVInstance::pivot`], this includes volume.
     fn transform(&self) -> Mat4;
 }
 
