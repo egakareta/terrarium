@@ -1,4 +1,4 @@
-use crate::{Camera, CameraController, Instance, InstanceData, InstanceId, Part};
+use crate::{Camera, CameraController, Instance, InstanceData, InstanceId};
 
 /// The 3D root that owns its child [`Instance`] values and its active camera.
 #[derive(Clone, Debug)]
@@ -43,9 +43,9 @@ impl Workspace {
             .filter_map(|instance| instance.downcast_ref::<T>())
     }
 
-    /// Finds the first descendant [`Part`] with `name` in depth-first order.
-    pub fn find_first_child(&mut self, name: &str) -> Option<(InstanceId, &mut Part)> {
-        find_part_mut(self, name)
+    /// Finds the first descendant of type `T` with `name` in depth-first order.
+    pub fn find_first_child<T: Instance>(&mut self, name: &str) -> Option<(InstanceId, &mut T)> {
+        find_child_mut::<T>(self, name)
     }
 
     /// Returns every child, preserving its concrete type behind [`Instance`].
@@ -98,19 +98,19 @@ impl Default for Workspace {
 
 crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
 
-fn find_part_mut<'a>(
+fn find_child_mut<'a, T: Instance>(
     instance: &'a mut dyn Instance,
     name: &str,
-) -> Option<(InstanceId, &'a mut Part)> {
+) -> Option<(InstanceId, &'a mut T)> {
     for child in instance.children_mut() {
         let matches = child
-            .downcast_ref::<Part>()
-            .is_some_and(|part| part.name() == name);
+            .downcast_ref::<T>()
+            .is_some_and(|child| child.name() == name);
         if matches {
             let id = child.id();
-            return Some((id, child.downcast_mut::<Part>()?));
+            return Some((id, child.downcast_mut::<T>()?));
         }
-        if let Some(found) = find_part_mut(child.as_mut(), name) {
+        if let Some(found) = find_child_mut::<T>(child.as_mut(), name) {
             return Some(found);
         }
     }
@@ -120,7 +120,28 @@ fn find_part_mut<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, PartShape};
+    use crate::{BasePart, Camera, Part, PartShape};
+
+    #[test]
+    fn find_first_child_matches_the_requested_concrete_type() {
+        let mut workspace = Workspace::new();
+        let basepart_id = workspace.add_instance(BasePart::new("shared"));
+        let part_id = workspace.add_instance(Part::new("shared"));
+
+        assert_eq!(
+            workspace
+                .find_first_child::<BasePart>("shared")
+                .map(|(id, _)| id),
+            Some(basepart_id)
+        );
+        assert_eq!(
+            workspace
+                .find_first_child::<Part>("shared")
+                .map(|(id, _)| id),
+            Some(part_id)
+        );
+        assert!(workspace.find_first_child::<Camera>("shared").is_none());
+    }
 
     #[test]
     fn isolated_instances_can_be_parented_and_recovered_by_id() {

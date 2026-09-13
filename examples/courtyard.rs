@@ -49,7 +49,7 @@ impl App {
             (self.animation_time + delta_seconds.min(0.1)).rem_euclid(std::f32::consts::TAU);
         let time = self.animation_time;
 
-        if let Some((_, part)) = self.workspace.find_first_child("PalePlatform") {
+        if let Some((_, part)) = self.workspace.find_first_child::<Part>("PalePlatform") {
             part.set_position(Vec3::new(
                 -1.0 + time.sin() * 2.2,
                 0.55 + (time * 2.0).sin() * 0.12,
@@ -347,7 +347,7 @@ fn apply_courtyard_textures(
         part.material.roughness = 0.82;
     }
 
-    if let Some((_, part)) = workspace.find_first_child("PalePlatform") {
+    if let Some((_, part)) = workspace.find_first_child::<Part>("PalePlatform") {
         part.color = Color3::WHITE;
         part.material = Material::textured(festival_lantern);
         part.material.roughness = 0.82;
