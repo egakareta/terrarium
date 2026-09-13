@@ -1,6 +1,9 @@
-use crate::{Camera, CameraController, Instance, InstanceData, InstanceId, TweenManager};
+use crate::{
+    Camera, CameraController, Instance, InstanceData, InstanceId, Texture, TextureError,
+    TextureHandle, TweenManager,
+};
 
-/// The 3D root that owns its child [`Instance`] values and its active camera.
+/// The 3D root that owns its child [`Instance`] values, CPU textures, and active camera.
 #[derive(Clone, Debug)]
 pub struct Workspace {
     instance: InstanceData,
@@ -8,6 +11,7 @@ pub struct Workspace {
     pub current_camera: Camera,
     camera_controller: CameraController,
     tween_manager: TweenManager,
+    textures: Vec<Texture>,
 }
 
 impl Workspace {
@@ -18,7 +22,21 @@ impl Workspace {
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
+            textures: Vec::new(),
         }
+    }
+
+    /// Takes ownership of a validated CPU-side texture and returns its workspace handle.
+    pub fn add_texture(&mut self, texture: Texture) -> Result<TextureHandle, TextureError> {
+        texture.validate()?;
+        let handle = TextureHandle(self.textures.len());
+        self.textures.push(texture);
+        Ok(handle)
+    }
+
+    /// Returns a CPU-side texture by its workspace-local handle.
+    pub fn get_texture(&self, handle: TextureHandle) -> Option<&Texture> {
+        self.textures.get(handle.0)
     }
 
     /// Takes ownership of any supported [`Instance`] and parents it here.
@@ -145,7 +163,7 @@ fn find_child_mut<'a, T: Instance>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, Part, PartShape};
+    use crate::{BasePart, Camera, Part, PartShape, TextureColorSpace};
 
     #[test]
     fn find_first_child_matches_the_requested_concrete_type() {
@@ -230,6 +248,26 @@ mod tests {
         assert_eq!(
             workspace.camera_controller().key_bindings.forward,
             vec![winit::keyboard::KeyCode::ArrowUp]
+        );
+    }
+
+    #[test]
+    fn workspace_owns_validated_cpu_textures() {
+        let texture = Texture::linear(1, 1, vec![1, 2, 3, 4]).unwrap();
+        let mut workspace = Workspace::new();
+        let handle = workspace.add_texture(texture.clone()).unwrap();
+
+        assert_eq!(workspace.get_texture(handle), Some(&texture));
+        assert_eq!(workspace.clone().get_texture(handle), Some(&texture));
+        assert!(
+            workspace
+                .add_texture(Texture {
+                    width: 1,
+                    height: 1,
+                    pixels: vec![],
+                    color_space: TextureColorSpace::Linear,
+                })
+                .is_err()
         );
     }
 }

@@ -13,31 +13,18 @@ use terrarium::{
     },
 };
 
+#[derive(Default)]
 struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     workspace: Workspace,
-    moving_parts: MovingParts,
-}
-
-struct MovingParts {
-    ground: InstanceId,
-    stone_blocks: Vec<InstanceId>,
-    grass_block: InstanceId,
-    tower: InstanceId,
-    orb: InstanceId,
-    platform: InstanceId,
 }
 
 impl App {
     fn new() -> Self {
-        let (mut workspace, moving_parts) = create_workspace();
-        configure_animations(&mut workspace, &moving_parts);
         Self {
-            window: None,
-            renderer: None,
-            workspace,
-            moving_parts,
+            workspace: create_workspace().unwrap(),
+            ..Default::default()
         }
     }
 }
@@ -71,13 +58,6 @@ impl ApplicationHandler for App {
             b: 0.050,
             a: 1.0,
         });
-        if let Err(error) =
-            apply_courtyard_textures(&mut renderer, &mut self.workspace, &self.moving_parts)
-        {
-            eprintln!("courtyard texture setup failed: {error}");
-            event_loop.exit();
-            return;
-        }
 
         self.window = Some(window);
         self.renderer = Some(renderer);
@@ -154,8 +134,29 @@ impl ApplicationHandler for App {
     }
 }
 
-fn create_workspace() -> (Workspace, MovingParts) {
+fn create_workspace() -> Result<Workspace, RendererError> {
     let mut workspace = Workspace::new();
+    let dirt = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/dirt.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let cobblestone = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/cobblestone.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let grass_top = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/grass_top.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let grass_side = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/grass_side.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let festival_lantern = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/festival_lantern.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+
     let ground = workspace.add_child_with(Part::new("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
@@ -188,7 +189,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
     });
 
-    let teal_block = workspace.add_child_with(Part::new("TealBlock"), |part| {
+    let grass_block = workspace.add_child_with(Part::new("GrassBlock"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
@@ -233,125 +234,19 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.set_orientation(Vec3::new(0.0, -46.0, 0.0));
     });
 
-    (
-        workspace,
-        MovingParts {
-            ground,
-            stone_blocks,
-            grass_block: teal_block,
-            tower,
-            orb,
-            platform,
-        },
-    )
-}
-
-fn configure_animations(workspace: &mut Workspace, moving_parts: &MovingParts) {
-    let platform_position = Tween::path(
-        [
-            Vec3::new(-1.0, 0.55, 1.6),
-            Vec3::new(0.1, 0.67, 1.6),
-            Vec3::new(1.2, 0.55, 1.6),
-            Vec3::new(0.1, 0.43, 1.6),
-            Vec3::new(-1.0, 0.55, 1.6),
-        ],
-        6.0,
-    )
-    .easing(Easing::EaseInOut)
-    .repeat(Repeat::Forever);
-    workspace
-        .tweens_mut()
-        .add_position(moving_parts.platform, platform_position);
-    workspace.tweens_mut().add_orientation(
-        moving_parts.platform,
-        Tween::new(Vec3::ZERO, Vec3::new(0.0, 6480.0, 0.0), 6.0).repeat_forever(),
-    );
-
-    workspace.tweens_mut().add_position(
-        moving_parts.tower,
-        Tween::path(
-            [
-                Vec3::new(-3.4, 1.0, -1.8),
-                Vec3::new(-3.4, 1.35, -1.8),
-                Vec3::new(-3.4, 1.0, -1.8),
-            ],
-            4.2,
-        )
-        .easing(Easing::EaseInOut)
-        .repeat_forever(),
-    );
-    workspace.tweens_mut().add_orientation(
-        moving_parts.tower,
-        Tween::new(Vec3::new(0.0, -33.0, 0.0), Vec3::new(0.0, 273.0, 0.0), 8.4)
-            .easing(Easing::Linear)
-            .repeat_forever()
-            .yoyo(),
-    );
-
-    let orbit_points = (0..=8).map(|step| {
-        let angle = step as f32 * std::f32::consts::TAU / 8.0;
-        Vec3::new(
-            angle.cos() * 3.3,
-            2.8 + (angle * 1.7 / 0.8).sin() * 0.45,
-            angle.sin() * 3.3,
-        )
-    });
-    workspace.tweens_mut().add_position(
-        moving_parts.orb,
-        Tween::path(orbit_points, std::f32::consts::TAU / 0.8)
-            .easing(Easing::EaseInOut)
-            .repeat_forever(),
-    );
-    workspace.tweens_mut().add_orientation(
-        moving_parts.orb,
-        Tween::new(
-            Vec3::ZERO,
-            Vec3::new(0.0, 360.0, 0.0),
-            std::f32::consts::TAU / 0.8,
-        )
-        .repeat_forever(),
-    );
-}
-
-fn apply_courtyard_textures(
-    renderer: &mut Renderer,
-    workspace: &mut Workspace,
-    moving_parts: &MovingParts,
-) -> Result<(), RendererError> {
-    let dirt = renderer.add_texture(&Texture::from_bytes(
-        include_bytes!("../assets/dirt.png"),
-        TextureColorSpace::Srgb,
-    )?)?;
-    let cobblestone = renderer.add_texture(&Texture::from_bytes(
-        include_bytes!("../assets/cobblestone.png"),
-        TextureColorSpace::Srgb,
-    )?)?;
-    let grass_top = renderer.add_texture(&Texture::from_bytes(
-        include_bytes!("../assets/grass_top.png"),
-        TextureColorSpace::Srgb,
-    )?)?;
-    let grass_side = renderer.add_texture(&Texture::from_bytes(
-        include_bytes!("../assets/grass_side.png"),
-        TextureColorSpace::Srgb,
-    )?)?;
-    let festival_lantern = renderer.add_texture(&Texture::from_bytes(
-        include_bytes!("../assets/festival_lantern.png"),
-        TextureColorSpace::Srgb,
-    )?)?;
-
-    let set_material = |workspace: &mut Workspace, part_id: InstanceId, material: Material| {
+    let mut set_material = |part_id: InstanceId, material: Material| {
         if let Some(part) = workspace.get_mut::<Part>(part_id) {
             part.color = Color3::WHITE;
             part.material = material;
             part.material.roughness = 0.82;
         }
     };
-    set_material(workspace, moving_parts.ground, Material::textured(dirt));
-    for &part_id in &moving_parts.stone_blocks {
-        set_material(workspace, part_id, Material::textured(cobblestone));
+    set_material(ground, Material::textured(dirt));
+    for &part_id in &stone_blocks {
+        set_material(part_id, Material::textured(cobblestone));
     }
 
-    if let Some(part) = workspace.get_mut::<Part>(moving_parts.grass_block) {
+    if let Some(part) = workspace.get_mut::<Part>(grass_block) {
         part.color = Color3::WHITE;
         part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
         part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
@@ -368,7 +263,73 @@ fn apply_courtyard_textures(
         part.material = Material::textured(festival_lantern);
         part.material.roughness = 0.82;
     }
-    Ok(())
+
+    let platform_position = Tween::path(
+        [
+            Vec3::new(-1.0, 0.55, 1.6),
+            Vec3::new(0.1, 0.67, 1.6),
+            Vec3::new(1.2, 0.55, 1.6),
+            Vec3::new(0.1, 0.43, 1.6),
+            Vec3::new(-1.0, 0.55, 1.6),
+        ],
+        6.0,
+    )
+    .easing(Easing::EaseInOut)
+    .repeat(Repeat::Forever);
+    workspace
+        .tweens_mut()
+        .add_position(platform, platform_position);
+    workspace.tweens_mut().add_orientation(
+        platform,
+        Tween::new(Vec3::ZERO, Vec3::new(0.0, 6480.0, 0.0), 6.0).repeat_forever(),
+    );
+
+    workspace.tweens_mut().add_position(
+        tower,
+        Tween::path(
+            [
+                Vec3::new(-3.4, 1.0, -1.8),
+                Vec3::new(-3.4, 1.35, -1.8),
+                Vec3::new(-3.4, 1.0, -1.8),
+            ],
+            4.2,
+        )
+        .easing(Easing::EaseInOut)
+        .repeat_forever(),
+    );
+    workspace.tweens_mut().add_orientation(
+        tower,
+        Tween::new(Vec3::new(0.0, -33.0, 0.0), Vec3::new(0.0, 273.0, 0.0), 8.4)
+            .easing(Easing::Linear)
+            .repeat_forever()
+            .yoyo(),
+    );
+
+    let orbit_points = (0..=8).map(|step| {
+        let angle = step as f32 * std::f32::consts::TAU / 8.0;
+        Vec3::new(
+            angle.cos() * 3.3,
+            2.8 + (angle * 1.7 / 0.8).sin() * 0.45,
+            angle.sin() * 3.3,
+        )
+    });
+    workspace.tweens_mut().add_position(
+        orb,
+        Tween::path(orbit_points, std::f32::consts::TAU / 0.8)
+            .easing(Easing::EaseInOut)
+            .repeat_forever(),
+    );
+    workspace.tweens_mut().add_orientation(
+        orb,
+        Tween::new(
+            Vec3::ZERO,
+            Vec3::new(0.0, 360.0, 0.0),
+            std::f32::consts::TAU / 0.8,
+        )
+        .repeat_forever(),
+    );
+
+    Ok(workspace)
 }
 
 fn main() {

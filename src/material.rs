@@ -8,18 +8,10 @@ pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// six directional slots.
 pub const MATERIAL_SLOT_COUNT: usize = 7;
 
-/// The GPU texture handles selected for each material slot.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct MaterialTextures {
-    pub(crate) base_color: [TextureHandle; MATERIAL_SLOT_COUNT],
-    pub(crate) normal: [TextureHandle; MATERIAL_SLOT_COUNT],
-    pub(crate) metallic_roughness: [TextureHandle; MATERIAL_SLOT_COUNT],
-}
-
-/// A handle to a texture stored on the GPU.
+/// A handle to a texture stored in a [`crate::Workspace`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TextureHandle(
-    /// Index into the texture storage owned by a [`crate::Renderer`].
+    /// Index into the CPU texture storage owned by a [`crate::Workspace`].
     pub usize,
 );
 
@@ -206,7 +198,7 @@ impl Image {
 }
 
 /// CPU-side RGBA8 texture data ready to be uploaded to a [`Renderer`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Texture {
     /// Texture width in pixels.
     pub width: u32,

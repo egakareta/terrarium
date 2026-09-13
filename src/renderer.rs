@@ -9,8 +9,8 @@ use crate::egui_integration::EguiIntegration;
 #[cfg(feature = "egui")]
 use crate::winit::event::WindowEvent;
 use crate::{
-    DEPTH_FORMAT, MATERIAL_SLOT_COUNT, Material, MaterialTextures, Mesh, MeshMaterialSlots, Part,
-    PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
+    DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
+    Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
     Workspace, wgpu::util::DeviceExt, winit::window::Window,
 };
 
@@ -41,6 +41,12 @@ pub enum RendererError {
     /// A texture failed validation.
     #[error("invalid texture: {0}")]
     InvalidTexture(#[from] TextureError),
+    /// A material referenced a texture that is not owned by its workspace.
+    #[error("workspace texture handle {index} is not valid")]
+    InvalidTextureHandle {
+        /// The invalid workspace-local texture index.
+        index: usize,
+    },
     /// The surface reported a validation error while acquiring a frame.
     #[error("the surface reported a validation error while acquiring a frame")]
     SurfaceValidation,
@@ -94,6 +100,16 @@ struct RenderBatch {
     instance_start: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct GpuTextureHandle(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct MaterialTextures {
+    base_color: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
+    normal: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
+    metallic_roughness: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
+}
+
 struct GpuTexture {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -121,6 +137,8 @@ pub struct Renderer {
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_sampler: wgpu::Sampler,
     textures: Vec<GpuTexture>,
+    workspace_texture_handles: HashMap<(InstanceId, TextureHandle), GpuTextureHandle>,
+    texture_dedup: HashMap<Texture, GpuTextureHandle>,
     default_material_textures: MaterialTextures,
     instance_buffer: wgpu::Buffer,
     instance_data: Vec<InstanceRaw>,
@@ -306,10 +324,14 @@ impl Renderer {
             upload_texture(&device, &queue, &default_normal)?,
             upload_texture(&device, &queue, &default_metallic_roughness)?,
         ];
+        let mut texture_dedup = HashMap::new();
+        texture_dedup.insert(default_base_color, GpuTextureHandle(0));
+        texture_dedup.insert(default_normal, GpuTextureHandle(1));
+        texture_dedup.insert(default_metallic_roughness, GpuTextureHandle(2));
         let default_material_textures = MaterialTextures {
-            base_color: [TextureHandle(0); MATERIAL_SLOT_COUNT],
-            normal: [TextureHandle(1); MATERIAL_SLOT_COUNT],
-            metallic_roughness: [TextureHandle(2); MATERIAL_SLOT_COUNT],
+            base_color: [GpuTextureHandle(0); MATERIAL_SLOT_COUNT],
+            normal: [GpuTextureHandle(1); MATERIAL_SLOT_COUNT],
+            metallic_roughness: [GpuTextureHandle(2); MATERIAL_SLOT_COUNT],
         };
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("PBR mesh shader"),
@@ -378,6 +400,8 @@ impl Renderer {
             material_bind_group_layout,
             material_sampler,
             textures,
+            workspace_texture_handles: HashMap::new(),
+            texture_dedup,
             default_material_textures,
             instance_buffer,
             instance_data: Vec::new(),
@@ -526,37 +550,36 @@ impl Renderer {
         Ok(handle)
     }
 
-    /// Uploads an RGBA8 texture and its complete mip chain, then returns its GPU handle.
-    pub fn add_texture(&mut self, texture: &Texture) -> Result<TextureHandle, RendererError> {
-        texture.validate()?;
-        let handle = TextureHandle(self.textures.len());
-        self.textures
-            .push(upload_texture(&self.device, &self.queue, texture)?);
-        Ok(handle)
-    }
-
     fn material_textures(
-        &self,
+        &mut self,
+        workspace: &Workspace,
         material: &Material,
         material_slots: &MeshMaterialSlots,
-    ) -> MaterialTextures {
-        let resolve = |handle: Option<TextureHandle>, fallback: TextureHandle| {
-            handle
-                .filter(|handle| self.textures.get(handle.0).is_some())
-                .unwrap_or(fallback)
+    ) -> Result<MaterialTextures, RendererError> {
+        let resolve = |renderer: &mut Self,
+                       handle: Option<TextureHandle>,
+                       fallback: GpuTextureHandle|
+         -> Result<GpuTextureHandle, RendererError> {
+            handle.map_or(Ok(fallback), |handle| {
+                renderer.upload_workspace_texture(workspace, handle)
+            })
         };
+
         let base_color = resolve(
+            self,
             material.textures.base_color,
             self.default_material_textures.base_color[0],
-        );
+        )?;
         let normal = resolve(
+            self,
             material.textures.normal,
             self.default_material_textures.normal[0],
-        );
+        )?;
         let metallic_roughness = resolve(
+            self,
             material.textures.metallic_roughness,
             self.default_material_textures.metallic_roughness[0],
-        );
+        )?;
         let mut textures = MaterialTextures {
             base_color: [base_color; MATERIAL_SLOT_COUNT],
             normal: [normal; MATERIAL_SLOT_COUNT],
@@ -569,12 +592,42 @@ impl Renderer {
             .enumerate()
         {
             let slot = slot + 1;
-            textures.base_color[slot] = resolve(material.textures.base_color, base_color);
-            textures.normal[slot] = resolve(material.textures.normal, normal);
-            textures.metallic_roughness[slot] =
-                resolve(material.textures.metallic_roughness, metallic_roughness);
+            textures.base_color[slot] = resolve(self, material.textures.base_color, base_color)?;
+            textures.normal[slot] = resolve(self, material.textures.normal, normal)?;
+            textures.metallic_roughness[slot] = resolve(
+                self,
+                material.textures.metallic_roughness,
+                metallic_roughness,
+            )?;
         }
-        textures
+        Ok(textures)
+    }
+
+    fn upload_workspace_texture(
+        &mut self,
+        workspace: &Workspace,
+        handle: TextureHandle,
+    ) -> Result<GpuTextureHandle, RendererError> {
+        let workspace_handle = (workspace.id(), handle);
+        if let Some(&gpu_handle) = self.workspace_texture_handles.get(&workspace_handle) {
+            return Ok(gpu_handle);
+        }
+
+        let texture = workspace
+            .get_texture(handle)
+            .ok_or(RendererError::InvalidTextureHandle { index: handle.0 })?;
+        let gpu_handle = if let Some(&gpu_handle) = self.texture_dedup.get(texture) {
+            gpu_handle
+        } else {
+            let gpu_handle = GpuTextureHandle(self.textures.len());
+            self.textures
+                .push(upload_texture(&self.device, &self.queue, texture)?);
+            self.texture_dedup.insert(texture.clone(), gpu_handle);
+            gpu_handle
+        };
+        self.workspace_texture_handles
+            .insert(workspace_handle, gpu_handle);
+        Ok(gpu_handle)
     }
 
     fn create_material_bind_group(&self, textures: MaterialTextures) -> wgpu::BindGroup {
@@ -712,7 +765,8 @@ impl Renderer {
         let mut batches = Vec::<RenderBatch>::new();
         let mut batch_indices = HashMap::new();
         for part in parts {
-            let textures = self.material_textures(&part.material, &part.material_slots);
+            let textures =
+                self.material_textures(workspace, &part.material, &part.material_slots)?;
             let key = (part.shape, textures);
             let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
                 batch_index
