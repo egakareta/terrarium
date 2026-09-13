@@ -79,8 +79,8 @@ impl Mesh {
 
     /// Creates a box centered at the origin.
     ///
-    /// The generated mesh labels its faces as [`MaterialSlot::Top`],
-    /// [`MaterialSlot::Bottom`], or [`MaterialSlot::Side`].
+    /// The generated mesh labels each face with its corresponding directional
+    /// [`MaterialSlot`].
     pub fn block(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         let faces = [
@@ -94,12 +94,15 @@ impl Mesh {
 
         let mut vertices = Vec::with_capacity(24);
         let mut indices = Vec::with_capacity(36);
-        for (face_index, (a, b, c, d)) in faces.into_iter().enumerate() {
-            let material_slot = match face_index {
-                2 => MaterialSlot::Top,
-                3 => MaterialSlot::Bottom,
-                _ => MaterialSlot::Side,
-            };
+        let material_slots = [
+            MaterialSlot::Front,
+            MaterialSlot::Back,
+            MaterialSlot::Top,
+            MaterialSlot::Bottom,
+            MaterialSlot::Right,
+            MaterialSlot::Left,
+        ];
+        for ((a, b, c, d), material_slot) in faces.into_iter().zip(material_slots) {
             push_quad_with_material_slot(
                 &mut vertices,
                 &mut indices,
@@ -422,21 +425,21 @@ mod tests {
     #[test]
     fn block_mesh_uses_named_material_slots() {
         let mesh = Mesh::block(1.0, [1.0; 4]);
+        let expected_slots = [
+            MaterialSlot::Front,
+            MaterialSlot::Back,
+            MaterialSlot::Top,
+            MaterialSlot::Bottom,
+            MaterialSlot::Right,
+            MaterialSlot::Left,
+        ];
 
-        assert!(
-            mesh.vertices[0..4]
-                .iter()
-                .all(|vertex| vertex.material_slot == MaterialSlot::Side as u32)
-        );
-        assert!(
-            mesh.vertices[8..12]
-                .iter()
-                .all(|vertex| vertex.material_slot == MaterialSlot::Top as u32)
-        );
-        assert!(
-            mesh.vertices[12..16]
-                .iter()
-                .all(|vertex| vertex.material_slot == MaterialSlot::Bottom as u32)
-        );
+        for (vertices, slot) in mesh.vertices.chunks_exact(4).zip(expected_slots) {
+            assert!(
+                vertices
+                    .iter()
+                    .all(|vertex| vertex.material_slot == slot as u32)
+            );
+        }
     }
 }

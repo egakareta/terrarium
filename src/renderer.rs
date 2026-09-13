@@ -175,11 +175,13 @@ impl Renderer {
             })
             .await?;
         log::info!("selected wgpu adapter: {:?}", adapter.get_info());
+        let mut required_limits = wgpu::Limits::default();
+        required_limits.max_sampled_textures_per_shader_stage = (MATERIAL_SLOT_COUNT * 3) as u32;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("terrarium device"),
                 required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits::default(),
+                required_limits,
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
                 memory_hints: wgpu::MemoryHints::Performance,
                 trace: wgpu::Trace::Off,

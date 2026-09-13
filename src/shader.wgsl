@@ -22,30 +22,57 @@ var base_color_texture_2: texture_2d<f32>;
 var base_color_texture_3: texture_2d<f32>;
 
 @group(1) @binding(4)
-var normal_texture_0: texture_2d<f32>;
+var base_color_texture_4: texture_2d<f32>;
 
 @group(1) @binding(5)
-var normal_texture_1: texture_2d<f32>;
+var base_color_texture_5: texture_2d<f32>;
 
 @group(1) @binding(6)
-var normal_texture_2: texture_2d<f32>;
+var base_color_texture_6: texture_2d<f32>;
 
 @group(1) @binding(7)
-var normal_texture_3: texture_2d<f32>;
+var normal_texture_0: texture_2d<f32>;
 
 @group(1) @binding(8)
-var metallic_roughness_texture_0: texture_2d<f32>;
+var normal_texture_1: texture_2d<f32>;
 
 @group(1) @binding(9)
-var metallic_roughness_texture_1: texture_2d<f32>;
+var normal_texture_2: texture_2d<f32>;
 
 @group(1) @binding(10)
-var metallic_roughness_texture_2: texture_2d<f32>;
+var normal_texture_3: texture_2d<f32>;
 
 @group(1) @binding(11)
-var metallic_roughness_texture_3: texture_2d<f32>;
+var normal_texture_4: texture_2d<f32>;
 
 @group(1) @binding(12)
+var normal_texture_5: texture_2d<f32>;
+
+@group(1) @binding(13)
+var normal_texture_6: texture_2d<f32>;
+
+@group(1) @binding(14)
+var metallic_roughness_texture_0: texture_2d<f32>;
+
+@group(1) @binding(15)
+var metallic_roughness_texture_1: texture_2d<f32>;
+
+@group(1) @binding(16)
+var metallic_roughness_texture_2: texture_2d<f32>;
+
+@group(1) @binding(17)
+var metallic_roughness_texture_3: texture_2d<f32>;
+
+@group(1) @binding(18)
+var metallic_roughness_texture_4: texture_2d<f32>;
+
+@group(1) @binding(19)
+var metallic_roughness_texture_5: texture_2d<f32>;
+
+@group(1) @binding(20)
+var metallic_roughness_texture_6: texture_2d<f32>;
+
+@group(1) @binding(21)
 var material_sampler: sampler;
 
 struct VertexInput {
@@ -139,6 +166,12 @@ fn sample_base_color(slot: u32, uv: vec2<f32>) -> vec4<f32> {
         return textureSampleLevel(base_color_texture_2, material_sampler, uv, 0.0);
     } else if (slot == 3u) {
         return textureSampleLevel(base_color_texture_3, material_sampler, uv, 0.0);
+    } else if (slot == 4u) {
+        return textureSampleLevel(base_color_texture_4, material_sampler, uv, 0.0);
+    } else if (slot == 5u) {
+        return textureSampleLevel(base_color_texture_5, material_sampler, uv, 0.0);
+    } else if (slot == 6u) {
+        return textureSampleLevel(base_color_texture_6, material_sampler, uv, 0.0);
     }
     return textureSampleLevel(base_color_texture_0, material_sampler, uv, 0.0);
 }
@@ -150,6 +183,12 @@ fn sample_normal(slot: u32, uv: vec2<f32>) -> vec3<f32> {
         return textureSampleLevel(normal_texture_2, material_sampler, uv, 0.0).xyz;
     } else if (slot == 3u) {
         return textureSampleLevel(normal_texture_3, material_sampler, uv, 0.0).xyz;
+    } else if (slot == 4u) {
+        return textureSampleLevel(normal_texture_4, material_sampler, uv, 0.0).xyz;
+    } else if (slot == 5u) {
+        return textureSampleLevel(normal_texture_5, material_sampler, uv, 0.0).xyz;
+    } else if (slot == 6u) {
+        return textureSampleLevel(normal_texture_6, material_sampler, uv, 0.0).xyz;
     }
     return textureSampleLevel(normal_texture_0, material_sampler, uv, 0.0).xyz;
 }
@@ -161,6 +200,12 @@ fn sample_metallic_roughness(slot: u32, uv: vec2<f32>) -> vec4<f32> {
         return textureSampleLevel(metallic_roughness_texture_2, material_sampler, uv, 0.0);
     } else if (slot == 3u) {
         return textureSampleLevel(metallic_roughness_texture_3, material_sampler, uv, 0.0);
+    } else if (slot == 4u) {
+        return textureSampleLevel(metallic_roughness_texture_4, material_sampler, uv, 0.0);
+    } else if (slot == 5u) {
+        return textureSampleLevel(metallic_roughness_texture_5, material_sampler, uv, 0.0);
+    } else if (slot == 6u) {
+        return textureSampleLevel(metallic_roughness_texture_6, material_sampler, uv, 0.0);
     }
     return textureSampleLevel(metallic_roughness_texture_0, material_sampler, uv, 0.0);
 }

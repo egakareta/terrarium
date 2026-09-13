@@ -340,7 +340,10 @@ fn apply_courtyard_textures(
         part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
         part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
         part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
-        part.set_material_slot(MaterialSlot::Side, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Front, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Back, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Left, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
         part.material.roughness = 0.82;
     }
 

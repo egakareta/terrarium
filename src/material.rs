@@ -4,8 +4,9 @@ use crate::Color3;
 
 /// Depth format used by the built-in renderer.
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-/// Number of material slots available to a mesh.
-pub const MATERIAL_SLOT_COUNT: usize = 4;
+/// Number of material slots available to a mesh, including the base slot and
+/// six directional slots.
+pub const MATERIAL_SLOT_COUNT: usize = 7;
 
 /// The GPU texture handles selected for each material slot.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -32,8 +33,14 @@ pub enum MaterialSlot {
     Top = 1,
     /// The bottom-facing material slot.
     Bottom = 2,
-    /// The side-facing material slot.
-    Side = 3,
+    /// The front-facing material slot toward `+Z`.
+    Front = 3,
+    /// The back-facing material slot toward `-Z`.
+    Back = 4,
+    /// The left-facing material slot toward `-X`.
+    Left = 5,
+    /// The right-facing material slot toward `+X`.
+    Right = 6,
 }
 
 impl MaterialSlot {
