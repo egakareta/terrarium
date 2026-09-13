@@ -1,12 +1,23 @@
 use std::{
     any::Any,
     fmt::Debug,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{Mutex, OnceLock},
 };
+
+use slotmap::SlotMap;
 
 use crate::glam::{EulerRot, Mat4, Quat, Vec3};
 
-static NEXT_INSTANCE_ID: AtomicUsize = AtomicUsize::new(0);
+slotmap::new_key_type! {
+    /// Stable identifier for an [`Instance`].
+    pub struct InstanceId;
+}
+
+static INSTANCE_IDS: OnceLock<Mutex<SlotMap<InstanceId, ()>>> = OnceLock::new();
+
+fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
+    INSTANCE_IDS.get_or_init(|| Mutex::new(SlotMap::with_key()))
+}
 
 /// Implements the common [`Instance`] plumbing for a type backed by
 /// [`InstanceData`]. The field paths provide the type-specific name and
@@ -103,13 +114,12 @@ macro_rules! impl_instance {
     };
 }
 
-/// Stable identifier for an [`Instance`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct InstanceId(usize);
-
 impl InstanceId {
     fn new() -> Self {
-        Self(NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed))
+        instance_ids()
+            .lock()
+            .expect("instance ID registry poisoned")
+            .insert(())
     }
 }
 
@@ -164,6 +174,15 @@ impl InstanceData {
         child.set_instance_parent(Some(self.id));
         self.children.push(child);
         id
+    }
+}
+
+impl Drop for InstanceData {
+    fn drop(&mut self) {
+        instance_ids()
+            .lock()
+            .expect("instance ID registry poisoned")
+            .remove(self.id);
     }
 }
 
@@ -482,5 +501,13 @@ mod tests {
         assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
         assert_eq!(workspace.get_all::<Part>().count(), 1);
         assert_eq!(workspace.instances().count(), 3);
+    }
+
+    #[test]
+    fn dropped_instance_ids_get_a_new_generation() {
+        let old_id = Part::new("old").id();
+        let new_id = Part::new("new").id();
+
+        assert_ne!(old_id, new_id);
     }
 }
