@@ -78,6 +78,39 @@ impl Camera {
 
 crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
 
+/// Physical keyboard keys assigned to camera movement actions.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CameraKeyBindings {
+    /// Keys that move the camera forward.
+    pub forward: Vec<KeyCode>,
+    /// Keys that move the camera backward.
+    pub backward: Vec<KeyCode>,
+    /// Keys that move the camera left.
+    pub left: Vec<KeyCode>,
+    /// Keys that move the camera right.
+    pub right: Vec<KeyCode>,
+    /// Keys that move the camera up.
+    pub up: Vec<KeyCode>,
+    /// Keys that move the camera down.
+    pub down: Vec<KeyCode>,
+    /// Keys that activate sprinting.
+    pub sprint: Vec<KeyCode>,
+}
+
+impl Default for CameraKeyBindings {
+    fn default() -> Self {
+        Self {
+            forward: vec![KeyCode::KeyW],
+            backward: vec![KeyCode::KeyS],
+            left: vec![KeyCode::KeyA],
+            right: vec![KeyCode::KeyD],
+            up: vec![KeyCode::Space],
+            down: vec![KeyCode::ControlLeft, KeyCode::ControlRight],
+            sprint: vec![KeyCode::ShiftLeft, KeyCode::ShiftRight],
+        }
+    }
+}
+
 /// First-person keyboard and raw mouse input for a [`Camera`].
 #[derive(Clone, Debug)]
 pub struct CameraController {
@@ -85,19 +118,21 @@ pub struct CameraController {
     pub speed: f32,
     /// Mouse-look sensitivity in radians per raw mouse unit.
     pub sensitivity: f32,
-    /// Whether `W` is currently held.
+    /// Physical keys assigned to each movement action.
+    pub key_bindings: CameraKeyBindings,
+    /// Whether a forward key is currently held.
     pub forward: bool,
-    /// Whether `S` is currently held.
+    /// Whether a backward key is currently held.
     pub backward: bool,
-    /// Whether `A` is currently held.
+    /// Whether a left key is currently held.
     pub left: bool,
-    /// Whether `D` is currently held.
+    /// Whether a right key is currently held.
     pub right: bool,
-    /// Whether `Space` is currently held.
+    /// Whether an up key is currently held.
     pub up: bool,
-    /// Whether either Control key is currently held.
+    /// Whether a down key is currently held.
     pub down: bool,
-    /// Whether either Shift key is currently held.
+    /// Whether a sprint key is currently held.
     pub sprint: bool,
     /// Accumulated raw mouse delta as `(x, y)` until the next update.
     pub mouse_delta: (f32, f32),
@@ -112,9 +147,19 @@ impl Default for CameraController {
 impl CameraController {
     /// Creates a first-person controller with the given speed and sensitivity.
     pub fn new(speed: f32, sensitivity: f32) -> Self {
+        Self::new_with_key_bindings(speed, sensitivity, CameraKeyBindings::default())
+    }
+
+    /// Creates a first-person controller with custom movement key bindings.
+    pub fn new_with_key_bindings(
+        speed: f32,
+        sensitivity: f32,
+        key_bindings: CameraKeyBindings,
+    ) -> Self {
         Self {
             speed,
             sensitivity,
+            key_bindings,
             forward: false,
             backward: false,
             left: false,
@@ -129,8 +174,8 @@ impl CameraController {
     /// Feeds a winit window event into the controller. Returns true when it was used.
     /// Applies a keyboard window event and returns whether it controls movement.
     ///
-    /// The controller recognizes physical `WASD`, Space, Control, and Shift
-    /// keys. Losing window focus clears all held keys.
+    /// The controller recognizes the physical keys in [`CameraKeyBindings`].
+    /// Losing window focus clears all held keys.
     pub fn process_window_event(&mut self, event: &WindowEvent) -> bool {
         let WindowEvent::KeyboardInput { event, .. } = event else {
             if matches!(event, WindowEvent::Focused(false)) {
@@ -143,15 +188,26 @@ impl CameraController {
             return false;
         };
         let pressed = event.state == ElementState::Pressed;
-        match key {
-            KeyCode::KeyW => set_key(&mut self.forward, pressed),
-            KeyCode::KeyS => set_key(&mut self.backward, pressed),
-            KeyCode::KeyA => set_key(&mut self.left, pressed),
-            KeyCode::KeyD => set_key(&mut self.right, pressed),
-            KeyCode::Space => set_key(&mut self.up, pressed),
-            KeyCode::ControlLeft | KeyCode::ControlRight => set_key(&mut self.down, pressed),
-            KeyCode::ShiftLeft | KeyCode::ShiftRight => set_key(&mut self.sprint, pressed),
-            _ => false,
+        self.process_key(key, pressed)
+    }
+
+    fn process_key(&mut self, key: KeyCode, pressed: bool) -> bool {
+        if self.key_bindings.forward.contains(&key) {
+            set_key(&mut self.forward, pressed)
+        } else if self.key_bindings.backward.contains(&key) {
+            set_key(&mut self.backward, pressed)
+        } else if self.key_bindings.left.contains(&key) {
+            set_key(&mut self.left, pressed)
+        } else if self.key_bindings.right.contains(&key) {
+            set_key(&mut self.right, pressed)
+        } else if self.key_bindings.up.contains(&key) {
+            set_key(&mut self.up, pressed)
+        } else if self.key_bindings.down.contains(&key) {
+            set_key(&mut self.down, pressed)
+        } else if self.key_bindings.sprint.contains(&key) {
+            set_key(&mut self.sprint, pressed)
+        } else {
+            false
         }
     }
 

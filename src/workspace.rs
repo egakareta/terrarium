@@ -69,6 +69,16 @@ impl Workspace {
             .update_camera(&mut self.current_camera, delta);
     }
 
+    /// Returns the active camera controller.
+    pub fn camera_controller(&self) -> &CameraController {
+        &self.camera_controller
+    }
+
+    /// Returns the active camera controller for configuration and input state access.
+    pub fn camera_controller_mut(&mut self) -> &mut CameraController {
+        &mut self.camera_controller
+    }
+
     /// Forwards a raw device event to the active camera controller.
     pub fn process_device_event(&mut self, event: &winit::event::DeviceEvent) {
         self.camera_controller.process_device_event(event);
@@ -161,6 +171,19 @@ mod tests {
             cloned_workspace
                 .instances()
                 .all(|instance| instance.parent() == Some(cloned_workspace.id()))
+        );
+    }
+
+    #[test]
+    fn camera_controller_can_be_configured_through_workspace() {
+        let mut workspace = Workspace::new();
+
+        workspace.camera_controller_mut().key_bindings.forward =
+            vec![winit::keyboard::KeyCode::ArrowUp];
+
+        assert_eq!(
+            workspace.camera_controller().key_bindings.forward,
+            vec![winit::keyboard::KeyCode::ArrowUp]
         );
     }
 }
