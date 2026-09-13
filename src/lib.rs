@@ -1,17 +1,21 @@
-use std::sync::Arc;
+mod camera;
+mod color3;
+mod pv_instance;
+
+use std::{collections::HashMap, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
-use glam::{EulerRot, Mat4, Quat, Vec3};
+pub use camera::*;
+pub use color3::*;
+use glam::{Mat4, Vec3};
+pub use pv_instance::*;
 use thiserror::Error;
 use web_time::Instant;
 use wgpu::util::DeviceExt;
-use winit::{
-    event::{DeviceEvent, ElementState, WindowEvent},
-    keyboard::{KeyCode, PhysicalKey},
-    window::Window,
-};
+use winit::window::Window;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const MATERIAL_SLOT_COUNT: usize = 4;
 
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
@@ -28,57 +32,87 @@ pub enum RendererError {
     EmptyMesh,
     #[error("mesh index {index} is outside the vertex range")]
     InvalidMeshIndex { index: u16 },
+    #[error("invalid texture: {0}")]
+    InvalidTexture(#[from] TextureError),
     #[error("the surface reported a validation error while acquiring a frame")]
     SurfaceValidation,
     #[error("could not wait for submitted GPU work: {0}")]
     DevicePoll(#[from] wgpu::PollError),
 }
 
-/// A position and vertex color consumed by the built-in pipeline.
+/// A vertex consumed by the built-in PBR pipeline.
+///
+/// Tangents use the fourth component as the bitangent handedness, as in glTF:
+/// the bitangent is `cross(normal, tangent) * tangent.w`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
+    pub normal: [f32; 3],
+    pub uv: [f32; 2],
+    pub tangent: [f32; 4],
+    /// A per-vertex color multiplier retained for custom mesh tinting.
     pub color: [f32; 4],
+    /// GPU representation of the material slot selected by this vertex.
+    pub material_slot: u32,
 }
 
 impl Vertex {
+    /// Creates a legacy vertex with default tangent-space attributes.
+    ///
+    /// New meshes should prefer [`Vertex::with_attributes`] so their normals,
+    /// UVs, and tangents participate in PBR lighting and normal mapping.
     pub fn new(position: [f32; 3], color: [f32; 4]) -> Self {
-        Self { position, color }
+        Self::with_attributes(
+            position,
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0],
+            [1.0, 0.0, 0.0, 1.0],
+            color,
+        )
+    }
+
+    pub fn with_attributes(
+        position: [f32; 3],
+        normal: [f32; 3],
+        uv: [f32; 2],
+        tangent: [f32; 4],
+        color: [f32; 4],
+    ) -> Self {
+        Self::with_material_slot(position, normal, uv, tangent, color, MaterialSlot::Base)
+    }
+
+    pub fn with_material_slot(
+        position: [f32; 3],
+        normal: [f32; 3],
+        uv: [f32; 2],
+        tangent: [f32; 4],
+        color: [f32; 4],
+        material_slot: MaterialSlot,
+    ) -> Self {
+        Self {
+            position,
+            normal,
+            uv,
+            tangent,
+            color,
+            material_slot: material_slot as u32,
+        }
     }
 
     fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRIBUTES: &[wgpu::VertexAttribute] =
-            &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+        0 => Float32x3,
+        1 => Float32x3,
+            2 => Float32x2,
+            3 => Float32x4,
+            4 => Float32x4,
+            5 => Uint32,
+        ];
 
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: ATTRIBUTES,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct InstanceRaw {
-    model: [[f32; 4]; 4],
-    color: [f32; 4],
-}
-
-impl InstanceRaw {
-    fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
-            2 => Float32x4,
-            3 => Float32x4,
-            4 => Float32x4,
-            5 => Float32x4,
-            6 => Float32x4,
-        ];
-
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
             attributes: ATTRIBUTES,
         }
     }
@@ -148,31 +182,29 @@ impl Mesh {
     pub fn block(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         let faces = [
-            ([-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h], 1.0),
-            ([h, -h, -h], [-h, -h, -h], [-h, h, -h], [h, h, -h], 0.72),
-            ([-h, h, h], [h, h, h], [h, h, -h], [-h, h, -h], 1.15),
-            ([-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h], 0.52),
-            ([h, -h, h], [h, -h, -h], [h, h, -h], [h, h, h], 0.86),
-            ([-h, -h, -h], [-h, -h, h], [-h, h, h], [-h, h, -h], 0.66),
+            ([-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h]),
+            ([h, -h, -h], [-h, -h, -h], [-h, h, -h], [h, h, -h]),
+            ([-h, h, h], [h, h, h], [h, h, -h], [-h, h, -h]),
+            ([-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h]),
+            ([h, -h, h], [h, -h, -h], [h, h, -h], [h, h, h]),
+            ([-h, -h, -h], [-h, -h, h], [-h, h, h], [-h, h, -h]),
         ];
 
         let mut vertices = Vec::with_capacity(24);
         let mut indices = Vec::with_capacity(36);
-        for (a, b, c, d, shade) in faces {
-            let face_color = [
-                (color[0] * shade).min(1.0),
-                (color[1] * shade).min(1.0),
-                (color[2] * shade).min(1.0),
-                color[3],
-            ];
-            let start = vertices.len() as u16;
-            vertices.extend([
-                Vertex::new(a, face_color),
-                Vertex::new(b, face_color),
-                Vertex::new(c, face_color),
-                Vertex::new(d, face_color),
-            ]);
-            indices.extend([start, start + 1, start + 2, start + 2, start + 3, start]);
+        for (face_index, (a, b, c, d)) in faces.into_iter().enumerate() {
+            let material_slot = match face_index {
+                2 => MaterialSlot::Top,
+                3 => MaterialSlot::Bottom,
+                _ => MaterialSlot::Side,
+            };
+            push_quad_with_material_slot(
+                &mut vertices,
+                &mut indices,
+                [a, b, c, d],
+                color,
+                material_slot,
+            );
         }
 
         Self { vertices, indices }
@@ -189,8 +221,6 @@ impl Mesh {
         let longitude_segments = longitude_segments.max(3);
         let mut vertices = Vec::with_capacity((latitude_segments + 1) * (longitude_segments + 1));
         let mut indices = Vec::with_capacity(latitude_segments * longitude_segments * 6);
-        let light_direction = Vec3::new(-0.45, 0.85, 0.35).normalize();
-
         for latitude in 0..=latitude_segments {
             let v = latitude as f32 / latitude_segments as f32;
             let phi = v * std::f32::consts::PI;
@@ -200,10 +230,13 @@ impl Mesh {
                 let u = longitude as f32 / longitude_segments as f32;
                 let theta = u * std::f32::consts::TAU;
                 let normal = Vec3::new(theta.cos() * ring, y, theta.sin() * ring);
-                let shade = 0.62 + normal.dot(light_direction).max(0.0) * 0.38;
-                vertices.push(Vertex::new(
+                let tangent = Vec3::new(-theta.sin(), 0.0, theta.cos());
+                vertices.push(Vertex::with_attributes(
                     [normal.x * radius, normal.y * radius, normal.z * radius],
-                    shade_color(color, shade),
+                    normal.to_array(),
+                    [u, v],
+                    [tangent.x, tangent.y, tangent.z, 1.0],
+                    color,
                 ));
             }
         }
@@ -242,8 +275,9 @@ impl Mesh {
             let next = (segment + 1) % segments;
             let angle = segment as f32 / segments as f32 * std::f32::consts::TAU;
             let next_angle = next as f32 / segments as f32 * std::f32::consts::TAU;
-            let side_shade = 0.68 + angle.cos().mul_add(-0.16, angle.sin() * 0.10);
-            push_quad(
+            let u = segment as f32 / segments as f32;
+            let next_u = (segment + 1) as f32 / segments as f32;
+            push_quad_with_uv(
                 &mut vertices,
                 &mut indices,
                 [
@@ -260,10 +294,11 @@ impl Mesh {
                     ],
                     [radius * angle.cos(), half_height, radius * angle.sin()],
                 ],
-                shade_color(color, side_shade),
+                [[u, 0.0], [next_u, 0.0], [next_u, 1.0], [u, 1.0]],
+                color,
             );
 
-            push_triangle(
+            push_triangle_with_uv(
                 &mut vertices,
                 &mut indices,
                 [
@@ -275,9 +310,14 @@ impl Mesh {
                     ],
                     [radius * angle.cos(), half_height, radius * angle.sin()],
                 ],
-                shade_color(color, 1.12),
+                [
+                    [0.5, 0.5],
+                    [0.5 + next_angle.cos() * 0.5, 0.5 + next_angle.sin() * 0.5],
+                    [0.5 + angle.cos() * 0.5, 0.5 + angle.sin() * 0.5],
+                ],
+                color,
             );
-            push_triangle(
+            push_triangle_with_uv(
                 &mut vertices,
                 &mut indices,
                 [
@@ -289,7 +329,12 @@ impl Mesh {
                         radius * next_angle.sin(),
                     ],
                 ],
-                shade_color(color, 0.56),
+                [
+                    [0.5, 0.5],
+                    [0.5 + angle.cos() * 0.5, 0.5 + angle.sin() * 0.5],
+                    [0.5 + next_angle.cos() * 0.5, 0.5 + next_angle.sin() * 0.5],
+                ],
+                color,
             );
         }
 
@@ -315,13 +360,13 @@ impl Mesh {
             &mut vertices,
             &mut indices,
             [front_bottom_left, front_bottom_right, front_top_right],
-            shade_color(color, 0.88),
+            color,
         );
         push_triangle(
             &mut vertices,
             &mut indices,
             [back_bottom_left, back_top_right, back_bottom_right],
-            shade_color(color, 0.70),
+            color,
         );
         push_quad(
             &mut vertices,
@@ -332,7 +377,7 @@ impl Mesh {
                 back_bottom_right,
                 front_bottom_right,
             ],
-            shade_color(color, 0.55),
+            color,
         );
         push_quad(
             &mut vertices,
@@ -343,7 +388,7 @@ impl Mesh {
                 back_top_right,
                 front_top_right,
             ],
-            shade_color(color, 0.82),
+            color,
         );
         push_quad(
             &mut vertices,
@@ -354,7 +399,7 @@ impl Mesh {
                 back_top_right,
                 back_bottom_left,
             ],
-            shade_color(color, 1.08),
+            color,
         );
 
         Self { vertices, indices }
@@ -374,14 +419,14 @@ impl Mesh {
             &mut vertices,
             &mut indices,
             [corners[0], corners[3], corners[2], corners[1]],
-            shade_color(color, 0.52),
+            color,
         );
         for (index, next) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
             push_triangle(
                 &mut vertices,
                 &mut indices,
                 [corners[index], corners[next], apex],
-                shade_color(color, 0.72 + index as f32 * 0.10),
+                color,
             );
         }
 
@@ -393,23 +438,38 @@ impl Mesh {
         let h = size * 0.5;
         Self {
             vertices: vec![
-                Vertex::new([-h, 0.0, -h], color),
-                Vertex::new([h, 0.0, -h], color),
-                Vertex::new([h, 0.0, h], color),
-                Vertex::new([-h, 0.0, h], color),
+                Vertex::with_attributes(
+                    [-h, 0.0, -h],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    color,
+                ),
+                Vertex::with_attributes(
+                    [h, 0.0, -h],
+                    [0.0, 1.0, 0.0],
+                    [1.0, 0.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    color,
+                ),
+                Vertex::with_attributes(
+                    [h, 0.0, h],
+                    [0.0, 1.0, 0.0],
+                    [1.0, 1.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    color,
+                ),
+                Vertex::with_attributes(
+                    [-h, 0.0, h],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 1.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    color,
+                ),
             ],
             indices: vec![0, 1, 2, 2, 3, 0],
         }
     }
-}
-
-fn shade_color(color: [f32; 4], shade: f32) -> [f32; 4] {
-    [
-        (color[0] * shade).clamp(0.0, 1.0),
-        (color[1] * shade).clamp(0.0, 1.0),
-        (color[2] * shade).clamp(0.0, 1.0),
-        color[3],
-    ]
 }
 
 fn push_triangle(
@@ -418,8 +478,46 @@ fn push_triangle(
     positions: [[f32; 3]; 3],
     color: [f32; 4],
 ) {
+    push_triangle_with_uv(
+        vertices,
+        indices,
+        positions,
+        [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        color,
+    );
+}
+
+fn push_triangle_with_uv(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 3],
+    uvs: [[f32; 2]; 3],
+    color: [f32; 4],
+) {
+    push_triangle_with_uv_and_material_slot(
+        vertices,
+        indices,
+        positions,
+        uvs,
+        color,
+        MaterialSlot::Base,
+    );
+}
+
+fn push_triangle_with_uv_and_material_slot(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 3],
+    uvs: [[f32; 2]; 3],
+    color: [f32; 4],
+    material_slot: MaterialSlot,
+) {
+    let normal = triangle_normal(positions);
+    let tangent = tangent_from_uv(positions, uvs, normal);
     let start = vertices.len() as u16;
-    vertices.extend(positions.map(|position| Vertex::new(position, color)));
+    vertices.extend(positions.into_iter().zip(uvs).map(|(position, uv)| {
+        Vertex::with_material_slot(position, normal, uv, tangent, color, material_slot)
+    }));
     indices.extend([start, start + 1, start + 2]);
 }
 
@@ -429,51 +527,347 @@ fn push_quad(
     positions: [[f32; 3]; 4],
     color: [f32; 4],
 ) {
+    push_quad_with_uv(
+        vertices,
+        indices,
+        positions,
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        color,
+    );
+}
+
+fn push_quad_with_uv(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 4],
+    uvs: [[f32; 2]; 4],
+    color: [f32; 4],
+) {
+    push_quad_with_uv_and_material_slot(
+        vertices,
+        indices,
+        positions,
+        uvs,
+        color,
+        MaterialSlot::Base,
+    );
+}
+
+fn push_quad_with_material_slot(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 4],
+    color: [f32; 4],
+    material_slot: MaterialSlot,
+) {
+    push_quad_with_uv_and_material_slot(
+        vertices,
+        indices,
+        positions,
+        [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+        color,
+        material_slot,
+    );
+}
+
+fn push_quad_with_uv_and_material_slot(
+    vertices: &mut Vec<Vertex>,
+    indices: &mut Vec<u16>,
+    positions: [[f32; 3]; 4],
+    uvs: [[f32; 2]; 4],
+    color: [f32; 4],
+    material_slot: MaterialSlot,
+) {
+    let normal = triangle_normal([positions[0], positions[1], positions[2]]);
+    let tangent = tangent_from_uv(
+        [positions[0], positions[1], positions[2]],
+        [uvs[0], uvs[1], uvs[2]],
+        normal,
+    );
     let start = vertices.len() as u16;
-    vertices.extend(positions.map(|position| Vertex::new(position, color)));
+    vertices.extend(positions.into_iter().zip(uvs).map(|(position, uv)| {
+        Vertex::with_material_slot(position, normal, uv, tangent, color, material_slot)
+    }));
     indices.extend([start, start + 1, start + 2, start + 2, start + 3, start]);
+}
+
+fn triangle_normal(positions: [[f32; 3]; 3]) -> [f32; 3] {
+    let edge_a = Vec3::from_array(positions[1]) - Vec3::from_array(positions[0]);
+    let edge_b = Vec3::from_array(positions[2]) - Vec3::from_array(positions[0]);
+    edge_a.cross(edge_b).normalize_or_zero().to_array()
+}
+
+fn tangent_from_uv(positions: [[f32; 3]; 3], uvs: [[f32; 2]; 3], normal: [f32; 3]) -> [f32; 4] {
+    let position_a = Vec3::from_array(positions[1]) - Vec3::from_array(positions[0]);
+    let position_b = Vec3::from_array(positions[2]) - Vec3::from_array(positions[0]);
+    let uv_a = Vec3::new(uvs[1][0] - uvs[0][0], uvs[1][1] - uvs[0][1], 0.0);
+    let uv_b = Vec3::new(uvs[2][0] - uvs[0][0], uvs[2][1] - uvs[0][1], 0.0);
+    let determinant = uv_a.x * uv_b.y - uv_a.y * uv_b.x;
+    let tangent = if determinant.abs() > f32::EPSILON {
+        (position_a * uv_b.y - position_b * uv_a.y) / determinant
+    } else {
+        position_a
+    };
+    let normal = Vec3::from_array(normal);
+    let tangent = (tangent - normal * normal.dot(tangent)).normalize_or_zero();
+    let bitangent = position_a * uv_b.x - position_b * uv_a.x;
+    let handedness = if normal.cross(tangent).dot(bitangent) < 0.0 {
+        -1.0
+    } else {
+        1.0
+    };
+    [tangent.x, tangent.y, tangent.z, handedness]
 }
 
 /// A handle to mesh data stored on the GPU.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MeshHandle(usize);
 
-/// An RGB color used by a [`Part`].
+/// A handle to a texture stored on the GPU.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TextureHandle(usize);
+
+/// The color space used when sampling an RGBA8 texture.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum TextureColorSpace {
+    /// Color data such as a base-color map. The GPU converts it to linear space.
+    Srgb,
+    /// Data maps such as normals and metallic-roughness.
+    Linear,
+}
+
+/// CPU-side image data independent of GPU texture resources.
+#[derive(Clone, Debug)]
+pub struct Image {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}
+
+impl Image {
+    /// Decodes any image format supported by the configured image codecs.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, TextureError> {
+        let image = image::load_from_memory(bytes)?.to_rgba8();
+        let (width, height) = image.dimensions();
+        Self::from_rgba8(width, height, image.into_raw())
+    }
+
+    /// Creates an image from RGBA8 pixels.
+    pub fn from_rgba8(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, TextureError> {
+        let image = Self {
+            width,
+            height,
+            pixels,
+        };
+        image.validate()?;
+        Ok(image)
+    }
+
+    fn validate(&self) -> Result<(), TextureError> {
+        if self.width == 0 || self.height == 0 {
+            return Err(TextureError::ZeroDimensions);
+        }
+        let expected = (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(TextureError::DimensionsTooLarge)?;
+        if self.pixels.len() != expected {
+            return Err(TextureError::InvalidData {
+                actual: self.pixels.len(),
+                expected,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// CPU-side RGBA8 texture data ready to be uploaded to a [`Renderer`].
+///
+/// Textures are intentionally single-mip resources for now. The renderer does
+/// not generate or upload additional mip levels.
+#[derive(Clone, Debug)]
+pub struct Texture {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+    pub color_space: TextureColorSpace,
+}
+
+#[derive(Debug, Error)]
+pub enum TextureError {
+    #[error("could not decode image data: {0}")]
+    ImageDecode(#[from] image::ImageError),
+    #[error("texture dimensions must be greater than zero")]
+    ZeroDimensions,
+    #[error("texture dimensions are too large")]
+    DimensionsTooLarge,
+    #[error("RGBA8 texture data has {actual} bytes, expected {expected}")]
+    InvalidData { actual: usize, expected: usize },
+}
+
+impl Texture {
+    /// Creates an sRGB RGBA8 texture, suitable for a base-color map.
+    pub fn new(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, TextureError> {
+        Self::with_color_space(width, height, pixels, TextureColorSpace::Srgb)
+    }
+
+    /// Creates an RGBA8 texture with an explicit color space.
+    pub fn with_color_space(
+        width: u32,
+        height: u32,
+        pixels: Vec<u8>,
+        color_space: TextureColorSpace,
+    ) -> Result<Self, TextureError> {
+        let texture = Self {
+            width,
+            height,
+            pixels,
+            color_space,
+        };
+        texture.validate()?;
+        Ok(texture)
+    }
+
+    /// Creates a texture from decoded image data.
+    pub fn from_image(image: Image, color_space: TextureColorSpace) -> Result<Self, TextureError> {
+        Self::with_color_space(image.width, image.height, image.pixels, color_space)
+    }
+
+    /// Creates a linear RGBA8 texture, suitable for normal or metallic-roughness data.
+    pub fn linear(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, TextureError> {
+        Self::with_color_space(width, height, pixels, TextureColorSpace::Linear)
+    }
+
+    /// Decodes an image from memory with an explicit texture color space.
+    pub fn from_bytes(bytes: &[u8], color_space: TextureColorSpace) -> Result<Self, TextureError> {
+        Self::from_image(Image::from_bytes(bytes)?, color_space)
+    }
+
+    fn validate(&self) -> Result<(), TextureError> {
+        if self.width == 0 || self.height == 0 {
+            return Err(TextureError::ZeroDimensions);
+        }
+        let expected = (self.width as usize)
+            .checked_mul(self.height as usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(TextureError::DimensionsTooLarge)?;
+        if self.pixels.len() != expected {
+            return Err(TextureError::InvalidData {
+                actual: self.pixels.len(),
+                expected,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// The material slot selected by a mesh vertex.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum MaterialSlot {
+    Base = 0,
+    Top = 1,
+    Bottom = 2,
+    Side = 3,
+}
+
+impl MaterialSlot {
+    pub const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Texture maps used by a PBR material.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TextureSet {
+    pub base_color: Option<TextureHandle>,
+    pub normal: Option<TextureHandle>,
+    pub metallic_roughness: Option<TextureHandle>,
+}
+
+/// PBR factors and optional texture maps used by a [`Part`].
+///
+/// The metallic-roughness map follows the glTF convention: metallic is read
+/// from the blue channel and roughness from the green channel. All scalar
+/// factors are supplied per instance, so parts can remain instanced efficiently.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Color3 {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
+pub struct Material {
+    pub base_color: [f32; 4],
+    pub metallic: f32,
+    pub roughness: f32,
+    pub emissive: [f32; 3],
+    pub textures: TextureSet,
 }
 
-impl Color3 {
-    pub const WHITE: Self = Self::new(1.0, 1.0, 1.0);
-
-    pub const fn new(r: f32, g: f32, b: f32) -> Self {
-        Self { r, g, b }
-    }
-
-    fn rgba(self) -> [f32; 4] {
-        [self.r, self.g, self.b, 1.0]
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            base_color: [1.0, 1.0, 1.0, 1.0],
+            metallic: 0.0,
+            roughness: 0.5,
+            emissive: [0.0, 0.0, 0.0],
+            textures: TextureSet::default(),
+        }
     }
 }
 
-/// Abstract trait for all objects that have a physical location in the world.
-pub trait PVInstance {
-    /// Returns this instance's world-space pivot.
-    fn get_pivot(&self) -> Mat4;
+impl Material {
+    /// Creates a material using a texture as its base-color map.
+    pub fn textured(texture: TextureHandle) -> Self {
+        Self::default().with_base_color_texture(texture)
+    }
 
-    /// Replaces this instance's world-space pivot.
-    fn pivot_to(&mut self, pivot: Mat4);
+    pub fn with_base_color_texture(mut self, texture: TextureHandle) -> Self {
+        self.textures.base_color = Some(texture);
+        self
+    }
+
+    pub fn with_normal_texture(mut self, texture: TextureHandle) -> Self {
+        self.textures.normal = Some(texture);
+        self
+    }
+
+    pub fn with_metallic_roughness_texture(mut self, texture: TextureHandle) -> Self {
+        self.textures.metallic_roughness = Some(texture);
+        self
+    }
+
+    pub fn from_color(color: Color3) -> Self {
+        Self {
+            base_color: color.rgba(),
+            ..Self::default()
+        }
+    }
+}
+
+/// Materials assigned to the non-default slots of a mesh.
+///
+/// Slot zero is the [`Part::material`] field. The first element in this list
+/// is slot one, the second is slot two, and so on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MeshMaterialSlots {
+    pub slots: Vec<Material>,
+}
+
+impl MeshMaterialSlots {
+    pub fn set(&mut self, slot: MaterialSlot, material: Material) {
+        assert!(slot != MaterialSlot::Base, "slot zero is Part::material");
+        let index = slot.index() - 1;
+        self.slots.resize(index + 1, Material::default());
+        self.slots[index] = material;
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct Part {
     pub name: String,
     pub shape: PartShape,
-    pivot: Mat4,
+    pub pv: PVInstance,
     pub size: Vec3,
+    /// Tint.
     pub color: Color3,
+    pub material: Material,
+    pub material_slots: MeshMaterialSlots,
     pub anchored: bool,
     pub can_collide: bool,
 }
@@ -483,77 +877,54 @@ impl Part {
         Self {
             name: name.into(),
             shape: PartShape::Block,
-            pivot: Mat4::IDENTITY,
+            pv: PVInstance::new(),
             size: Vec3::ONE,
             color: Color3::WHITE,
+            material: Material::default(),
+            material_slots: MeshMaterialSlots::default(),
             anchored: true,
             can_collide: true,
         }
     }
 
-    /// Returns the position component of this part's pivot.
-    pub fn position(&self) -> Vec3 {
-        self.get_pivot().w_axis.truncate()
-    }
-
-    /// Changes this part's position while preserving its orientation.
-    pub fn set_position(&mut self, position: Vec3) {
-        let (_, rotation, _) = self.get_pivot().to_scale_rotation_translation();
-        self.pivot_to(Mat4::from_rotation_translation(rotation, position));
-    }
-
-    /// Returns this part's Euler orientation in degrees.
-    pub fn orientation(&self) -> Vec3 {
-        let (_, rotation, _) = self.get_pivot().to_scale_rotation_translation();
-        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
-        Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
-    }
-
-    /// Changes this part's Euler orientation in degrees while preserving its position.
-    pub fn set_orientation(&mut self, orientation: Vec3) {
-        self.pivot_to(Mat4::from_rotation_translation(
-            Quat::from_euler(
-                EulerRot::XYZ,
-                orientation.x.to_radians(),
-                orientation.y.to_radians(),
-                orientation.z.to_radians(),
-            ),
-            self.position(),
-        ));
-    }
-}
-
-impl PVInstance for Part {
-    fn get_pivot(&self) -> Mat4 {
-        self.pivot
-    }
-
-    fn pivot_to(&mut self, pivot: Mat4) {
-        self.pivot = pivot;
+    /// Assigns a material to a mesh-selected slot.
+    pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
+        if slot == MaterialSlot::Base {
+            self.material = material;
+        } else {
+            self.material_slots.set(slot, material);
+        }
     }
 }
 
 pub trait Transform {
-    /// Returns the 4x4 model transform matrix for this object.
+    /// Returns the 4x4 transform matrix for this object:
+    /// ```text
+    /// [s_x, 0,   0,   x]
+    /// [0,   s_y, 0,   y]
+    /// [0,   0,   s_z, z]
+    /// [0,   0,   0,   1]
+    /// ```
     fn transform(&self) -> Mat4;
 }
 
 impl Transform for Part {
     fn transform(&self) -> Mat4 {
-        self.get_pivot() * Mat4::from_scale(self.size)
+        self.pv.pivot() * Mat4::from_scale(self.size)
     }
 }
 
-/// Stable handle for a part in a [`Workspace`].
+/// Stable identifier for an [`Instance`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct PartId(usize);
+pub struct InstanceId(usize);
 
 /// The 3D container that owns all renderable [`Part`] instances and its active camera.
 #[derive(Clone, Debug, Default)]
 pub struct Workspace {
-    parts: Vec<Part>,
+    children: Vec<Part>,
     /// The camera used when this workspace is rendered.
     pub current_camera: Camera,
+    camera_controller: CameraController,
 }
 
 impl Workspace {
@@ -562,7 +933,7 @@ impl Workspace {
     }
 
     /// Creates and parents a new Part to this workspace.
-    pub fn create_part(&mut self, name: impl Into<String>) -> PartId {
+    pub fn create_part(&mut self, name: impl Into<String>) -> InstanceId {
         self.add_part(Part::new(name))
     }
 
@@ -570,249 +941,110 @@ impl Workspace {
         &mut self,
         name: impl Into<String>,
         configure: impl FnOnce(&mut Part),
-    ) -> PartId {
+    ) -> InstanceId {
         let mut part = Part::new(name);
         configure(&mut part);
         self.add_part(part)
     }
 
-    pub fn add_part(&mut self, part: Part) -> PartId {
-        let id = PartId(self.parts.len());
-        self.parts.push(part);
+    pub fn add_part(&mut self, part: Part) -> InstanceId {
+        let id = InstanceId(self.children.len());
+        self.children.push(part);
         id
     }
 
-    pub fn add_parts<I>(&mut self, parts: I) -> Vec<PartId>
+    pub fn add_parts<I>(&mut self, parts: I) -> Vec<InstanceId>
     where
         I: IntoIterator<Item = Part>,
     {
         parts.into_iter().map(|part| self.add_part(part)).collect()
     }
 
-    pub fn part(&self, id: PartId) -> Option<&Part> {
-        self.parts.get(id.0)
+    pub fn part(&self, id: InstanceId) -> Option<&Part> {
+        self.children.get(id.0)
     }
 
-    pub fn part_mut(&mut self, id: PartId) -> Option<&mut Part> {
-        self.parts.get_mut(id.0)
+    pub fn part_mut(&mut self, id: InstanceId) -> Option<&mut Part> {
+        self.children.get_mut(id.0)
     }
 
-    pub fn find_first(&self, name: &str) -> Option<(PartId, &Part)> {
-        self.parts
-            .iter()
+    pub fn find_first_child(&mut self, name: &str) -> Option<(InstanceId, &mut Part)> {
+        self.children
+            .iter_mut()
             .position(|part| part.name == name)
-            .map(|index| (PartId(index), &self.parts[index]))
+            .map(|index| (InstanceId(index), &mut self.children[index]))
     }
 
     pub fn parts(&self) -> &[Part] {
-        &self.parts
-    }
-}
-
-/// A perspective camera with a world-space pivot.
-#[derive(Clone, Debug)]
-pub struct Camera {
-    pivot: Mat4,
-    pub aspect: f32,
-    pub fovy: f32,
-    pub znear: f32,
-    pub zfar: f32,
-}
-
-impl Default for Camera {
-    fn default() -> Self {
-        Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0)
-    }
-}
-
-impl Camera {
-    pub fn new(position: Vec3, target: Vec3, aspect: f32) -> Self {
-        let direction = (target - position).normalize_or_zero();
-        let yaw = direction.x.atan2(-direction.z);
-        let pitch = direction.y.asin();
-        Self {
-            pivot: Mat4::from_rotation_translation(
-                Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
-                position,
-            ),
-            aspect: aspect.max(0.001),
-            fovy: 60.0_f32.to_radians(),
-            znear: 0.1,
-            zfar: 200.0,
-        }
+        &self.children
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) {
-        if height != 0 {
-            self.aspect = width as f32 / height as f32;
-        }
+    pub fn update_camera(&mut self, delta: f32) {
+        self.camera_controller
+            .update_camera(&mut self.current_camera, delta);
     }
 
-    pub fn forward(&self) -> Vec3 {
-        self.get_pivot()
-            .transform_vector3(Vec3::NEG_Z)
-            .normalize_or_zero()
+    pub fn process_device_event(&mut self, event: &winit::event::DeviceEvent) {
+        self.camera_controller.process_device_event(event);
     }
 
-    pub fn view_projection_matrix(&self) -> Mat4 {
-        let view = self.get_pivot().inverse();
-        let projection = glam::camera::rh::proj::directx::perspective(
-            self.fovy,
-            self.aspect,
-            self.znear,
-            self.zfar,
-        );
-        projection * view
+    pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) {
+        self.camera_controller.process_window_event(event);
     }
-}
-
-impl PVInstance for Camera {
-    fn get_pivot(&self) -> Mat4 {
-        self.pivot
-    }
-
-    fn pivot_to(&mut self, pivot: Mat4) {
-        self.pivot = pivot;
-    }
-}
-
-/// First-person keyboard and raw mouse input for a [`Camera`].
-#[derive(Clone, Debug)]
-pub struct CameraController {
-    pub speed: f32,
-    pub sensitivity: f32,
-    forward: bool,
-    backward: bool,
-    left: bool,
-    right: bool,
-    up: bool,
-    down: bool,
-    sprint: bool,
-    mouse_delta: (f32, f32),
-}
-
-impl CameraController {
-    pub fn new(speed: f32, sensitivity: f32) -> Self {
-        Self {
-            speed,
-            sensitivity,
-            forward: false,
-            backward: false,
-            left: false,
-            right: false,
-            up: false,
-            down: false,
-            sprint: false,
-            mouse_delta: (0.0, 0.0),
-        }
-    }
-
-    /// Feeds a winit window event into the controller. Returns true when it was used.
-    pub fn process_window_event(&mut self, event: &WindowEvent) -> bool {
-        let WindowEvent::KeyboardInput { event, .. } = event else {
-            if matches!(event, WindowEvent::Focused(false)) {
-                self.clear_keys();
-            }
-            return false;
-        };
-
-        let PhysicalKey::Code(key) = event.physical_key else {
-            return false;
-        };
-        let pressed = event.state == ElementState::Pressed;
-        match key {
-            KeyCode::KeyW => set_key(&mut self.forward, pressed),
-            KeyCode::KeyS => set_key(&mut self.backward, pressed),
-            KeyCode::KeyA => set_key(&mut self.left, pressed),
-            KeyCode::KeyD => set_key(&mut self.right, pressed),
-            KeyCode::Space => set_key(&mut self.up, pressed),
-            KeyCode::ControlLeft | KeyCode::ControlRight => set_key(&mut self.down, pressed),
-            KeyCode::ShiftLeft | KeyCode::ShiftRight => set_key(&mut self.sprint, pressed),
-            _ => false,
-        }
-    }
-
-    /// Feeds raw device events into the controller for mouse-look.
-    pub fn process_device_event(&mut self, event: &DeviceEvent) {
-        if let DeviceEvent::MouseMotion { delta } = event {
-            self.mouse_delta.0 += delta.0 as f32;
-            self.mouse_delta.1 += delta.1 as f32;
-        }
-    }
-
-    pub fn update_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
-        let delta_seconds = delta_seconds.min(0.1);
-        let forward = camera.forward();
-        let right = forward.cross(Vec3::Y).normalize_or_zero();
-        let horizontal_forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-        let mut movement = Vec3::ZERO;
-        if self.forward {
-            movement += horizontal_forward;
-        }
-        if self.backward {
-            movement -= horizontal_forward;
-        }
-        if self.right {
-            movement += right;
-        }
-        if self.left {
-            movement -= right;
-        }
-        if self.up {
-            movement += Vec3::Y;
-        }
-        if self.down {
-            movement -= Vec3::Y;
-        }
-
-        if movement.length_squared() > 0.0 {
-            let speed = self.speed * if self.sprint { 2.5 } else { 1.0 };
-            camera.pivot_to(
-                Mat4::from_translation(movement.normalize() * speed * delta_seconds)
-                    * camera.get_pivot(),
-            );
-        }
-
-        let yaw_delta = -self.mouse_delta.0 * self.sensitivity;
-        let current_pitch = camera.forward().y.asin();
-        let target_pitch = (current_pitch - self.mouse_delta.1 * self.sensitivity)
-            .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
-        let mut pivot = camera.get_pivot();
-        if yaw_delta != 0.0 {
-            let (_, rotation, position) = pivot.to_scale_rotation_translation();
-            pivot = Mat4::from_rotation_translation(
-                Quat::from_rotation_y(yaw_delta) * rotation,
-                position,
-            );
-        }
-        if target_pitch != current_pitch {
-            pivot *= Mat4::from_rotation_x(target_pitch - current_pitch);
-        }
-        camera.pivot_to(pivot);
-        self.mouse_delta = (0.0, 0.0);
-    }
-
-    fn clear_keys(&mut self) {
-        self.forward = false;
-        self.backward = false;
-        self.left = false;
-        self.right = false;
-        self.up = false;
-        self.down = false;
-        self.sprint = false;
-        self.mouse_delta = (0.0, 0.0);
-    }
-}
-
-fn set_key(key: &mut bool, pressed: bool) -> bool {
-    *key = pressed;
-    true
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct CameraUniform {
-    view_projection: [[f32; 4]; 4],
+struct InstanceRaw {
+    model: [[f32; 4]; 4],
+    normal_0: [f32; 4],
+    normal_1: [f32; 4],
+    normal_2: [f32; 4],
+    base_color: [f32; 4],
+    metallic_roughness: [f32; 4],
+    emissive: [f32; 4],
+}
+
+impl InstanceRaw {
+    fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+            6 => Float32x4,
+            7 => Float32x4,
+            8 => Float32x4,
+            9 => Float32x4,
+            10 => Float32x4,
+            11 => Float32x4,
+            12 => Float32x4,
+            13 => Float32x4,
+            14 => Float32x4,
+            15 => Float32x4,
+        ];
+
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: ATTRIBUTES,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct MaterialTextures {
+    base_color: [TextureHandle; MATERIAL_SLOT_COUNT],
+    normal: [TextureHandle; MATERIAL_SLOT_COUNT],
+    metallic_roughness: [TextureHandle; MATERIAL_SLOT_COUNT],
+}
+
+struct RenderBatch {
+    shape: PartShape,
+    textures: MaterialTextures,
+    instances: Vec<InstanceRaw>,
+    instance_start: usize,
+}
+
+struct GpuTexture {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
 }
 
 struct GpuMesh {
@@ -821,7 +1053,7 @@ struct GpuMesh {
     index_count: u32,
 }
 
-/// The wgpu state and built-in colored mesh pipeline.
+/// The wgpu state and built-in PBR mesh pipeline.
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -832,6 +1064,10 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    material_bind_group_layout: wgpu::BindGroupLayout,
+    material_sampler: wgpu::Sampler,
+    textures: Vec<GpuTexture>,
+    default_material_textures: MaterialTextures,
     instance_buffer: wgpu::Buffer,
     instance_data: Vec<InstanceRaw>,
     meshes: Vec<GpuMesh>,
@@ -931,7 +1167,7 @@ impl Renderer {
                 label: Some("camera bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -948,17 +1184,71 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let mut material_bind_group_entries = Vec::with_capacity(MATERIAL_SLOT_COUNT * 3 + 1);
+        for binding in 0..(MATERIAL_SLOT_COUNT * 3) {
+            material_bind_group_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: binding as u32,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            });
+        }
+        material_bind_group_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: (MATERIAL_SLOT_COUNT * 3) as u32,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        });
+        let material_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("material bind group layout"),
+                entries: &material_bind_group_entries,
+            });
+        let material_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("material sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 0.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+        let default_base_color = Texture::new(1, 1, vec![255, 255, 255, 255])?;
+        let default_normal = Texture::linear(1, 1, vec![128, 128, 255, 255])?;
+        let default_metallic_roughness = Texture::linear(1, 1, vec![0, 255, 0, 255])?;
+        let textures = vec![
+            upload_texture(&device, &queue, &default_base_color),
+            upload_texture(&device, &queue, &default_normal),
+            upload_texture(&device, &queue, &default_metallic_roughness),
+        ];
+        let default_material_textures = MaterialTextures {
+            base_color: [TextureHandle(0); MATERIAL_SLOT_COUNT],
+            normal: [TextureHandle(1); MATERIAL_SLOT_COUNT],
+            metallic_roughness: [TextureHandle(2); MATERIAL_SLOT_COUNT],
+        };
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("colored mesh shader"),
+            label: Some("PBR mesh shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh pipeline layout"),
-            bind_group_layouts: &[Some(&camera_bind_group_layout)],
+            bind_group_layouts: &[
+                Some(&camera_bind_group_layout),
+                Some(&material_bind_group_layout),
+            ],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("colored mesh pipeline"),
+            label: Some("PBR mesh pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -1007,6 +1297,10 @@ impl Renderer {
             pipeline,
             camera_buffer,
             camera_bind_group,
+            material_bind_group_layout,
+            material_sampler,
+            textures,
+            default_material_textures,
             instance_buffer,
             instance_data: Vec::new(),
             meshes: Vec::new(),
@@ -1072,8 +1366,6 @@ impl Renderer {
     }
 
     /// Uploads a custom mesh and returns its GPU handle.
-    ///
-    /// Regular [`Part`] instances use the built-in box mesh automatically.
     pub fn add_mesh(&mut self, mesh: &Mesh) -> Result<MeshHandle, RendererError> {
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Err(RendererError::EmptyMesh);
@@ -1105,6 +1397,91 @@ impl Renderer {
             index_count: mesh.indices.len() as u32,
         });
         Ok(handle)
+    }
+
+    /// Uploads a single-mip RGBA8 texture and returns its GPU handle.
+    ///
+    /// Mipmap generation is intentionally not performed yet. Use sRGB data for
+    /// base-color textures and linear data for normal or metallic-roughness maps.
+    pub fn add_texture(&mut self, texture: &Texture) -> Result<TextureHandle, RendererError> {
+        texture.validate()?;
+        let handle = TextureHandle(self.textures.len());
+        self.textures
+            .push(upload_texture(&self.device, &self.queue, texture));
+        Ok(handle)
+    }
+
+    fn material_textures(
+        &self,
+        material: &Material,
+        material_slots: &MeshMaterialSlots,
+    ) -> MaterialTextures {
+        let resolve = |handle: Option<TextureHandle>, fallback: TextureHandle| {
+            handle
+                .filter(|handle| self.textures.get(handle.0).is_some())
+                .unwrap_or(fallback)
+        };
+        let base_color = resolve(
+            material.textures.base_color,
+            self.default_material_textures.base_color[0],
+        );
+        let normal = resolve(
+            material.textures.normal,
+            self.default_material_textures.normal[0],
+        );
+        let metallic_roughness = resolve(
+            material.textures.metallic_roughness,
+            self.default_material_textures.metallic_roughness[0],
+        );
+        let mut textures = MaterialTextures {
+            base_color: [base_color; MATERIAL_SLOT_COUNT],
+            normal: [normal; MATERIAL_SLOT_COUNT],
+            metallic_roughness: [metallic_roughness; MATERIAL_SLOT_COUNT],
+        };
+        for (slot, material) in material_slots
+            .slots
+            .iter()
+            .take(MATERIAL_SLOT_COUNT - 1)
+            .enumerate()
+        {
+            let slot = slot + 1;
+            textures.base_color[slot] = resolve(material.textures.base_color, base_color);
+            textures.normal[slot] = resolve(material.textures.normal, normal);
+            textures.metallic_roughness[slot] =
+                resolve(material.textures.metallic_roughness, metallic_roughness);
+        }
+        textures
+    }
+
+    fn create_material_bind_group(&self, textures: MaterialTextures) -> wgpu::BindGroup {
+        let mut entries = Vec::with_capacity(MATERIAL_SLOT_COUNT * 3 + 1);
+        for (slot, texture) in textures.base_color.into_iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: slot as u32,
+                resource: wgpu::BindingResource::TextureView(&self.textures[texture.0].view),
+            });
+        }
+        for (slot, texture) in textures.normal.into_iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: (MATERIAL_SLOT_COUNT + slot) as u32,
+                resource: wgpu::BindingResource::TextureView(&self.textures[texture.0].view),
+            });
+        }
+        for (slot, texture) in textures.metallic_roughness.into_iter().enumerate() {
+            entries.push(wgpu::BindGroupEntry {
+                binding: (MATERIAL_SLOT_COUNT * 2 + slot) as u32,
+                resource: wgpu::BindingResource::TextureView(&self.textures[texture.0].view),
+            });
+        }
+        entries.push(wgpu::BindGroupEntry {
+            binding: (MATERIAL_SLOT_COUNT * 3) as u32,
+            resource: wgpu::BindingResource::Sampler(&self.material_sampler),
+        });
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("material bind group"),
+            layout: &self.material_bind_group_layout,
+            entries: &entries,
+        })
     }
 
     fn ensure_instance_capacity(&mut self, instance_count: usize) {
@@ -1145,42 +1522,102 @@ impl Renderer {
                 .current_camera
                 .view_projection_matrix()
                 .to_cols_array_2d(),
+            camera_position: workspace
+                .current_camera
+                .pv
+                .pivot()
+                .w_axis
+                .truncate()
+                .extend(1.0)
+                .to_array(),
+            light_direction: [-0.45, 0.85, 0.35, 0.0],
+            light_color: [3.0, 2.8, 2.5, 0.0],
+            ambient_color: [0.035, 0.045, 0.06, 0.0],
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
         let parts = workspace.parts();
-        let mut shape_counts = [0usize; PartShape::COUNT];
+        let mut batches = Vec::<RenderBatch>::new();
+        let mut batch_indices = HashMap::new();
         for part in parts {
-            shape_counts[part.shape.index()] += 1;
-        }
-
-        let mut shape_offsets = [0usize; PartShape::COUNT];
-        let mut instance_count = 0;
-        for (offset, count) in shape_offsets.iter_mut().zip(shape_counts) {
-            *offset = instance_count;
-            instance_count += count;
-        }
-
-        self.ensure_instance_capacity(instance_count);
-        self.instance_data.clear();
-        self.instance_data
-            .resize(instance_count, InstanceRaw::zeroed());
-        let mut next_offsets = shape_offsets;
-        for part in parts {
-            let shape_index = part.shape.index();
-            self.instance_data[next_offsets[shape_index]] = InstanceRaw {
-                model: part.transform().to_cols_array_2d(),
-                color: part.color.rgba(),
+            let textures = self.material_textures(&part.material, &part.material_slots);
+            let key = (part.shape, textures);
+            let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
+                batch_index
+            } else {
+                let batch_index = batches.len();
+                batch_indices.insert(key, batch_index);
+                batches.push(RenderBatch {
+                    shape: part.shape,
+                    textures,
+                    instances: Vec::new(),
+                    instance_start: 0,
+                });
+                batch_index
             };
-            next_offsets[shape_index] += 1;
+            let model = part.transform();
+            let normal_matrix = model.inverse().transpose().to_cols_array_2d();
+            let material = part.material;
+            let tint = part.color.rgba();
+            batches[batch_index].instances.push(InstanceRaw {
+                model: model.to_cols_array_2d(),
+                normal_0: [
+                    normal_matrix[0][0],
+                    normal_matrix[0][1],
+                    normal_matrix[0][2],
+                    0.0,
+                ],
+                normal_1: [
+                    normal_matrix[1][0],
+                    normal_matrix[1][1],
+                    normal_matrix[1][2],
+                    0.0,
+                ],
+                normal_2: [
+                    normal_matrix[2][0],
+                    normal_matrix[2][1],
+                    normal_matrix[2][2],
+                    0.0,
+                ],
+                base_color: [
+                    material.base_color[0] * tint[0],
+                    material.base_color[1] * tint[1],
+                    material.base_color[2] * tint[2],
+                    material.base_color[3] * tint[3],
+                ],
+                metallic_roughness: [
+                    material.metallic.clamp(0.0, 1.0),
+                    material.roughness.clamp(0.04, 1.0),
+                    0.0,
+                    0.0,
+                ],
+                emissive: [
+                    material.emissive[0],
+                    material.emissive[1],
+                    material.emissive[2],
+                    0.0,
+                ],
+            });
         }
-        if instance_count != 0 {
+
+        self.instance_data.clear();
+        for batch in &mut batches {
+            batch.instance_start = self.instance_data.len();
+            self.instance_data.extend_from_slice(&batch.instances);
+        }
+        self.ensure_instance_capacity(self.instance_data.len());
+        if !self.instance_data.is_empty() {
             self.queue.write_buffer(
                 &self.instance_buffer,
                 0,
                 bytemuck::cast_slice(&self.instance_data),
             );
         }
+
+        let material_bind_groups = batches
+            .iter()
+            .map(|batch| self.create_material_bind_group(batch.textures))
+            .collect::<Vec<_>>();
 
         let view = frame
             .texture
@@ -1218,24 +1655,23 @@ impl Renderer {
             });
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            for shape in PartShape::ALL {
-                let shape_index = shape.index();
-                let instance_count = shape_counts[shape_index];
-                if instance_count == 0 {
+            for (batch, material_bind_group) in batches.iter().zip(&material_bind_groups) {
+                if batch.instances.is_empty() {
                     continue;
                 }
-                let mesh_handle = self.primitive_meshes[shape_index];
+                let mesh_handle = self.primitive_meshes[batch.shape.index()];
                 let Some(mesh) = self.meshes.get(mesh_handle.0) else {
                     continue;
                 };
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                 let instance_start =
-                    shape_offsets[shape_index] as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+                    batch.instance_start as u64 * std::mem::size_of::<InstanceRaw>() as u64;
                 let instance_end = instance_start
-                    + instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+                    + batch.instances.len() as u64 * std::mem::size_of::<InstanceRaw>() as u64;
                 pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
-                pass.draw_indexed(0..mesh.index_count, 0, 0..instance_count as u32);
+                pass.set_bind_group(1, material_bind_group, &[]);
+                pass.draw_indexed(0..mesh.index_count, 0, 0..batch.instances.len() as u32);
             }
         }
         self.queue.submit(Some(encoder.finish()));
@@ -1248,6 +1684,52 @@ impl Renderer {
             self.fps_timer = Instant::now();
         }
         Ok(())
+    }
+}
+
+fn upload_texture(device: &wgpu::Device, queue: &wgpu::Queue, texture: &Texture) -> GpuTexture {
+    let format = match texture.color_space {
+        TextureColorSpace::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+        TextureColorSpace::Linear => wgpu::TextureFormat::Rgba8Unorm,
+    };
+    let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("material texture"),
+        size: wgpu::Extent3d {
+            width: texture.width,
+            height: texture.height,
+            depth_or_array_layers: 1,
+        },
+        // Mipmaps are deliberately deferred; every material texture has one level for now.
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &gpu_texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &texture.pixels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(texture.width * 4),
+            rows_per_image: Some(texture.height),
+        },
+        wgpu::Extent3d {
+            width: texture.width,
+            height: texture.height,
+            depth_or_array_layers: 1,
+        },
+    );
+    let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
+    GpuTexture {
+        _texture: gpu_texture,
+        view,
     }
 }
 
@@ -1278,53 +1760,112 @@ mod tests {
     use super::*;
 
     #[test]
-    fn workspace_has_a_current_camera_by_default() {
-        let workspace = Workspace::new();
-
-        assert_eq!(
-            workspace.current_camera.get_pivot().w_axis.truncate(),
-            Vec3::new(0.0, 1.0, 5.0)
-        );
-        assert_eq!(workspace.current_camera.aspect, 1.0);
-    }
-
-    #[test]
-    fn part_and_camera_are_pv_instances() {
-        let pivot =
-            Mat4::from_rotation_translation(Quat::from_rotation_y(0.5), Vec3::new(1.0, 2.0, 3.0));
-        let mut part = Part::new("part");
-        let mut camera = Camera::default();
-
-        part.pivot_to(pivot);
-        camera.pivot_to(pivot);
-
-        assert_eq!(part.get_pivot(), pivot);
-        assert_eq!(camera.get_pivot(), pivot);
-    }
-
-    #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {
         let position = Vec3::new(1.0, 2.0, 3.0);
         let orientation = Vec3::new(10.0, 20.0, 30.0);
         let mut part = Part::new("part");
 
-        part.set_position(position);
-        part.set_orientation(orientation);
+        part.pv.set_position(position);
+        part.pv.set_orientation(orientation);
 
-        assert_eq!(part.position(), position);
-        assert!((part.orientation() - orientation).abs().max_element() < 0.0001);
+        assert_eq!(part.pv.position(), position);
+        assert!((part.pv.orientation() - orientation).abs().max_element() < 0.0001);
     }
 
     #[test]
     fn camera_mouse_look_rotates_in_place_with_the_expected_horizontal_sign() {
         let mut camera = Camera::default();
-        let original_position = camera.get_pivot().w_axis.truncate();
+        let original_position = camera.pv.pivot().w_axis.truncate();
         let mut controller = CameraController::new(6.0, 0.1);
         controller.mouse_delta = (1.0, 0.0);
 
         controller.update_camera(&mut camera, 1.0 / 60.0);
 
-        assert_eq!(camera.get_pivot().w_axis.truncate(), original_position);
-        assert!(camera.forward().x > 0.0);
+        assert_eq!(camera.pv.pivot().w_axis.truncate(), original_position);
+        assert!(camera.pv.forward().x > 0.0);
+    }
+
+    #[test]
+    fn primitive_meshes_have_valid_tangent_space_attributes() {
+        let meshes = [
+            Mesh::block(1.0, [1.0; 4]),
+            Mesh::ball(1.0, 4, 8, [1.0; 4]),
+            Mesh::cylinder(1.0, 1.0, 8, [1.0; 4]),
+            Mesh::wedge([1.0; 4]),
+            Mesh::corner_wedge([1.0; 4]),
+            Mesh::plane(1.0, [1.0; 4]),
+        ];
+
+        for mesh in meshes {
+            assert!(!mesh.vertices.is_empty());
+            for vertex in mesh.vertices {
+                let normal = Vec3::from_array(vertex.normal);
+                let tangent = Vec3::from_array(vertex.tangent[..3].try_into().unwrap());
+                assert!((normal.length() - 1.0).abs() < 0.0001);
+                assert!((tangent.length() - 1.0).abs() < 0.0001);
+                assert!(normal.dot(tangent).abs() < 0.0001);
+                assert!(vertex.uv.iter().all(|coordinate| coordinate.is_finite()));
+                assert!(vertex.tangent[3] == 1.0 || vertex.tangent[3] == -1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn textures_validate_rgba8_data_and_material_defaults_are_rough_dielectrics() {
+        assert!(matches!(
+            Texture::new(2, 2, vec![0; 3]),
+            Err(TextureError::InvalidData {
+                actual: 3,
+                expected: 16
+            })
+        ));
+        let texture = Texture::linear(1, 1, vec![128, 128, 255, 255]).unwrap();
+        assert_eq!(texture.color_space, TextureColorSpace::Linear);
+
+        let material = Material::default();
+        assert_eq!(material.base_color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(material.metallic, 0.0);
+        assert_eq!(material.roughness, 0.5);
+        assert!(material.textures.base_color.is_none());
+        assert!(material.textures.normal.is_none());
+        assert!(material.textures.metallic_roughness.is_none());
+    }
+
+    #[test]
+    fn block_mesh_uses_named_material_slots() {
+        let mesh = Mesh::block(1.0, [1.0; 4]);
+
+        assert!(
+            mesh.vertices[0..4]
+                .iter()
+                .all(|vertex| vertex.material_slot == MaterialSlot::Side as u32)
+        );
+        assert!(
+            mesh.vertices[8..12]
+                .iter()
+                .all(|vertex| vertex.material_slot == MaterialSlot::Top as u32)
+        );
+        assert!(
+            mesh.vertices[12..16]
+                .iter()
+                .all(|vertex| vertex.material_slot == MaterialSlot::Bottom as u32)
+        );
+    }
+
+    #[test]
+    fn material_helpers_configure_a_texture_set() {
+        let texture = TextureHandle(7);
+        let material = Material::textured(texture)
+            .with_normal_texture(TextureHandle(8))
+            .with_metallic_roughness_texture(TextureHandle(9));
+
+        assert_eq!(
+            material.textures,
+            TextureSet {
+                base_color: Some(texture),
+                normal: Some(TextureHandle(8)),
+                metallic_roughness: Some(TextureHandle(9)),
+            }
+        );
     }
 }

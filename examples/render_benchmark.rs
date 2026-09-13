@@ -8,9 +8,7 @@ use std::{
 };
 
 use glam::{EulerRot, Mat4, Quat, Vec3};
-use terrarium::{
-    Camera, Color3, PVInstance, Part, PartId, PartShape, Renderer, RendererError, Workspace,
-};
+use terrarium::{Camera, Color3, InstanceId, Part, PartShape, Renderer, RendererError, Workspace};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -58,7 +56,7 @@ struct App {
     renderer: Option<Renderer>,
     workspace: Workspace,
     base_camera_pivot: Mat4,
-    part_ids: Vec<PartId>,
+    part_ids: Vec<InstanceId>,
     base_parts: Vec<Part>,
     animation_frame: usize,
     animation_pool_start: usize,
@@ -70,7 +68,7 @@ impl App {
     fn new(config: Config) -> Self {
         let (workspace, part_ids) =
             create_benchmark_workspace(config.parts, config.width, config.height);
-        let base_camera_pivot = workspace.current_camera.get_pivot();
+        let base_camera_pivot = workspace.current_camera.pv.pivot();
         let base_parts = workspace.parts().to_vec();
         Self {
             config,
@@ -123,10 +121,14 @@ impl App {
 
     fn animate_parts(&mut self) {
         let part_count = self.part_ids.len();
-        let animated_count =
-            part_count / ANIMATED_PARTS_RATIO + usize::from(part_count % ANIMATED_PARTS_RATIO != 0);
+        let animated_count = part_count / ANIMATED_PARTS_RATIO
+            + usize::from(!part_count.is_multiple_of(ANIMATED_PARTS_RATIO));
 
-        if self.animation_frame != 0 && self.animation_frame % ANIMATION_POOL_CHANGE_INTERVAL == 0 {
+        if self.animation_frame != 0
+            && self
+                .animation_frame
+                .is_multiple_of(ANIMATION_POOL_CHANGE_INTERVAL)
+        {
             for offset in 0..animated_count {
                 let index = (self.animation_pool_start + offset) % part_count;
                 self.reset_part(index);
@@ -143,6 +145,7 @@ impl App {
             self.base_camera_pivot.to_scale_rotation_translation();
         self.workspace
             .current_camera
+            .pv
             .pivot_to(Mat4::from_rotation_translation(
                 camera_rotation,
                 camera_position * camera_scale,
@@ -158,7 +161,7 @@ impl App {
 
             if let Some(part) = self.workspace.part_mut(id) {
                 let (_, base_rotation, base_position) =
-                    base.get_pivot().to_scale_rotation_translation();
+                    base.pv.pivot().to_scale_rotation_translation();
                 let position = base_position
                     + Vec3::new(
                         motion.sin() * 0.32,
@@ -172,7 +175,8 @@ impl App {
                         (motion.cos() * 18.0).to_radians(),
                         ((motion * 0.7).sin() * 10.0).to_radians(),
                     );
-                part.pivot_to(Mat4::from_rotation_translation(rotation, position));
+                part.pv
+                    .pivot_to(Mat4::from_rotation_translation(rotation, position));
                 part.size =
                     base.size * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35);
                 part.color = Color3::new(
@@ -189,7 +193,7 @@ impl App {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
         if let Some(part) = self.workspace.part_mut(id) {
-            part.pivot_to(base.get_pivot());
+            part.pv.pivot_to(base.pv.pivot());
             part.size = base.size;
             part.color = base.color;
         }
@@ -278,7 +282,7 @@ fn create_benchmark_workspace(
     part_count: usize,
     width: u32,
     height: u32,
-) -> (Workspace, Vec<PartId>) {
+) -> (Workspace, Vec<InstanceId>) {
     let side = (part_count as f64).sqrt().ceil() as usize;
     let spacing = 1.2;
     let extent = side as f32 * spacing;
@@ -303,7 +307,7 @@ fn create_benchmark_workspace(
             3 => PartShape::Wedge,
             _ => PartShape::CornerWedge,
         };
-        part.pivot_to(Mat4::from_rotation_translation(
+        part.pv.pivot_to(Mat4::from_rotation_translation(
             Quat::from_rotation_y(((index % 360) as f32).to_radians()),
             Vec3::new(
                 (column as f32 - side as f32 * 0.5) * spacing,
@@ -340,7 +344,8 @@ fn print_report(config: Config, samples: &[Sample]) {
     println!("  parts: {}", config.parts);
     println!(
         "  animated parts: {} (25%), pool changes every {} frames",
-        config.parts / ANIMATED_PARTS_RATIO + usize::from(config.parts % ANIMATED_PARTS_RATIO != 0),
+        config.parts / ANIMATED_PARTS_RATIO
+            + usize::from(!config.parts.is_multiple_of(ANIMATED_PARTS_RATIO)),
         ANIMATION_POOL_CHANGE_INTERVAL
     );
     println!("  warmup frames: {}", config.warmup_frames);

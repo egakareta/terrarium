@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use glam::Vec3;
-use terrarium::{CameraController, Color3, PartId, PartShape, Renderer, Workspace};
+use terrarium::{
+    Color3, InstanceId, Material, MaterialSlot, PartShape, Renderer, RendererError, Texture,
+    TextureColorSpace, Workspace,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -16,15 +19,16 @@ struct App {
     renderer: Option<Renderer>,
     workspace: Workspace,
     moving_parts: MovingParts,
-    controller: CameraController,
     animation_time: f32,
     mouse_captured: bool,
 }
 
 struct MovingParts {
-    platform: PartId,
-    tower: PartId,
-    orb: PartId,
+    ground: InstanceId,
+    stone_blocks: Vec<InstanceId>,
+    grass_block: InstanceId,
+    tower: InstanceId,
+    orb: InstanceId,
 }
 
 impl App {
@@ -35,7 +39,6 @@ impl App {
             renderer: None,
             workspace,
             moving_parts,
-            controller: CameraController::new(6.0, 0.0025),
             animation_time: 0.0,
             mouse_captured: false,
         }
@@ -46,28 +49,32 @@ impl App {
             (self.animation_time + delta_seconds.min(0.1)).rem_euclid(std::f32::consts::TAU);
         let time = self.animation_time;
 
-        if let Some(part) = self.workspace.part_mut(self.moving_parts.platform) {
-            part.set_position(Vec3::new(
+        if let Some((_, part)) = self.workspace.find_first_child("PalePlatform") {
+            part.pv.set_position(Vec3::new(
                 -1.0 + time.sin() * 2.2,
                 0.55 + (time * 2.0).sin() * 0.12,
                 1.6,
             ));
-            part.set_orientation(Vec3::new(0.0, time.to_degrees() * 18.0, 0.0));
+            part.pv
+                .set_orientation(Vec3::new(0.0, time.to_degrees() * 18.0, 0.0));
         }
 
         if let Some(part) = self.workspace.part_mut(self.moving_parts.tower) {
-            part.set_position(Vec3::new(-3.4, 1.0 + (time * 1.5).sin() * 0.35, -1.8));
-            part.set_orientation(Vec3::new(0.0, -33.0 + time.to_degrees() * 0.85, 0.0));
+            part.pv
+                .set_position(Vec3::new(-3.4, 1.0 + (time * 1.5).sin() * 0.35, -1.8));
+            part.pv
+                .set_orientation(Vec3::new(0.0, -33.0 + time.to_degrees() * 0.85, 0.0));
         }
 
         if let Some(part) = self.workspace.part_mut(self.moving_parts.orb) {
             let orbit_angle = time * 0.8;
-            part.set_position(Vec3::new(
+            part.pv.set_position(Vec3::new(
                 orbit_angle.cos() * 3.3,
                 2.8 + (time * 1.7).sin() * 0.45,
                 orbit_angle.sin() * 3.3,
             ));
-            part.set_orientation(Vec3::new(0.0, orbit_angle.to_degrees(), 0.0));
+            part.pv
+                .set_orientation(Vec3::new(0.0, orbit_angle.to_degrees(), 0.0));
         }
     }
 
@@ -121,6 +128,13 @@ impl ApplicationHandler for App {
             b: 0.050,
             a: 1.0,
         });
+        if let Err(error) =
+            apply_courtyard_textures(&mut renderer, &mut self.workspace, &self.moving_parts)
+        {
+            eprintln!("courtyard texture setup failed: {error}");
+            event_loop.exit();
+            return;
+        }
 
         self.window = Some(window);
         self.renderer = Some(renderer);
@@ -140,7 +154,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        self.controller.process_window_event(&event);
+        self.workspace.process_window_event(&event);
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -165,8 +179,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 let delta = self.renderer.as_mut().map(|renderer| renderer.delta_secs());
                 if let Some(delta) = delta {
-                    self.controller
-                        .update_camera(&mut self.workspace.current_camera, delta);
+                    self.workspace.update_camera(delta);
                     self.animate_parts(delta);
 
                     if let Some(renderer) = &mut self.renderer {
@@ -191,7 +204,7 @@ impl ApplicationHandler for App {
         event: DeviceEvent,
     ) {
         if self.mouse_captured {
-            self.controller.process_device_event(&event);
+            self.workspace.process_device_event(&event);
         }
     }
 
@@ -204,78 +217,143 @@ impl ApplicationHandler for App {
 
 fn create_workspace() -> (Workspace, MovingParts) {
     let mut workspace = Workspace::new();
-    workspace.create_part_with("Ground", |part| {
+    let ground = workspace.create_part_with("Ground", |part| {
         part.shape = PartShape::Block;
-        part.set_position(Vec3::new(0.0, -0.1, 0.0));
+        part.pv.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
         part.color = Color3::new(0.07, 0.12, 0.13);
     });
+    let mut stone_blocks = Vec::new();
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        workspace.create_part_with("StoneBlock", |part| {
+        let stone_block = workspace.create_part_with("StoneBlock", |part| {
             part.shape = PartShape::Block;
-            part.set_position(Vec3::new(x, 0.22, -4.0));
+            part.pv.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
             part.color = Color3::new(0.29, 0.34, 0.39);
         });
+        stone_blocks.push(stone_block);
     }
 
     let tower = workspace.create_part_with("CopperTower", |part| {
         part.shape = PartShape::Cylinder;
-        part.set_position(Vec3::new(-3.4, 1.0, -1.8));
+        part.pv.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
         part.color = Color3::new(0.76, 0.30, 0.14);
-        part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
+        part.material = Material {
+            metallic: 0.82,
+            roughness: 0.24,
+            ..Material::default()
+        };
+        part.pv.set_orientation(Vec3::new(0.0, -33.0, 0.0));
     });
 
-    workspace.create_part_with("TealBlock", |part| {
+    let teal_block = workspace.create_part_with("TealBlock", |part| {
         part.shape = PartShape::Block;
-        part.set_position(Vec3::new(3.2, 0.8, -2.3));
+        part.pv.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
         part.color = Color3::new(0.10, 0.48, 0.47);
-        part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
+        part.pv.set_orientation(Vec3::new(0.0, 31.0, 0.0));
     });
 
-    let platform = workspace.create_part_with("PalePlatform", |part| {
+    workspace.create_part_with("PalePlatform", |part| {
         part.shape = PartShape::Block;
-        part.set_position(Vec3::new(-1.0, 0.55, 1.6));
+        part.pv.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
         part.color = Color3::new(0.60, 0.68, 0.50);
     });
 
     let orb = workspace.create_part_with("OrbitingOrb", |part| {
         part.shape = PartShape::Ball;
-        part.set_position(Vec3::new(3.3, 2.8, 0.0));
+        part.pv.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
         part.color = Color3::new(0.95, 0.72, 0.22);
+        part.material.roughness = 0.18;
         part.can_collide = false;
     });
 
     workspace.create_part_with("CopperPillar", |part| {
         part.shape = PartShape::Wedge;
-        part.set_position(Vec3::new(2.7, 1.5, 2.2));
+        part.pv.set_position(Vec3::new(2.7, 1.5, 2.2));
         part.size = Vec3::new(1.1, 3.0, 1.1);
         part.color = Color3::new(0.76, 0.30, 0.14);
-        part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
+        part.pv.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
     workspace.create_part_with("TealMonolith", |part| {
         part.shape = PartShape::CornerWedge;
-        part.set_position(Vec3::new(-4.7, 0.6, 3.1));
+        part.pv.set_position(Vec3::new(-4.7, 0.6, 3.1));
         part.size = Vec3::new(1.8, 1.2, 1.8);
         part.color = Color3::new(0.10, 0.48, 0.47);
-        part.set_orientation(Vec3::new(0.0, -46.0, 0.0));
+        part.pv.set_orientation(Vec3::new(0.0, -46.0, 0.0));
     });
 
     (
         workspace,
         MovingParts {
-            platform,
+            ground,
+            stone_blocks,
+            grass_block: teal_block,
             tower,
             orb,
         },
     )
+}
+
+fn apply_courtyard_textures(
+    renderer: &mut Renderer,
+    workspace: &mut Workspace,
+    moving_parts: &MovingParts,
+) -> Result<(), RendererError> {
+    let dirt = renderer.add_texture(&Texture::from_bytes(
+        include_bytes!("../assets/dirt.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let cobblestone = renderer.add_texture(&Texture::from_bytes(
+        include_bytes!("../assets/cobblestone.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let grass_top = renderer.add_texture(&Texture::from_bytes(
+        include_bytes!("../assets/grass_top.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let grass_side = renderer.add_texture(&Texture::from_bytes(
+        include_bytes!("../assets/grass_side.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let festival_lantern = renderer.add_texture(&Texture::from_bytes(
+        include_bytes!("../assets/festival_lantern.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+
+    let set_material = |workspace: &mut Workspace, part_id: InstanceId, material: Material| {
+        if let Some(part) = workspace.part_mut(part_id) {
+            part.color = Color3::WHITE;
+            part.material = material;
+            part.material.roughness = 0.82;
+        }
+    };
+    set_material(workspace, moving_parts.ground, Material::textured(dirt));
+    for &part_id in &moving_parts.stone_blocks {
+        set_material(workspace, part_id, Material::textured(cobblestone));
+    }
+
+    if let Some(part) = workspace.part_mut(moving_parts.grass_block) {
+        part.color = Color3::WHITE;
+        part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
+        part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
+        part.set_material_slot(MaterialSlot::Side, Material::textured(grass_side));
+        part.material.roughness = 0.82;
+    }
+
+    if let Some((_, part)) = workspace.find_first_child("PalePlatform") {
+        part.color = Color3::WHITE;
+        part.material = Material::textured(festival_lantern);
+        part.material.roughness = 0.82;
+    }
+    Ok(())
 }
 
 fn main() {
