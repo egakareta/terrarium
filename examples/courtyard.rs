@@ -212,7 +212,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        let stone_block = workspace.add_child_with(Part::new("StoneBlock"), |part| {
+        let stone_block = workspace.add_child_with(Part::unnamed(), |part| {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
