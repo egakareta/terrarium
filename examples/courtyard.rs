@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use glam::Vec3;
 use terrarium::{
-    Color3, InstanceId, Material, MaterialSlot, PartShape, Renderer, RendererError, Texture,
+    Color3, InstanceId, Material, MaterialSlot, Part, PartShape, Renderer, RendererError, Texture,
     TextureColorSpace, Workspace,
 };
 use winit::{
@@ -58,12 +58,12 @@ impl App {
             part.set_orientation(Vec3::new(0.0, time.to_degrees() * 18.0, 0.0));
         }
 
-        if let Some(part) = self.workspace.part_mut(self.moving_parts.tower) {
+        if let Some(part) = self.workspace.get_mut::<Part>(self.moving_parts.tower) {
             part.set_position(Vec3::new(-3.4, 1.0 + (time * 1.5).sin() * 0.35, -1.8));
             part.set_orientation(Vec3::new(0.0, -33.0 + time.to_degrees() * 0.85, 0.0));
         }
 
-        if let Some(part) = self.workspace.part_mut(self.moving_parts.orb) {
+        if let Some(part) = self.workspace.get_mut::<Part>(self.moving_parts.orb) {
             let orbit_angle = time * 0.8;
             part.set_position(Vec3::new(
                 orbit_angle.cos() * 3.3,
@@ -213,7 +213,7 @@ impl ApplicationHandler for App {
 
 fn create_workspace() -> (Workspace, MovingParts) {
     let mut workspace = Workspace::new();
-    let ground = workspace.create_part_with("Ground", |part| {
+    let ground = workspace.add_child_with(Part::new("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
@@ -223,7 +223,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        let stone_block = workspace.create_part_with("StoneBlock", |part| {
+        let stone_block = workspace.add_child_with(Part::new("StoneBlock"), |part| {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
@@ -232,7 +232,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
         stone_blocks.push(stone_block);
     }
 
-    let tower = workspace.create_part_with("CopperTower", |part| {
+    let tower = workspace.add_child_with(Part::new("CopperTower"), |part| {
         part.shape = PartShape::Cylinder;
         part.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
@@ -245,7 +245,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
     });
 
-    let teal_block = workspace.create_part_with("TealBlock", |part| {
+    let teal_block = workspace.add_child_with(Part::new("TealBlock"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
@@ -253,14 +253,14 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
     });
 
-    workspace.create_part_with("PalePlatform", |part| {
+    workspace.add_child_with(Part::new("PalePlatform"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
         part.color = Color3::new(0.60, 0.68, 0.50);
     });
 
-    let orb = workspace.create_part_with("OrbitingOrb", |part| {
+    let orb = workspace.add_child_with(Part::new("OrbitingOrb"), |part| {
         part.shape = PartShape::Ball;
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
@@ -269,7 +269,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.can_collide = false;
     });
 
-    workspace.create_part_with("CopperPillar", |part| {
+    workspace.add_child_with(Part::new("CopperPillar"), |part| {
         part.shape = PartShape::Wedge;
         part.set_position(Vec3::new(2.7, 1.5, 2.2));
         part.size = Vec3::new(1.1, 3.0, 1.1);
@@ -277,7 +277,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
         part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
-    workspace.create_part_with("TealMonolith", |part| {
+    workspace.add_child_with(Part::new("TealMonolith"), |part| {
         part.shape = PartShape::CornerWedge;
         part.set_position(Vec3::new(-4.7, 0.6, 3.1));
         part.size = Vec3::new(1.8, 1.2, 1.8);
@@ -324,7 +324,7 @@ fn apply_courtyard_textures(
     )?)?;
 
     let set_material = |workspace: &mut Workspace, part_id: InstanceId, material: Material| {
-        if let Some(part) = workspace.part_mut(part_id) {
+        if let Some(part) = workspace.get_mut::<Part>(part_id) {
             part.color = Color3::WHITE;
             part.material = material;
             part.material.roughness = 0.82;
@@ -335,7 +335,7 @@ fn apply_courtyard_textures(
         set_material(workspace, part_id, Material::textured(cobblestone));
     }
 
-    if let Some(part) = workspace.part_mut(moving_parts.grass_block) {
+    if let Some(part) = workspace.get_mut::<Part>(moving_parts.grass_block) {
         part.color = Color3::WHITE;
         part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
         part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));

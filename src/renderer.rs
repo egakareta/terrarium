@@ -8,7 +8,7 @@ use winit::window::Window;
 
 use crate::{
     CameraUniform, DEPTH_FORMAT, MATERIAL_SLOT_COUNT, Material, MaterialTextures, Mesh,
-    MeshMaterialSlots, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
+    MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
     Transform, Vertex, Workspace,
 };
 
@@ -573,7 +573,7 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
-        let parts = workspace.parts();
+        let parts = workspace.get_all::<Part>();
         let mut batches = Vec::<RenderBatch>::new();
         let mut batch_indices = HashMap::new();
         for part in parts {

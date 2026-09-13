@@ -46,6 +46,8 @@ impl Part {
     }
 }
 
+crate::impl_instance!(Part, class_name = "Part", data = basepart.instance,);
+
 impl Deref for Part {
     type Target = BasePart;
     fn deref(&self) -> &Self::Target {
@@ -59,14 +61,10 @@ impl DerefMut for Part {
     }
 }
 
-/// Stable identifier for an [`Instance`].
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct InstanceId(usize);
-
-/// The 3D container that owns all renderable [`Part`] instances and its active camera.
-#[derive(Clone, Debug, Default)]
+/// The 3D root that owns its child [`Instance`] values and its active camera.
+#[derive(Clone, Debug)]
 pub struct Workspace {
-    children: Vec<Part>,
+    instance: InstanceData,
     /// The camera used when this workspace is rendered.
     pub current_camera: Camera,
     camera_controller: CameraController,
@@ -74,7 +72,11 @@ pub struct Workspace {
 
 impl Workspace {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            instance: InstanceData::new("Workspace"),
+            current_camera: Camera::default(),
+            camera_controller: CameraController::default(),
+        }
     }
 
     /// Creates and parents a new Part to this workspace.
@@ -87,15 +89,19 @@ impl Workspace {
         name: impl Into<String>,
         configure: impl FnOnce(&mut Part),
     ) -> InstanceId {
-        let mut part = Part::new(name);
-        configure(&mut part);
-        self.add_part(part)
+        self.add_child_with(Part::new(name), configure)
     }
 
     pub fn add_part(&mut self, part: Part) -> InstanceId {
-        let id = InstanceId(self.children.len());
-        self.children.push(part);
-        id
+        self.add_instance(part)
+    }
+
+    /// Takes ownership of any supported [`Instance`] and parents it here.
+    pub fn add_instance<T>(&mut self, instance: T) -> InstanceId
+    where
+        T: Instance,
+    {
+        self.add_child(instance)
     }
 
     pub fn add_parts<I>(&mut self, parts: I) -> Vec<InstanceId>
@@ -105,23 +111,39 @@ impl Workspace {
         parts.into_iter().map(|part| self.add_part(part)).collect()
     }
 
-    pub fn part(&self, id: InstanceId) -> Option<&Part> {
-        self.children.get(id.0)
+    /// Returns a descendant by ID, downcast to its concrete instance type.
+    pub fn get<T: Instance>(&self, id: InstanceId) -> Option<&T> {
+        self.instance(id)?.downcast_ref::<T>()
     }
 
-    pub fn part_mut(&mut self, id: InstanceId) -> Option<&mut Part> {
-        self.children.get_mut(id.0)
+    /// Returns a mutable descendant by ID, downcast to its concrete instance type.
+    pub fn get_mut<T: Instance>(&mut self, id: InstanceId) -> Option<&mut T> {
+        self.instance_mut(id)?.downcast_mut::<T>()
+    }
+
+    /// Returns descendants of the requested concrete instance type in insertion order.
+    pub fn get_all<T: Instance>(&self) -> impl Iterator<Item = &T> {
+        self.descendants()
+            .filter_map(|instance| instance.downcast_ref::<T>())
     }
 
     pub fn find_first_child(&mut self, name: &str) -> Option<(InstanceId, &mut Part)> {
-        self.children
-            .iter_mut()
-            .position(|part| part.name == name)
-            .map(|index| (InstanceId(index), &mut self.children[index]))
+        find_part_mut(self, name)
     }
 
-    pub fn parts(&self) -> &[Part] {
-        &self.children
+    /// Returns every child, preserving its concrete type behind [`Instance`].
+    pub fn instances(&self) -> impl Iterator<Item = &dyn Instance> {
+        self.descendants()
+    }
+
+    /// Returns a child by its stable identifier.
+    pub fn instance(&self, id: InstanceId) -> Option<&dyn Instance> {
+        self.find_descendant(id)
+    }
+
+    /// Returns a mutable child by its stable identifier.
+    pub fn instance_mut(&mut self, id: InstanceId) -> Option<&mut dyn Instance> {
+        self.find_descendant_mut(id)
     }
 
     pub fn update_camera(&mut self, delta: f32) {
@@ -136,6 +158,33 @@ impl Workspace {
     pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) {
         self.camera_controller.process_window_event(event);
     }
+}
+
+impl Default for Workspace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
+
+fn find_part_mut<'a>(
+    instance: &'a mut dyn Instance,
+    name: &str,
+) -> Option<(InstanceId, &'a mut Part)> {
+    for child in instance.children_mut() {
+        let matches = child
+            .downcast_ref::<Part>()
+            .is_some_and(|part| part.name() == name);
+        if matches {
+            let id = child.id();
+            return Some((id, child.downcast_mut::<Part>()?));
+        }
+        if let Some(found) = find_part_mut(child.as_mut(), name) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -252,5 +301,116 @@ mod tests {
                 metallic_roughness: Some(TextureHandle(9)),
             }
         );
+    }
+
+    #[test]
+    fn built_in_objects_implement_instance_and_support_downcasting() {
+        fn assert_instance<T: Instance>() {}
+
+        assert_instance::<Workspace>();
+        assert_instance::<BasePart>();
+        assert_instance::<Camera>();
+        assert_instance::<Part>();
+        assert_eq!(Workspace::new().name(), "Workspace");
+        assert_eq!(BasePart::new("base").name(), "base");
+        assert_eq!(Camera::default().name(), "Camera");
+
+        let mut instance: Box<dyn Instance> = Box::new(BasePart::new("base"));
+        assert!(instance.is::<BasePart>());
+        assert!(!instance.is::<Part>());
+        assert_eq!(instance.downcast_ref::<BasePart>().unwrap().name(), "base");
+        instance
+            .downcast_mut::<BasePart>()
+            .unwrap()
+            .set_name("renamed".to_owned());
+        assert_eq!(instance.name(), "renamed");
+
+        let instance = match instance.downcast::<BasePart>() {
+            Ok(instance) => instance,
+            Err(_) => panic!("expected a BasePart"),
+        };
+        assert_eq!(instance.name(), "renamed");
+    }
+
+    #[test]
+    fn isolated_instances_can_be_parented_and_recovered_by_id() {
+        let mut workspace = Workspace::new();
+        let workspace_id = workspace.id();
+        let mut part = Part::new("part");
+        part.shape = PartShape::Ball;
+        let part_id = part.id();
+        let returned_id = part.set_parent(&mut workspace);
+
+        assert_eq!(returned_id, part_id);
+        assert_eq!(workspace.children().len(), 1);
+        assert_eq!(workspace.children()[0].id(), part_id);
+        let child = workspace.instance(part_id).unwrap();
+        assert_eq!(child.class_name(), "Part");
+        assert_eq!(child.parent(), Some(workspace_id));
+        assert_eq!(
+            workspace.get::<Part>(part_id).unwrap().shape,
+            PartShape::Ball
+        );
+
+        let basepart_id = BasePart::new("base").set_parent(&mut workspace);
+        let camera_id = Camera::default().set_parent(&mut workspace);
+        workspace
+            .get_mut::<BasePart>(basepart_id)
+            .unwrap()
+            .set_name("renamed".to_owned());
+        assert_eq!(
+            workspace.get::<BasePart>(basepart_id).unwrap().name(),
+            "renamed"
+        );
+        assert!(workspace.instance(basepart_id).unwrap().is::<BasePart>());
+        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert!(workspace.get::<Part>(camera_id).is_none());
+        assert_eq!(workspace.get_all::<Camera>().count(), 1);
+        assert_eq!(workspace.get_all::<Part>().count(), 1);
+        assert_eq!(
+            workspace
+                .instances()
+                .map(Instance::class_name)
+                .collect::<Vec<_>>(),
+            vec!["Part", "BasePart", "Camera"]
+        );
+
+        let cloned_workspace = workspace.clone();
+        assert_eq!(cloned_workspace.children().len(), 3);
+        assert!(
+            cloned_workspace
+                .instances()
+                .all(|instance| instance.parent() == Some(cloned_workspace.id()))
+        );
+    }
+
+    #[test]
+    fn every_instance_can_own_a_nested_instance_tree() {
+        let mut model = BasePart::new("model");
+        let part_id = model.add_child_with(Part::new("part"), |part| {
+            part.shape = PartShape::Ball;
+        });
+        let camera_id = Camera::default().set_parent(&mut model);
+        let model_id = model.id();
+
+        assert_eq!(model.children().len(), 2);
+        assert_eq!(model.children()[0].id(), part_id);
+        assert_eq!(model.children()[1].id(), camera_id);
+        assert_eq!(model.children()[0].parent(), Some(model_id));
+
+        let mut workspace = Workspace::new();
+        model.set_parent(&mut workspace);
+        assert_eq!(workspace.children().len(), 1);
+        assert_eq!(
+            workspace.instance(model_id).unwrap().class_name(),
+            "BasePart"
+        );
+        assert_eq!(
+            workspace.instance(part_id).unwrap().parent(),
+            Some(model_id)
+        );
+        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert_eq!(workspace.get_all::<Part>().count(), 1);
+        assert_eq!(workspace.instances().count(), 3);
     }
 }

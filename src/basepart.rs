@@ -2,12 +2,12 @@ use std::ops::{Deref, DerefMut};
 
 use glam::{Mat4, Vec3};
 
-use crate::{Color3, PVInstance};
+use crate::{Color3, InstanceData, PVInstance};
 
 #[derive(Clone, Debug)]
 pub struct BasePart {
-    pub name: String,
-    pv_instance: PVInstance,
+    pub(crate) instance: InstanceData,
+    pub(crate) pv_instance: PVInstance,
     pub size: Vec3,
     /// Tint.
     pub color: Color3,
@@ -18,7 +18,7 @@ pub struct BasePart {
 impl BasePart {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name: name.into(),
+            instance: InstanceData::new(name),
             pv_instance: PVInstance::new(),
             size: Vec3::ONE,
             color: Color3::WHITE,
@@ -27,6 +27,8 @@ impl BasePart {
         }
     }
 }
+
+crate::impl_instance!(BasePart, class_name = "BasePart", data = instance,);
 
 impl Deref for BasePart {
     type Target = PVInstance;

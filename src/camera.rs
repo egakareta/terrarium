@@ -7,12 +7,13 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
 };
 
-use crate::PVInstance;
+use crate::{InstanceData, PVInstance};
 
 /// A perspective camera with a world-space pivot.
 #[derive(Clone, Debug)]
 pub struct Camera {
-    pv_instance: PVInstance,
+    pub(crate) instance: InstanceData,
+    pub(crate) pv_instance: PVInstance,
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -31,6 +32,7 @@ impl Camera {
         let yaw = direction.x.atan2(-direction.z);
         let pitch = direction.y.asin();
         Self {
+            instance: InstanceData::new("Camera"),
             pv_instance: PVInstance::from_world_transform(Mat4::from_rotation_translation(
                 Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
                 position,
@@ -59,6 +61,8 @@ impl Camera {
         projection * view
     }
 }
+
+crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
 
 /// First-person keyboard and raw mouse input for a [`Camera`].
 #[derive(Clone, Debug)]

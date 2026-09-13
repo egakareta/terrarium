@@ -69,7 +69,7 @@ impl App {
         let (workspace, part_ids) =
             create_benchmark_workspace(config.parts, config.width, config.height);
         let base_camera_pivot = workspace.current_camera.pivot();
-        let base_parts = workspace.parts().to_vec();
+        let base_parts = workspace.get_all::<Part>().cloned().collect();
         Self {
             config,
             window: None,
@@ -158,7 +158,7 @@ impl App {
             let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
-            if let Some(part) = self.workspace.part_mut(id) {
+            if let Some(part) = self.workspace.get_mut::<Part>(id) {
                 let (_, base_rotation, base_position) =
                     base.pivot().to_scale_rotation_translation();
                 let position = base_position
@@ -190,7 +190,7 @@ impl App {
     fn reset_part(&mut self, index: usize) {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
-        if let Some(part) = self.workspace.part_mut(id) {
+        if let Some(part) = self.workspace.get_mut::<Part>(id) {
             part.pivot_to(base.pivot());
             part.size = base.size;
             part.color = base.color;
@@ -319,7 +319,7 @@ fn create_benchmark_workspace(
             0.32 + (index % 3) as f32 * 0.16,
             0.40 + (index % 4) as f32 * 0.11,
         );
-        part_ids.push(workspace.add_part(part));
+        part_ids.push(part.set_parent(&mut workspace));
     }
 
     (workspace, part_ids)
