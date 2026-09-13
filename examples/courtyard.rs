@@ -47,24 +47,27 @@ impl App {
         let time = self.animation_time;
 
         if let Some(part) = self.workspace.part_mut(self.moving_parts.platform) {
-            part.position.x = -1.0 + time.sin() * 2.2;
-            part.position.y = 0.55 + (time * 2.0).sin() * 0.12;
-            part.orientation.y = time.to_degrees() * 18.0;
+            part.set_position(Vec3::new(
+                -1.0 + time.sin() * 2.2,
+                0.55 + (time * 2.0).sin() * 0.12,
+                1.6,
+            ));
+            part.set_orientation(Vec3::new(0.0, time.to_degrees() * 18.0, 0.0));
         }
 
         if let Some(part) = self.workspace.part_mut(self.moving_parts.tower) {
-            part.position.y = 1.0 + (time * 1.5).sin() * 0.35;
-            part.orientation.y = -33.0 + time.to_degrees() * 0.85;
+            part.set_position(Vec3::new(-3.4, 1.0 + (time * 1.5).sin() * 0.35, -1.8));
+            part.set_orientation(Vec3::new(0.0, -33.0 + time.to_degrees() * 0.85, 0.0));
         }
 
         if let Some(part) = self.workspace.part_mut(self.moving_parts.orb) {
             let orbit_angle = time * 0.8;
-            part.position = Vec3::new(
+            part.set_position(Vec3::new(
                 orbit_angle.cos() * 3.3,
                 2.8 + (time * 1.7).sin() * 0.45,
                 orbit_angle.sin() * 3.3,
-            );
-            part.orientation.y = orbit_angle.to_degrees();
+            ));
+            part.set_orientation(Vec3::new(0.0, orbit_angle.to_degrees(), 0.0));
         }
     }
 
@@ -203,7 +206,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
     let mut workspace = Workspace::new();
     workspace.create_part_with("Ground", |part| {
         part.shape = PartShape::Block;
-        part.position = Vec3::new(0.0, -0.1, 0.0);
+        part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
         part.color = Color3::new(0.07, 0.12, 0.13);
     });
@@ -212,7 +215,7 @@ fn create_workspace() -> (Workspace, MovingParts) {
         let x = x as f32 * 2.1;
         workspace.create_part_with("StoneBlock", |part| {
             part.shape = PartShape::Block;
-            part.position = Vec3::new(x, 0.22, -4.0);
+            part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
             part.color = Color3::new(0.29, 0.34, 0.39);
         });
@@ -220,31 +223,30 @@ fn create_workspace() -> (Workspace, MovingParts) {
 
     let tower = workspace.create_part_with("CopperTower", |part| {
         part.shape = PartShape::Cylinder;
-        part.position = Vec3::new(-3.4, 1.0, -1.8);
+        part.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
         part.color = Color3::new(0.76, 0.30, 0.14);
-        part.orientation = Vec3::new(0.0, -33.0, 0.0);
+        part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
     });
 
     workspace.create_part_with("TealBlock", |part| {
         part.shape = PartShape::Block;
-        part.position = Vec3::new(3.2, 0.8, -2.3);
+        part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
         part.color = Color3::new(0.10, 0.48, 0.47);
-        part.orientation = Vec3::new(0.0, 31.0, 0.0);
+        part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
     });
 
     let platform = workspace.create_part_with("PalePlatform", |part| {
         part.shape = PartShape::Block;
-        part.position = Vec3::new(-1.0, 0.55, 1.6);
+        part.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
         part.color = Color3::new(0.60, 0.68, 0.50);
-        part.orientation = Vec3::ZERO;
     });
 
     let orb = workspace.create_part_with("OrbitingOrb", |part| {
         part.shape = PartShape::Ball;
-        part.position = Vec3::new(3.3, 2.8, 0.0);
+        part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
         part.color = Color3::new(0.95, 0.72, 0.22);
         part.can_collide = false;
@@ -252,18 +254,18 @@ fn create_workspace() -> (Workspace, MovingParts) {
 
     workspace.create_part_with("CopperPillar", |part| {
         part.shape = PartShape::Wedge;
-        part.position = Vec3::new(2.7, 1.5, 2.2);
+        part.set_position(Vec3::new(2.7, 1.5, 2.2));
         part.size = Vec3::new(1.1, 3.0, 1.1);
         part.color = Color3::new(0.76, 0.30, 0.14);
-        part.orientation = Vec3::new(0.0, 26.0, 0.0);
+        part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
     workspace.create_part_with("TealMonolith", |part| {
         part.shape = PartShape::CornerWedge;
-        part.position = Vec3::new(-4.7, 0.6, 3.1);
+        part.set_position(Vec3::new(-4.7, 0.6, 3.1));
         part.size = Vec3::new(1.8, 1.2, 1.8);
         part.color = Color3::new(0.10, 0.48, 0.47);
-        part.orientation = Vec3::new(0.0, -46.0, 0.0);
+        part.set_orientation(Vec3::new(0.0, -46.0, 0.0));
     });
 
     (

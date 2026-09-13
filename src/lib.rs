@@ -458,14 +458,21 @@ impl Color3 {
     }
 }
 
+/// Abstract trait for all objects that have a physical location in the world.
+pub trait PVInstance {
+    /// Returns this instance's world-space pivot.
+    fn get_pivot(&self) -> Mat4;
+
+    /// Replaces this instance's world-space pivot.
+    fn pivot_to(&mut self, pivot: Mat4);
+}
+
 #[derive(Clone, Debug)]
 pub struct Part {
     pub name: String,
     pub shape: PartShape,
-    pub position: Vec3,
+    pivot: Mat4,
     pub size: Vec3,
-    /// Euler angles in degrees.
-    pub orientation: Vec3,
     pub color: Color3,
     pub anchored: bool,
     pub can_collide: bool,
@@ -476,36 +483,64 @@ impl Part {
         Self {
             name: name.into(),
             shape: PartShape::Block,
-            position: Vec3::ZERO,
+            pivot: Mat4::IDENTITY,
             size: Vec3::ONE,
-            orientation: Vec3::ZERO,
             color: Color3::WHITE,
             anchored: true,
             can_collide: true,
         }
     }
+
+    /// Returns the position component of this part's pivot.
+    pub fn position(&self) -> Vec3 {
+        self.get_pivot().w_axis.truncate()
+    }
+
+    /// Changes this part's position while preserving its orientation.
+    pub fn set_position(&mut self, position: Vec3) {
+        let (_, rotation, _) = self.get_pivot().to_scale_rotation_translation();
+        self.pivot_to(Mat4::from_rotation_translation(rotation, position));
+    }
+
+    /// Returns this part's Euler orientation in degrees.
+    pub fn orientation(&self) -> Vec3 {
+        let (_, rotation, _) = self.get_pivot().to_scale_rotation_translation();
+        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
+        Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
+    }
+
+    /// Changes this part's Euler orientation in degrees while preserving its position.
+    pub fn set_orientation(&mut self, orientation: Vec3) {
+        self.pivot_to(Mat4::from_rotation_translation(
+            Quat::from_euler(
+                EulerRot::XYZ,
+                orientation.x.to_radians(),
+                orientation.y.to_radians(),
+                orientation.z.to_radians(),
+            ),
+            self.position(),
+        ));
+    }
+}
+
+impl PVInstance for Part {
+    fn get_pivot(&self) -> Mat4 {
+        self.pivot
+    }
+
+    fn pivot_to(&mut self, pivot: Mat4) {
+        self.pivot = pivot;
+    }
 }
 
 pub trait Transform {
-    /// Returns the 4x4 transform matrix for this object:
-    /// ```text
-    /// [s_x, 0,   0,   x]
-    /// [0,   s_y, 0,   y]
-    /// [0,   0,   s_z, z]
-    /// [0,   0,   0,   1]
-    /// ```
+    /// Returns the 4x4 model transform matrix for this object.
     fn transform(&self) -> Mat4;
 }
 
 impl Transform for Part {
     fn transform(&self) -> Mat4 {
-        let rotation = Quat::from_euler(
-            EulerRot::XYZ,
-            self.orientation.x.to_radians(),
-            self.orientation.y.to_radians(),
-            self.orientation.z.to_radians(),
-        );
-        Mat4::from_scale_rotation_translation(self.size, rotation, self.position)
+        self.get_pivot() * Mat4::from_scale(self.size)
     }
 }
 
@@ -574,12 +609,10 @@ impl Workspace {
     }
 }
 
-/// A perspective camera with yaw/pitch orientation.
+/// A perspective camera with a world-space pivot.
 #[derive(Clone, Debug)]
 pub struct Camera {
-    pub position: Vec3,
-    pub yaw: f32,
-    pub pitch: f32,
+    pivot: Mat4,
     pub aspect: f32,
     pub fovy: f32,
     pub znear: f32,
@@ -595,10 +628,13 @@ impl Default for Camera {
 impl Camera {
     pub fn new(position: Vec3, target: Vec3, aspect: f32) -> Self {
         let direction = (target - position).normalize_or_zero();
+        let yaw = direction.x.atan2(-direction.z);
+        let pitch = direction.y.asin();
         Self {
-            position,
-            yaw: direction.x.atan2(-direction.z),
-            pitch: direction.y.asin(),
+            pivot: Mat4::from_rotation_translation(
+                Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
+                position,
+            ),
             aspect: aspect.max(0.001),
             fovy: 60.0_f32.to_radians(),
             znear: 0.1,
@@ -613,16 +649,13 @@ impl Camera {
     }
 
     pub fn forward(&self) -> Vec3 {
-        Vec3::new(
-            self.yaw.sin() * self.pitch.cos(),
-            self.pitch.sin(),
-            -self.yaw.cos() * self.pitch.cos(),
-        )
-        .normalize_or_zero()
+        self.get_pivot()
+            .transform_vector3(Vec3::NEG_Z)
+            .normalize_or_zero()
     }
 
     pub fn view_projection_matrix(&self) -> Mat4 {
-        let view = glam::camera::rh::view::look_to_mat4(self.position, self.forward(), Vec3::Y);
+        let view = self.get_pivot().inverse();
         let projection = glam::camera::rh::proj::directx::perspective(
             self.fovy,
             self.aspect,
@@ -630,6 +663,16 @@ impl Camera {
             self.zfar,
         );
         projection * view
+    }
+}
+
+impl PVInstance for Camera {
+    fn get_pivot(&self) -> Mat4 {
+        self.pivot
+    }
+
+    fn pivot_to(&mut self, pivot: Mat4) {
+        self.pivot = pivot;
     }
 }
 
@@ -724,12 +767,28 @@ impl CameraController {
 
         if movement.length_squared() > 0.0 {
             let speed = self.speed * if self.sprint { 2.5 } else { 1.0 };
-            camera.position += movement.normalize() * speed * delta_seconds;
+            camera.pivot_to(
+                Mat4::from_translation(movement.normalize() * speed * delta_seconds)
+                    * camera.get_pivot(),
+            );
         }
 
-        camera.yaw += self.mouse_delta.0 * self.sensitivity;
-        camera.pitch = (camera.pitch - self.mouse_delta.1 * self.sensitivity)
+        let yaw_delta = -self.mouse_delta.0 * self.sensitivity;
+        let current_pitch = camera.forward().y.asin();
+        let target_pitch = (current_pitch - self.mouse_delta.1 * self.sensitivity)
             .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
+        let mut pivot = camera.get_pivot();
+        if yaw_delta != 0.0 {
+            let (_, rotation, position) = pivot.to_scale_rotation_translation();
+            pivot = Mat4::from_rotation_translation(
+                Quat::from_rotation_y(yaw_delta) * rotation,
+                position,
+            );
+        }
+        if target_pitch != current_pitch {
+            pivot *= Mat4::from_rotation_x(target_pitch - current_pitch);
+        }
+        camera.pivot_to(pivot);
         self.mouse_delta = (0.0, 0.0);
     }
 
@@ -1215,7 +1274,50 @@ mod tests {
     fn workspace_has_a_current_camera_by_default() {
         let workspace = Workspace::new();
 
-        assert_eq!(workspace.current_camera.position, Vec3::new(0.0, 1.0, 5.0));
+        assert_eq!(
+            workspace.current_camera.get_pivot().w_axis.truncate(),
+            Vec3::new(0.0, 1.0, 5.0)
+        );
         assert_eq!(workspace.current_camera.aspect, 1.0);
+    }
+
+    #[test]
+    fn part_and_camera_are_pv_instances() {
+        let pivot =
+            Mat4::from_rotation_translation(Quat::from_rotation_y(0.5), Vec3::new(1.0, 2.0, 3.0));
+        let mut part = Part::new("part");
+        let mut camera = Camera::default();
+
+        part.pivot_to(pivot);
+        camera.pivot_to(pivot);
+
+        assert_eq!(part.get_pivot(), pivot);
+        assert_eq!(camera.get_pivot(), pivot);
+    }
+
+    #[test]
+    fn part_position_and_orientation_accessors_use_the_pivot() {
+        let position = Vec3::new(1.0, 2.0, 3.0);
+        let orientation = Vec3::new(10.0, 20.0, 30.0);
+        let mut part = Part::new("part");
+
+        part.set_position(position);
+        part.set_orientation(orientation);
+
+        assert_eq!(part.position(), position);
+        assert!((part.orientation() - orientation).abs().max_element() < 0.0001);
+    }
+
+    #[test]
+    fn camera_mouse_look_rotates_in_place_with_the_expected_horizontal_sign() {
+        let mut camera = Camera::default();
+        let original_position = camera.get_pivot().w_axis.truncate();
+        let mut controller = CameraController::new(6.0, 0.1);
+        controller.mouse_delta = (1.0, 0.0);
+
+        controller.update_camera(&mut camera, 1.0 / 60.0);
+
+        assert_eq!(camera.get_pivot().w_axis.truncate(), original_position);
+        assert!(camera.forward().x > 0.0);
     }
 }

@@ -7,8 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use glam::Vec3;
-use terrarium::{Camera, Color3, Part, PartId, PartShape, Renderer, RendererError, Workspace};
+use glam::{EulerRot, Mat4, Quat, Vec3};
+use terrarium::{
+    Camera, Color3, PVInstance, Part, PartId, PartShape, Renderer, RendererError, Workspace,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -55,7 +57,7 @@ struct App {
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     workspace: Workspace,
-    base_camera_position: Vec3,
+    base_camera_pivot: Mat4,
     part_ids: Vec<PartId>,
     base_parts: Vec<Part>,
     animation_frame: usize,
@@ -68,14 +70,14 @@ impl App {
     fn new(config: Config) -> Self {
         let (workspace, part_ids) =
             create_benchmark_workspace(config.parts, config.width, config.height);
-        let base_camera_position = workspace.current_camera.position;
+        let base_camera_pivot = workspace.current_camera.get_pivot();
         let base_parts = workspace.parts().to_vec();
         Self {
             config,
             window: None,
             renderer: None,
             workspace,
-            base_camera_position,
+            base_camera_pivot,
             part_ids,
             base_parts,
             animation_frame: 0,
@@ -137,7 +139,14 @@ impl App {
             + (CAMERA_DISTANCE_MAX_SCALE - CAMERA_DISTANCE_MIN_SCALE)
                 * 0.5
                 * (time * CAMERA_ZOOM_SPEED).sin();
-        self.workspace.current_camera.position = self.base_camera_position * camera_scale;
+        let (_, camera_rotation, camera_position) =
+            self.base_camera_pivot.to_scale_rotation_translation();
+        self.workspace
+            .current_camera
+            .pivot_to(Mat4::from_rotation_translation(
+                camera_rotation,
+                camera_position * camera_scale,
+            ));
 
         for offset in 0..animated_count {
             let index = (self.animation_pool_start + offset) % part_count;
@@ -148,20 +157,24 @@ impl App {
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
             if let Some(part) = self.workspace.part_mut(id) {
-                part.position = base.position
+                let (_, base_rotation, base_position) =
+                    base.get_pivot().to_scale_rotation_translation();
+                let position = base_position
                     + Vec3::new(
                         motion.sin() * 0.32,
                         (motion * 1.7).cos() * 0.16,
                         motion.cos() * 0.32,
                     );
+                let rotation = base_rotation
+                    * Quat::from_euler(
+                        EulerRot::XYZ,
+                        (motion.sin() * 12.0).to_radians(),
+                        (motion.cos() * 18.0).to_radians(),
+                        ((motion * 0.7).sin() * 10.0).to_radians(),
+                    );
+                part.pivot_to(Mat4::from_rotation_translation(rotation, position));
                 part.size =
                     base.size * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35);
-                part.orientation = base.orientation
-                    + Vec3::new(
-                        motion.sin() * 12.0,
-                        motion.cos() * 18.0,
-                        (motion * 0.7).sin() * 10.0,
-                    );
                 part.color = Color3::new(
                     (base.color.r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
                     (base.color.g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
@@ -176,9 +189,8 @@ impl App {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
         if let Some(part) = self.workspace.part_mut(id) {
-            part.position = base.position;
+            part.pivot_to(base.get_pivot());
             part.size = base.size;
-            part.orientation = base.orientation;
             part.color = base.color;
         }
     }
@@ -291,13 +303,15 @@ fn create_benchmark_workspace(
             3 => PartShape::Wedge,
             _ => PartShape::CornerWedge,
         };
-        part.position = Vec3::new(
-            (column as f32 - side as f32 * 0.5) * spacing,
-            0.35 + (index % 7) as f32 * 0.06,
-            (row as f32 - side as f32 * 0.5) * spacing,
-        );
+        part.pivot_to(Mat4::from_rotation_translation(
+            Quat::from_rotation_y(((index % 360) as f32).to_radians()),
+            Vec3::new(
+                (column as f32 - side as f32 * 0.5) * spacing,
+                0.35 + (index % 7) as f32 * 0.06,
+                (row as f32 - side as f32 * 0.5) * spacing,
+            ),
+        ));
         part.size = Vec3::splat(0.82);
-        part.orientation = Vec3::new(0.0, (index % 360) as f32, 0.0);
         part.color = Color3::new(
             0.24 + (index % 5) as f32 * 0.12,
             0.32 + (index % 3) as f32 * 0.16,
