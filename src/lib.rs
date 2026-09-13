@@ -858,7 +858,13 @@ impl Renderer {
         requested_present_mode: wgpu::PresentMode,
     ) -> Result<Self, RendererError> {
         let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: Default::default(),
+            flags: wgpu::InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER,
+            backend_options: Default::default(),
+            display: Default::default(),
+            memory_budget_thresholds: Default::default(),
+        });
         let surface = instance.create_surface(window)?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -868,6 +874,7 @@ impl Renderer {
                 apply_limit_buckets: false,
             })
             .await?;
+        log::info!("selected wgpu adapter: {:?}", adapter.get_info());
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("terrarium device"),
