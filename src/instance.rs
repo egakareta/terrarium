@@ -61,6 +61,38 @@ macro_rules! impl_instance {
                 configure(&mut child);
                 self.add_child(child)
             }
+
+            /// Adds an owned child and returns a mutable reference to it.
+            ///
+            /// The reference borrows the parent, so copy out the [`$crate::InstanceId`]
+            /// with [`$crate::Instance::id`] if the handle must outlive the borrow.
+            pub fn add_child_ref<T>(&mut self, child: T) -> &mut T
+            where
+                T: $crate::Instance,
+            {
+                <$type as $crate::Instance>::add_child_ref(self, child)
+            }
+
+            /// Configures a child before adding it and returns a mutable reference to it.
+            ///
+            /// The reference borrows the parent, so copy out the [`$crate::InstanceId`]
+            /// with [`$crate::Instance::id`] if the handle must outlive the borrow.
+            pub fn add_child_with_ref<T, F>(&mut self, mut child: T, configure: F) -> &mut T
+            where
+                T: $crate::Instance,
+                F: FnOnce(&mut T),
+            {
+                configure(&mut child);
+                self.add_child_ref(child)
+            }
+
+            /// Adds an owned trait-object child and returns a mutable reference to it.
+            pub fn add_child_box_ref(
+                &mut self,
+                child: Box<dyn $crate::Instance>,
+            ) -> &mut dyn $crate::Instance {
+                <$type as $crate::Instance>::add_child_box_ref(self, child)
+            }
         }
 
         impl $crate::Instance for $type {
@@ -97,6 +129,13 @@ macro_rules! impl_instance {
                 child: Box<dyn $crate::Instance>,
             ) -> $crate::InstanceId {
                 self.$data $(.$data_tail)*.add_child(child)
+            }
+
+            fn add_child_box_ref(
+                &mut self,
+                child: Box<dyn $crate::Instance>,
+            ) -> &mut dyn $crate::Instance {
+                self.$data $(.$data_tail)*.add_child_ref(child)
             }
 
             fn set_instance_parent(&mut self, parent: Option<$crate::InstanceId>) {
@@ -169,11 +208,17 @@ impl InstanceData {
         &mut self.children
     }
 
-    pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
-        let id = child.id();
+    pub(crate) fn add_child(&mut self, child: Box<dyn Instance>) -> InstanceId {
+        self.add_child_ref(child).id()
+    }
+
+    pub(crate) fn add_child_ref(&mut self, mut child: Box<dyn Instance>) -> &mut dyn Instance {
         child.set_instance_parent(Some(self.id));
         self.children.push(child);
-        id
+        self.children
+            .last_mut()
+            .expect("just pushed child")
+            .as_mut()
     }
 }
 
@@ -228,6 +273,18 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Adds an owned child to this instance.
     fn add_child_box(&mut self, child: Box<dyn Instance>) -> InstanceId;
 
+    /// Adds an owned child to this instance and returns a mutable reference to it.
+    ///
+    /// The reference borrows the parent, so copy out the [`InstanceId`] with
+    /// [`Instance::id`] if the handle must outlive the borrow.
+    fn add_child_box_ref(&mut self, child: Box<dyn Instance>) -> &mut dyn Instance {
+        self.add_child_box(child);
+        self.children_mut()
+            .last_mut()
+            .expect("just pushed child")
+            .as_mut()
+    }
+
     /// Configures an isolated child, then adds it and returns its identifier.
     fn add_child_with<T, F>(&mut self, mut child: T, configure: F) -> InstanceId
     where
@@ -237,6 +294,36 @@ pub trait Instance: Any + Debug + InstanceClone {
     {
         configure(&mut child);
         self.add_child_box(Box::new(child))
+    }
+
+    /// Adds an owned child to this instance and returns a mutable reference to it.
+    ///
+    /// The concrete type is known statically, so no downcasting is needed.
+    /// The reference borrows the parent, so copy out the [`InstanceId`] with
+    /// [`Instance::id`] if the handle must outlive the borrow.
+    fn add_child_ref<T>(&mut self, child: T) -> &mut T
+    where
+        Self: Sized,
+        T: Instance,
+    {
+        self.add_child_box_ref(Box::new(child))
+            .downcast_mut::<T>()
+            .expect("just pushed child of type T")
+    }
+
+    /// Configures an isolated child, then adds it and returns a mutable reference to it.
+    ///
+    /// The concrete type is known statically, so no downcasting is needed.
+    /// The reference borrows the parent, so copy out the [`InstanceId`] with
+    /// [`Instance::id`] if the handle must outlive the borrow.
+    fn add_child_with_ref<T, F>(&mut self, mut child: T, configure: F) -> &mut T
+    where
+        Self: Sized,
+        T: Instance,
+        F: FnOnce(&mut T),
+    {
+        configure(&mut child);
+        self.add_child_ref(child)
     }
 
     /// Sets the internal parent link while a parent takes ownership of this instance.
@@ -289,6 +376,33 @@ pub trait Instance: Any + Debug + InstanceClone {
         }
         None
     }
+
+    /// Finds the first descendant of type `T` with `name` in depth-first order.
+    fn find_first_child<T: Instance>(&mut self, name: &str) -> Option<(InstanceId, &mut T)>
+    where
+        Self: Sized,
+    {
+        find_child_mut(self, name)
+    }
+}
+
+fn find_child_mut<'a, T: Instance>(
+    instance: &'a mut dyn Instance,
+    name: &str,
+) -> Option<(InstanceId, &'a mut T)> {
+    for child in instance.children_mut() {
+        let matches = child
+            .downcast_ref::<T>()
+            .is_some_and(|child| child.name() == name);
+        if matches {
+            let id = child.id();
+            return Some((id, child.downcast_mut::<T>()?));
+        }
+        if let Some(found) = find_child_mut::<T>(child.as_mut(), name) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Depth-first iterator over an instance's descendants.
@@ -482,6 +596,14 @@ mod tests {
         let camera_id = Camera::default().set_parent(&mut model);
         let model_id = model.id();
 
+        assert_eq!(
+            model.find_first_child::<Part>("part").map(|(id, _)| id),
+            Some(part_id)
+        );
+        assert_eq!(
+            model.find_first_child::<Camera>("Camera").map(|(id, _)| id),
+            Some(camera_id)
+        );
         assert_eq!(model.children().len(), 2);
         assert_eq!(model.children()[0].id(), part_id);
         assert_eq!(model.children()[1].id(), camera_id);

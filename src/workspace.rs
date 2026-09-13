@@ -47,6 +47,32 @@ impl Workspace {
         self.add_child(instance)
     }
 
+    /// Takes ownership of any supported [`Instance`], parents it here, and
+    /// returns a mutable reference to it.
+    ///
+    /// The reference borrows the workspace, so copy out the [`InstanceId`]
+    /// with [`Instance::id`] if the handle must outlive the borrow.
+    pub fn add_instance_ref<T>(&mut self, instance: T) -> &mut T
+    where
+        T: Instance,
+    {
+        self.add_child_ref(instance)
+    }
+
+    /// Configures an instance before parenting it here and returns a mutable
+    /// reference to it.
+    ///
+    /// The reference borrows the workspace, so copy out the [`InstanceId`]
+    /// with [`Instance::id`] if the handle must outlive the borrow.
+    pub fn add_instance_with_ref<T, F>(&mut self, mut instance: T, configure: F) -> &mut T
+    where
+        T: Instance,
+        F: FnOnce(&mut T),
+    {
+        configure(&mut instance);
+        self.add_instance_ref(instance)
+    }
+
     /// Returns a descendant by ID, downcast to its concrete instance type.
     pub fn get<T: Instance>(&self, id: InstanceId) -> Option<&T> {
         self.instance(id)?.downcast_ref::<T>()
@@ -61,11 +87,6 @@ impl Workspace {
     pub fn get_all<T: Instance>(&self) -> impl Iterator<Item = &T> {
         self.descendants()
             .filter_map(|instance| instance.downcast_ref::<T>())
-    }
-
-    /// Finds the first descendant of type `T` with `name` in depth-first order.
-    pub fn find_first_child<T: Instance>(&mut self, name: &str) -> Option<(InstanceId, &mut T)> {
-        find_child_mut::<T>(self, name)
     }
 
     /// Returns every child, preserving its concrete type behind [`Instance`].
@@ -140,25 +161,6 @@ impl Default for Workspace {
 }
 
 crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
-
-fn find_child_mut<'a, T: Instance>(
-    instance: &'a mut dyn Instance,
-    name: &str,
-) -> Option<(InstanceId, &'a mut T)> {
-    for child in instance.children_mut() {
-        let matches = child
-            .downcast_ref::<T>()
-            .is_some_and(|child| child.name() == name);
-        if matches {
-            let id = child.id();
-            return Some((id, child.downcast_mut::<T>()?));
-        }
-        if let Some(found) = find_child_mut::<T>(child.as_mut(), name) {
-            return Some(found);
-        }
-    }
-    None
-}
 
 #[cfg(test)]
 mod tests {
