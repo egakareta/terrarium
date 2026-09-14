@@ -118,6 +118,12 @@ impl Workspace {
     pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) {
         self.camera_controller.process_window_event(event);
     }
+
+    /// Forwards eframe input to the active camera controller.
+    #[cfg(feature = "eframe")]
+    pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
+        self.camera_controller.process_eframe_input(input);
+    }
 }
 
 impl Default for Workspace {

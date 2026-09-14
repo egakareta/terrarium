@@ -3,8 +3,6 @@
 
 mod camera;
 mod color3;
-#[cfg(feature = "egui")]
-mod egui_integration;
 mod instance;
 mod material;
 mod part;
@@ -16,8 +14,12 @@ mod workspace;
 
 pub use camera::*;
 pub use color3::*;
-#[cfg(feature = "egui")]
-pub use egui;
+#[cfg(feature = "eframe")]
+pub use eframe;
+#[cfg(feature = "eframe")]
+pub use eframe::egui;
+#[cfg(feature = "eframe")]
+pub use eframe::egui_wgpu;
 pub use glam;
 pub use instance::*;
 pub use material::*;

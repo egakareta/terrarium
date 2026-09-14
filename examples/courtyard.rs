@@ -1,136 +1,115 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use terrarium::{
     Color3, Easing, Instance, Material, MaterialSlot, Part, PartShape, Renderer, RendererError,
-    Repeat, Texture, TextureColorSpace, Tween, Workspace, egui,
-    glam::Vec3,
-    winit::{
-        application::ApplicationHandler,
-        dpi::PhysicalSize,
-        event::WindowEvent,
-        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-        window::{Window, WindowId},
-    },
+    Repeat, Texture, TextureColorSpace, Tween, Workspace, eframe, egui, egui_wgpu, glam::Vec3,
 };
 
-#[derive(Default)]
-struct App {
-    window: Option<Arc<Window>>,
-    renderer: Option<Renderer>,
-    workspace: Workspace,
+struct SceneCallback {
+    renderer: Arc<Mutex<Renderer>>,
 }
 
-impl App {
-    fn new() -> Self {
-        Self {
-            workspace: create_workspace().unwrap(),
-            ..Default::default()
-        }
+impl egui_wgpu::CallbackTrait for SceneCallback {
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut egui_wgpu::wgpu::RenderPass<'static>,
+        _callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        self.renderer
+            .lock()
+            .expect("scene renderer lock poisoned")
+            .paint_eframe_scene(render_pass);
     }
 }
 
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
+struct App {
+    workspace: Workspace,
+    renderer: Arc<Mutex<Renderer>>,
+}
 
-        let attributes = Window::default_attributes()
-            .with_title("Courtyard")
-            .with_inner_size(PhysicalSize::new(1280, 720));
-        let window = Arc::new(event_loop.create_window(attributes).expect("create window"));
-        let size = window.inner_size();
-        self.workspace
-            .current_camera
-            .resize(size.width, size.height);
+impl App {
+    fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, RendererError> {
+        let size = cc
+            .winit_window()
+            .map(|window| window.inner_size())
+            .map_or([1280, 720], |size| [size.width, size.height]);
+        let render_state = cc
+            .wgpu_render_state
+            .as_ref()
+            .ok_or(RendererError::EframeRenderStateUnavailable)?;
+        let mut workspace = create_workspace()?;
+        workspace.current_camera.resize(size[0], size[1]);
 
-        let mut renderer = match pollster::block_on(Renderer::new(window.clone())) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                eprintln!("renderer initialization failed: {error}");
-                event_loop.exit();
-                return;
-            }
-        };
-        renderer.set_clear_color(wgpu::Color {
+        let mut renderer = Renderer::new_eframe(render_state, size)?;
+        renderer.set_clear_color(egui_wgpu::wgpu::Color {
             r: 0.012,
             g: 0.019,
             b: 0.050,
             a: 1.0,
         });
+        Ok(Self {
+            workspace,
+            renderer: Arc::new(Mutex::new(renderer)),
+        })
+    }
+}
 
-        self.window = Some(window);
-        self.renderer = Some(renderer);
+impl eframe::App for App {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.012, 0.019, 0.050, 1.0]
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        let Some(window) = self.window.clone() else {
-            return;
-        };
-        if window.id() != window_id {
-            return;
-        }
-
-        if let Some(renderer) = &mut self.renderer {
-            let _ = renderer.on_window_event(&event);
-        }
-        self.workspace.process_window_event(&event);
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => {
-                self.workspace
-                    .current_camera
-                    .resize(size.width, size.height);
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.resize(size.width, size.height);
-                }
-            }
-            WindowEvent::RedrawRequested => {
-                let delta = self.renderer.as_mut().map(|renderer| renderer.delta_secs());
-                if let Some(delta) = delta {
-                    self.workspace.update(delta);
-
-                    let fps = self
-                        .renderer
-                        .as_ref()
-                        .map(Renderer::fps)
-                        .unwrap_or_default();
-                    if let Some(renderer) = &mut self.renderer {
-                        let render_result = renderer.render_egui(&self.workspace, |ui| {
-                            egui::Area::new("fps_counter".into())
-                                .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
-                                .order(egui::Order::Foreground)
-                                .show(ui.ctx(), |ui| {
-                                    egui::Frame::new()
-                                        .fill(egui::Color32::from_black_alpha(180))
-                                        .corner_radius(egui::CornerRadius::same(6))
-                                        .inner_margin(egui::Margin::same(8))
-                                        .show(ui, |ui| {
-                                            ui.label(format!("FPS: {fps:.0}"));
-                                        });
-                                });
-                        });
-                        if let Err(error) = render_result {
-                            eprintln!("rendering stopped: {error}");
-                            event_loop.exit();
-                        }
-                    }
-                }
-                window.request_redraw();
-            }
-            _ => {}
-        }
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let delta = ctx.input(|input| input.stable_dt.min(0.1));
+        ctx.input(|input| self.workspace.process_eframe_input(input));
+        self.workspace.update(delta);
+        ctx.request_repaint();
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let size = ui.ctx().input(|input| {
+            let rect = input.viewport_rect();
+            [
+                (rect.width() * input.pixels_per_point).round() as u32,
+                (rect.height() * input.pixels_per_point).round() as u32,
+            ]
+        });
+        self.workspace.current_camera.resize(size[0], size[1]);
+        if let Err(error) = self
+            .renderer
+            .lock()
+            .expect("scene renderer lock poisoned")
+            .prepare_eframe_scene(&self.workspace, size)
+        {
+            log::error!("scene preparation failed: {error}");
         }
+
+        let callback = egui_wgpu::Callback::new_paint_callback(
+            ui.max_rect(),
+            SceneCallback {
+                renderer: Arc::clone(&self.renderer),
+            },
+        );
+        ui.painter().add(egui::Shape::Callback(callback));
+
+        let fps = self
+            .renderer
+            .lock()
+            .expect("scene renderer lock poisoned")
+            .fps();
+        egui::Area::new("fps_counter".into())
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(180))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.label(format!("FPS: {fps:.0}"));
+                    });
+            });
     }
 }
 
@@ -306,13 +285,22 @@ fn create_workspace() -> Result<Workspace, RendererError> {
     Ok(workspace)
 }
 
-fn main() {
+fn main() -> eframe::Result {
     env_logger::init();
     println!(
         "WASD move | drag with left mouse to look | Space/Ctrl rise and descend | Shift sprint"
     );
-    let event_loop = EventLoop::new().expect("create event loop");
-    event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::new();
-    event_loop.run_app(&mut app).expect("run event loop");
+    let native_options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
+        depth_buffer: 32,
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Courtyard")
+            .with_inner_size([1280.0, 720.0]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Courtyard",
+        native_options,
+        Box::new(|cc| Ok(Box::new(App::new(cc)?))),
+    )
 }

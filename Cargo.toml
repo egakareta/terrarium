@@ -5,9 +5,12 @@ edition = "2024"
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
-egui = { version = "0.36", optional = true }
-egui-wgpu = { version = "0.36", optional = true }
-egui-winit = { version = "0.36", default-features = false, optional = true }
+eframe = { version = "0.36", default-features = false, features = [
+  "default_fonts",
+  "wayland",
+  "wgpu",
+  "x11",
+], optional = true }
 env_logger = "0.11"
 glam = "0.33"
 image = { version = "0.25" }
@@ -22,5 +25,5 @@ wgpu = "30"
 winit = "0.30"
 
 [features]
-default = ["egui"]
-egui = ["dep:egui", "dep:egui-wgpu", "dep:egui-winit"]
+default = ["eframe"]
+eframe = ["dep:eframe"]

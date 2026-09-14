@@ -220,6 +220,36 @@ impl CameraController {
         }
     }
 
+    /// Feeds eframe's normalized input state into the controller.
+    #[cfg(feature = "eframe")]
+    pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
+        if !input.focused {
+            self.clear_keys();
+            return;
+        }
+
+        let key_down = |binding: &[KeyCode]| {
+            binding
+                .iter()
+                .copied()
+                .any(|key| eframe_key(key).is_some_and(|key| input.key_down(key)))
+        };
+        self.forward = key_down(&self.key_bindings.forward);
+        self.backward = key_down(&self.key_bindings.backward);
+        self.left = key_down(&self.key_bindings.left);
+        self.right = key_down(&self.key_bindings.right);
+        self.up = key_down(&self.key_bindings.up);
+        self.down = key_down(&self.key_bindings.down);
+        self.sprint = key_down(&self.key_bindings.sprint);
+
+        if let Some(button) = eframe_button(self.mouse_drag_button)
+            && input.pointer.button_down(button)
+        {
+            let delta = input.pointer.delta() * input.pixels_per_point;
+            self.process_mouse_motion((delta.x, delta.y));
+        }
+    }
+
     fn process_key(&mut self, key: KeyCode, pressed: bool) -> bool {
         if self.key_bindings.forward.contains(&key) {
             set_key(&mut self.forward, pressed)
@@ -344,6 +374,42 @@ impl DerefMut for Camera {
 fn set_key(key: &mut bool, pressed: bool) -> bool {
     *key = pressed;
     true
+}
+
+#[cfg(feature = "eframe")]
+fn eframe_key(key: KeyCode) -> Option<crate::egui::Key> {
+    use crate::egui::Key;
+
+    Some(match key {
+        KeyCode::KeyA => Key::A,
+        KeyCode::KeyD => Key::D,
+        KeyCode::KeyS => Key::S,
+        KeyCode::KeyW => Key::W,
+        KeyCode::Space => Key::Space,
+        KeyCode::ControlLeft => Key::ControlLeft,
+        KeyCode::ControlRight => Key::ControlRight,
+        KeyCode::ShiftLeft => Key::ShiftLeft,
+        KeyCode::ShiftRight => Key::ShiftRight,
+        KeyCode::ArrowDown => Key::ArrowDown,
+        KeyCode::ArrowLeft => Key::ArrowLeft,
+        KeyCode::ArrowRight => Key::ArrowRight,
+        KeyCode::ArrowUp => Key::ArrowUp,
+        _ => return None,
+    })
+}
+
+#[cfg(feature = "eframe")]
+fn eframe_button(button: MouseButton) -> Option<crate::egui::PointerButton> {
+    use crate::egui::PointerButton;
+
+    Some(match button {
+        MouseButton::Left => PointerButton::Primary,
+        MouseButton::Right => PointerButton::Secondary,
+        MouseButton::Middle => PointerButton::Middle,
+        MouseButton::Back => PointerButton::Extra1,
+        MouseButton::Forward => PointerButton::Extra2,
+        MouseButton::Other(_) => return None,
+    })
 }
 
 #[cfg(test)]
