@@ -1,6 +1,6 @@
 use crate::{
     MaterialSlot, Vertex, glam::Vec3, push_quad, push_quad_with_material_slot, push_quad_with_uv,
-    push_triangle, push_triangle_with_uv,
+    push_triangle_with_uv,
 };
 
 /// The primitive geometry available to a [`crate::Part`].
@@ -192,19 +192,19 @@ impl Mesh {
                 &mut indices,
                 [
                     [radius * angle.cos(), -half_height, radius * angle.sin()],
-                    [
-                        radius * next_angle.cos(),
-                        -half_height,
-                        radius * next_angle.sin(),
-                    ],
+                    [radius * angle.cos(), half_height, radius * angle.sin()],
                     [
                         radius * next_angle.cos(),
                         half_height,
                         radius * next_angle.sin(),
                     ],
-                    [radius * angle.cos(), half_height, radius * angle.sin()],
+                    [
+                        radius * next_angle.cos(),
+                        -half_height,
+                        radius * next_angle.sin(),
+                    ],
                 ],
-                [[u, 0.0], [next_u, 0.0], [next_u, 1.0], [u, 1.0]],
+                [[u, 0.0], [u, 1.0], [next_u, 1.0], [next_u, 0.0]],
                 color,
             );
 
@@ -269,16 +269,40 @@ impl Mesh {
         let mut vertices = Vec::with_capacity(18);
         let mut indices = Vec::with_capacity(24);
 
-        push_triangle(
+        push_triangle_with_uv(
             &mut vertices,
             &mut indices,
-            [front_bottom_left, front_bottom_right, front_top_right],
+            [front_bottom_left, front_top_right, front_bottom_right],
+            [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0]],
             color,
         );
-        push_triangle(
+        push_triangle_with_uv(
             &mut vertices,
             &mut indices,
-            [back_bottom_left, back_top_right, back_bottom_right],
+            [back_bottom_left, back_bottom_right, back_top_right],
+            [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            color,
+        );
+        push_quad(
+            &mut vertices,
+            &mut indices,
+            [
+                front_bottom_left,
+                front_bottom_right,
+                back_bottom_right,
+                back_bottom_left,
+            ],
+            color,
+        );
+        push_quad(
+            &mut vertices,
+            &mut indices,
+            [
+                back_bottom_right,
+                front_bottom_right,
+                front_top_right,
+                back_top_right,
+            ],
             color,
         );
         push_quad(
@@ -287,30 +311,8 @@ impl Mesh {
             [
                 front_bottom_left,
                 back_bottom_left,
-                back_bottom_right,
-                front_bottom_right,
-            ],
-            color,
-        );
-        push_quad(
-            &mut vertices,
-            &mut indices,
-            [
-                front_bottom_right,
-                back_bottom_right,
                 back_top_right,
                 front_top_right,
-            ],
-            color,
-        );
-        push_quad(
-            &mut vertices,
-            &mut indices,
-            [
-                front_bottom_left,
-                front_top_right,
-                back_top_right,
-                back_bottom_left,
             ],
             color,
         );
@@ -334,14 +336,15 @@ impl Mesh {
         push_quad(
             &mut vertices,
             &mut indices,
-            [corners[0], corners[3], corners[2], corners[1]],
+            [corners[0], corners[1], corners[2], corners[3]],
             color,
         );
         for (index, next) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
-            push_triangle(
+            push_triangle_with_uv(
                 &mut vertices,
                 &mut indices,
-                [corners[index], corners[next], apex],
+                [corners[index], apex, corners[next]],
+                [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0]],
                 color,
             );
         }
@@ -397,6 +400,17 @@ mod tests {
     use super::*;
     use crate::MaterialSlot;
 
+    fn assert_face_normal(vertices: &[Vertex], expected: Vec3) {
+        let expected = expected.normalize();
+        for vertex in vertices {
+            let normal = Vec3::from_array(vertex.normal);
+            assert!(
+                normal.dot(expected) > 0.9999,
+                "expected normal {expected:?}, got {normal:?}"
+            );
+        }
+    }
+
     #[test]
     fn primitive_meshes_have_valid_tangent_space_attributes() {
         let meshes = [
@@ -440,6 +454,53 @@ mod tests {
                     .iter()
                     .all(|vertex| vertex.material_slot == slot as u32)
             );
+        }
+    }
+
+    #[test]
+    fn wedge_face_normals_point_outward() {
+        let mesh = Mesh::wedge([1.0; 4]);
+        let faces = [
+            (0..3, Vec3::NEG_Z),
+            (3..6, Vec3::Z),
+            (6..10, Vec3::NEG_Y),
+            (10..14, Vec3::X),
+            (14..18, Vec3::new(-1.0, 1.0, 0.0)),
+        ];
+
+        for (range, expected) in faces {
+            assert_face_normal(&mesh.vertices[range], expected);
+        }
+    }
+
+    #[test]
+    fn cylinder_face_normals_point_outward() {
+        let mesh = Mesh::cylinder(1.0, 1.0, 8, [1.0; 4]);
+
+        for segment in mesh.vertices.chunks_exact(10) {
+            let side_direction = (Vec3::from_array(segment[0].position)
+                + Vec3::from_array(segment[2].position))
+            .with_y(0.0)
+            .normalize();
+            assert_face_normal(&segment[0..4], side_direction);
+            assert_face_normal(&segment[4..7], Vec3::Y);
+            assert_face_normal(&segment[7..10], Vec3::NEG_Y);
+        }
+    }
+
+    #[test]
+    fn corner_wedge_face_normals_point_outward() {
+        let mesh = Mesh::corner_wedge([1.0; 4]);
+        let faces = [
+            (0..4, Vec3::NEG_Y),
+            (4..7, Vec3::NEG_Z),
+            (7..10, Vec3::new(1.0, 1.0, 0.0)),
+            (10..13, Vec3::new(0.0, 1.0, 1.0)),
+            (13..16, Vec3::NEG_X),
+        ];
+
+        for (range, expected) in faces {
+            assert_face_normal(&mesh.vertices[range], expected);
         }
     }
 }

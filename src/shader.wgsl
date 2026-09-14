@@ -1,5 +1,6 @@
 struct Camera {
     view_projection: mat4x4<f32>,
+    light_view_projection: mat4x4<f32>,
     camera_position: vec4<f32>,
     light_direction: vec4<f32>,
     light_color: vec4<f32>,
@@ -10,6 +11,12 @@ override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
 
 @group(0) @binding(0)
 var<uniform> camera: Camera;
+
+@group(0) @binding(1)
+var shadow_map: texture_depth_2d;
+
+@group(0) @binding(2)
+var shadow_sampler: sampler_comparison;
 
 @group(1) @binding(0)
 var material_texture_0: texture_2d_array<f32>;
@@ -65,6 +72,7 @@ struct VertexOutput {
     @location(6) base_color: vec4<f32>,
     @location(7) metallic_roughness: vec4<f32>,
     @location(8) emissive: vec4<f32>,
+    @location(9) shadow_position: vec4<f32>,
 };
 
 @vertex
@@ -85,6 +93,7 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     let world_normal = normalize(normal_matrix * vertex.normal);
     let world_tangent = normalize((model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz);
     output.position = camera.view_projection * world_position;
+    output.shadow_position = camera.light_view_projection * world_position;
     output.world_position = world_position.xyz;
     output.normal = world_normal;
     output.tangent = vec4<f32>(world_tangent, vertex.tangent.w);
@@ -95,6 +104,17 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     output.metallic_roughness = vertex.metallic_roughness;
     output.emissive = vertex.emissive;
     return output;
+}
+
+@vertex
+fn vs_shadow(vertex: VertexInput) -> @builtin(position) vec4<f32> {
+    let model = mat4x4<f32>(
+        vertex.model_0,
+        vertex.model_1,
+        vertex.model_2,
+        vertex.model_3,
+    );
+    return camera.light_view_projection * model * vec4<f32>(vertex.position, 1.0);
 }
 
 fn distribution_ggx(normal_dot_half: f32, roughness: f32) -> f32 {
@@ -129,17 +149,17 @@ fn linear_to_srgb(linear_color: vec3<f32>) -> vec3<f32> {
 }
 
 fn sample_base_color(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
-    if (slot == 1u) {
+    if slot == 1u {
         return textureSampleGrad(material_texture_1, material_sampler, uv, 0, uv_dx, uv_dy);
-    } else if (slot == 2u) {
+    } else if slot == 2u {
         return textureSampleGrad(material_texture_2, material_sampler, uv, 0, uv_dx, uv_dy);
-    } else if (slot == 3u) {
+    } else if slot == 3u {
         return textureSampleGrad(material_texture_3, material_sampler, uv, 0, uv_dx, uv_dy);
-    } else if (slot == 4u) {
+    } else if slot == 4u {
         return textureSampleGrad(material_texture_4, material_sampler, uv, 0, uv_dx, uv_dy);
-    } else if (slot == 5u) {
+    } else if slot == 5u {
         return textureSampleGrad(material_texture_5, material_sampler, uv, 0, uv_dx, uv_dy);
-    } else if (slot == 6u) {
+    } else if slot == 6u {
         return textureSampleGrad(material_texture_6, material_sampler, uv, 0, uv_dx, uv_dy);
     }
     return textureSampleGrad(material_texture_0, material_sampler, uv, 0, uv_dx, uv_dy);
@@ -152,17 +172,17 @@ fn unpack_normal(surface_sample: vec4<f32>) -> vec3<f32> {
 }
 
 fn sample_normal(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec3<f32> {
-    if (slot == 1u) {
+    if slot == 1u {
         return unpack_normal(textureSampleGrad(material_texture_1, material_sampler, uv, 1, uv_dx, uv_dy));
-    } else if (slot == 2u) {
+    } else if slot == 2u {
         return unpack_normal(textureSampleGrad(material_texture_2, material_sampler, uv, 1, uv_dx, uv_dy));
-    } else if (slot == 3u) {
+    } else if slot == 3u {
         return unpack_normal(textureSampleGrad(material_texture_3, material_sampler, uv, 1, uv_dx, uv_dy));
-    } else if (slot == 4u) {
+    } else if slot == 4u {
         return unpack_normal(textureSampleGrad(material_texture_4, material_sampler, uv, 1, uv_dx, uv_dy));
-    } else if (slot == 5u) {
+    } else if slot == 5u {
         return unpack_normal(textureSampleGrad(material_texture_5, material_sampler, uv, 1, uv_dx, uv_dy));
-    } else if (slot == 6u) {
+    } else if slot == 6u {
         return unpack_normal(textureSampleGrad(material_texture_6, material_sampler, uv, 1, uv_dx, uv_dy));
     }
     return unpack_normal(textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy));
@@ -174,27 +194,58 @@ fn sample_metallic_roughness(
     uv_dx: vec2<f32>,
     uv_dy: vec2<f32>,
 ) -> vec4<f32> {
-    if (slot == 1u) {
+    if slot == 1u {
         let sample = textureSampleGrad(material_texture_1, material_sampler, uv, 1, uv_dx, uv_dy);
         return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if (slot == 2u) {
+    } else if slot == 2u {
         let sample = textureSampleGrad(material_texture_2, material_sampler, uv, 1, uv_dx, uv_dy);
         return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if (slot == 3u) {
+    } else if slot == 3u {
         let sample = textureSampleGrad(material_texture_3, material_sampler, uv, 1, uv_dx, uv_dy);
         return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if (slot == 4u) {
+    } else if slot == 4u {
         let sample = textureSampleGrad(material_texture_4, material_sampler, uv, 1, uv_dx, uv_dy);
         return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if (slot == 5u) {
+    } else if slot == 5u {
         let sample = textureSampleGrad(material_texture_5, material_sampler, uv, 1, uv_dx, uv_dy);
         return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if (slot == 6u) {
+    } else if slot == 6u {
         let sample = textureSampleGrad(material_texture_6, material_sampler, uv, 1, uv_dx, uv_dy);
         return vec4<f32>(0.0, sample.a, sample.b, 1.0);
     }
     let sample = textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy);
     return vec4<f32>(0.0, sample.a, sample.b, 1.0);
+}
+
+fn sample_shadow(shadow_position: vec4<f32>, normal_dot_light: f32) -> f32 {
+    let projected = shadow_position.xyz / max(shadow_position.w, 0.0001);
+    if projected.z <= 0.0 || projected.z >= 1.0 {
+        return 1.0;
+    }
+
+    let shadow_uv = projected.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+    if any(shadow_uv <= vec2<f32>(0.0)) || any(shadow_uv >= vec2<f32>(1.0)) {
+        return 1.0;
+    }
+
+    let texel_size = 1.0 / 2048.0;
+    // Base bias covers ~1.5 texels of depth quantization: slope term grows
+    // toward grazing angles where depth changes fastest across a texel.
+    let depth_bias = 0.0006 + 0.0012 * (1.0 - normal_dot_light);
+    let depth = projected.z - depth_bias;
+    var visibility = 0.0;
+    for (var x: i32 = -1; x <= 1; x = x + 1) {
+        for (var y: i32 = -1; y <= 1; y = y + 1) {
+            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+            visibility += textureSampleCompareLevel(
+                shadow_map,
+                shadow_sampler,
+                shadow_uv + offset,
+                depth,
+            );
+        }
+    }
+    return visibility / 9.0;
 }
 
 @fragment
@@ -211,8 +262,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         tangent * normal_sample.x + bitangent * normal_sample.y + world_normal * normal_sample.z,
     );
 
-    let metallic_roughness_sample =
-        sample_metallic_roughness(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+    let metallic_roughness_sample = sample_metallic_roughness(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
     let metallic = clamp(
         vertex.metallic_roughness.x * metallic_roughness_sample.b,
         0.0,
@@ -227,6 +277,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let view_direction = normalize(camera.camera_position.xyz - vertex.world_position);
     let light_direction = normalize(camera.light_direction.xyz);
     let half_direction = normalize(view_direction + light_direction);
+    let geometric_normal_dot_light = max(dot(world_normal, light_direction), 0.0);
     let normal_dot_view = max(dot(mapped_normal, view_direction), 0.0);
     let normal_dot_light = max(dot(mapped_normal, light_direction), 0.0);
     let normal_dot_half = max(dot(mapped_normal, half_direction), 0.0);
@@ -236,17 +287,26 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let fresnel = fresnel_schlick(view_dot_half, base_reflectance);
     let normal_distribution = distribution_ggx(normal_dot_half, roughness);
     let geometry = geometry_smith(normal_dot_view, normal_dot_light, roughness);
+    // Normal-offset bias: move the receiver off its own surface along the
+    // geometric normal before the shadow lookup. Depth-only bias always trades
+    // acne against peter-panning. The normal offset removes self-intersection
+    // at grazing angles without pushing contact shadows away along light dir.
+    let normal_bias = mix(0.06, 0.02, geometric_normal_dot_light);
+    let biased_world = vertex.world_position + world_normal * normal_bias;
+    let biased_shadow_position = camera.light_view_projection * vec4<f32>(biased_world, 1.0);
+    let shadow_visibility = sample_shadow(biased_shadow_position, geometric_normal_dot_light);
     let specular = normal_distribution * geometry * fresnel
         / max(4.0 * normal_dot_view * normal_dot_light, 0.0001);
     let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) / 3.14159265;
     let direct = (diffuse * base_color.rgb + specular)
         * camera.light_color.rgb
-        * normal_dot_light;
+        * normal_dot_light
+        * shadow_visibility;
     let ambient = base_color.rgb * camera.ambient_color.rgb * (1.0 - metallic);
     let color = ambient + direct + vertex.emissive.rgb;
     let tone_mapped = color / (color + vec3<f32>(1.0));
     var display_color = linear_to_srgb(tone_mapped);
-    if (FRAMEBUFFER_IS_SRGB > 0.5) {
+    if FRAMEBUFFER_IS_SRGB > 0.5 {
         display_color = tone_mapped;
     }
     return vec4<f32>(display_color, base_color.a);

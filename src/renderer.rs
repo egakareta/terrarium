@@ -7,8 +7,16 @@ use web_time::Instant;
 use crate::{
     DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
     Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
-    Workspace, wgpu::util::DeviceExt, winit::window::Window,
+    Workspace,
+    glam::{Mat4, Vec3},
+    wgpu::util::DeviceExt,
+    winit::window::Window,
 };
+
+const SHADOW_MAP_SIZE: u32 = 2048;
+const SHADOW_ORTHOGRAPHIC_EXTENT: f32 = 35.0;
+const SHADOW_NEAR: f32 = 20.0;
+const SHADOW_FAR: f32 = 80.0;
 
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
@@ -152,9 +160,14 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     depth_texture: Option<wgpu::Texture>,
     depth_view: Option<wgpu::TextureView>,
+    _shadow_texture: wgpu::Texture,
+    shadow_view: wgpu::TextureView,
+    _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
+    shadow_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    shadow_camera_bind_group: wgpu::BindGroup,
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_sampler: wgpu::Sampler,
     textures: Vec<GpuTexture>,
@@ -181,6 +194,8 @@ pub struct Renderer {
 pub struct CameraUniform {
     /// Camera view-projection matrix in column-major form.
     pub view_projection: [[f32; 4]; 4],
+    /// World-to-light clip matrix used to render and sample the directional shadow map.
+    pub light_view_projection: [[f32; 4]; 4],
     /// Camera world position as an XYZ vector with an unused fourth component.
     pub camera_position: [f32; 4],
     /// World-space direction toward the fixed key light.
@@ -224,7 +239,7 @@ impl Renderer {
             .await?;
         log::info!("selected wgpu adapter: {:?}", adapter.get_info());
         let required_limits = wgpu::Limits {
-            max_sampled_textures_per_shader_stage: MATERIAL_SLOT_COUNT as u32,
+            max_sampled_textures_per_shader_stage: MATERIAL_SLOT_COUNT as u32 + 1,
             ..Default::default()
         };
         let (device, queue) = adapter
@@ -302,6 +317,21 @@ impl Renderer {
             let (texture, view) = create_depth_texture(&device, &config);
             (Some(texture), Some(view))
         });
+        let (shadow_texture, shadow_view) = create_shadow_texture(&device);
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow comparison sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 0.0,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera uniform buffer"),
             size: std::mem::size_of::<CameraUniform>() as u64,
@@ -318,9 +348,59 @@ impl Renderer {
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("camera bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("camera bind group"),
+            layout: &camera_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+            ],
+        });
+        let shadow_camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shadow camera bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -329,9 +409,9 @@ impl Renderer {
                     count: None,
                 }],
             });
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("camera bind group"),
-            layout: &camera_bind_group_layout,
+        let shadow_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow camera bind group"),
+            layout: &shadow_camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: camera_buffer.as_entire_binding(),
@@ -453,6 +533,49 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let shadow_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shadow pipeline layout"),
+                bind_group_layouts: &[Some(&shadow_camera_bind_group_layout)],
+                immediate_size: 0,
+            });
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("directional shadow pipeline"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_shadow"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &shader_constants,
+                    ..Default::default()
+                },
+                buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: None,
+            multiview_mask: None,
+            cache: None,
+        });
 
         let mut renderer = Self {
             surface,
@@ -461,9 +584,14 @@ impl Renderer {
             config,
             depth_texture,
             depth_view,
+            _shadow_texture: shadow_texture,
+            shadow_view,
+            _shadow_sampler: shadow_sampler,
             pipeline,
+            shadow_pipeline,
             camera_buffer,
             camera_bind_group,
+            shadow_camera_bind_group,
             material_bind_group_layout,
             material_sampler,
             textures,
@@ -557,7 +685,9 @@ impl Renderer {
     ) -> Result<(), RendererError> {
         self.config.width = size[0].max(1);
         self.config.height = size[1].max(1);
-        self.prepare_scene(workspace)
+        self.prepare_scene(workspace)?;
+        self.submit_shadow_map();
+        Ok(())
     }
 
     /// Draws the prepared workspace into an eframe WGPU render pass.
@@ -850,6 +980,8 @@ impl Renderer {
                 .current_camera
                 .view_projection_matrix()
                 .to_cols_array_2d(),
+            light_view_projection: light_view_projection(Vec3::new(-0.45, 0.85, 0.35))
+                .to_cols_array_2d(),
             camera_position: workspace
                 .current_camera
                 .pivot()
@@ -956,9 +1088,15 @@ impl Renderer {
         Ok(())
     }
 
-    fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.camera_bind_group, &[]);
+    fn draw_batches<'a>(
+        &self,
+        pass: &mut wgpu::RenderPass<'a>,
+        pipeline: &wgpu::RenderPipeline,
+        camera_bind_group: &wgpu::BindGroup,
+        use_materials: bool,
+    ) {
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, camera_bind_group, &[]);
         for batch in &self.prepared_batches {
             if batch.instance_count == 0 {
                 continue;
@@ -974,9 +1112,54 @@ impl Renderer {
             let instance_end = instance_start
                 + batch.instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
             pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
-            pass.set_bind_group(1, &batch.bind_group, &[]);
+            if use_materials {
+                pass.set_bind_group(1, &batch.bind_group, &[]);
+            }
             pass.draw_indexed(0..mesh.index_count, 0, 0..batch.instance_count);
         }
+    }
+
+    fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
+        self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, true);
+    }
+
+    fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
+        self.draw_batches(
+            pass,
+            &self.shadow_pipeline,
+            &self.shadow_camera_bind_group,
+            false,
+        );
+    }
+
+    fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("directional shadow pass"),
+            color_attachments: &[],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.shadow_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        self.draw_shadow_scene(&mut pass);
+    }
+
+    #[cfg(feature = "eframe")]
+    fn submit_shadow_map(&self) {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("shadow command encoder"),
+            });
+        self.encode_shadow_pass(&mut encoder);
+        self.queue.submit(Some(encoder.finish()));
     }
 
     fn record_frame(&mut self) {
@@ -1091,6 +1274,7 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("scene command encoder"),
             });
+        self.encode_shadow_pass(&mut encoder);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene render pass"),
@@ -1213,6 +1397,45 @@ fn linear_to_srgb_byte(value: u8) -> u8 {
         1.055 * value.powf(1.0 / 2.4) - 0.055
     };
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn light_view_projection(light_direction: Vec3) -> Mat4 {
+    let light_direction = light_direction.normalize_or_zero();
+    let light_position = light_direction * 50.0;
+    let up = if light_direction.dot(Vec3::Y).abs() > 0.98 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let view = crate::glam::camera::rh::view::look_at_mat4(light_position, Vec3::ZERO, up);
+    let projection = crate::glam::camera::rh::proj::directx::orthographic(
+        -SHADOW_ORTHOGRAPHIC_EXTENT,
+        SHADOW_ORTHOGRAPHIC_EXTENT,
+        -SHADOW_ORTHOGRAPHIC_EXTENT,
+        SHADOW_ORTHOGRAPHIC_EXTENT,
+        SHADOW_NEAR,
+        SHADOW_FAR,
+    );
+    projection * view
+}
+
+fn create_shadow_texture(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("directional shadow map"),
+        size: wgpu::Extent3d {
+            width: SHADOW_MAP_SIZE,
+            height: SHADOW_MAP_SIZE,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }
 
 fn create_depth_texture(

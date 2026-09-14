@@ -228,11 +228,34 @@ pub fn tangent_from_uv(positions: [[f32; 3]; 3], uvs: [[f32; 2]; 3], normal: [f3
     };
     let normal = Vec3::from_array(normal);
     let tangent = (tangent - normal * normal.dot(tangent)).normalize_or_zero();
-    let bitangent = position_a * uv_b.x - position_b * uv_a.x;
+    let bitangent = if determinant.abs() > f32::EPSILON {
+        (position_b * uv_a.x - position_a * uv_b.x) / determinant
+    } else {
+        normal.cross(tangent)
+    };
     let handedness = if normal.cross(tangent).dot(bitangent) < 0.0 {
         -1.0
     } else {
         1.0
     };
     [tangent.x, tangent.y, tangent.z, handedness]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tangent_frame_follows_uv_directions() {
+        let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]];
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]];
+        let normal = triangle_normal(positions);
+        let tangent = tangent_from_uv(positions, uvs, normal);
+        let normal = Vec3::from_array(normal);
+        let tangent_direction = Vec3::from_array(tangent[..3].try_into().unwrap());
+        let bitangent_direction = normal.cross(tangent_direction) * tangent[3];
+
+        assert!(tangent_direction.dot(Vec3::X) > 0.9999);
+        assert!(bitangent_direction.dot(Vec3::Y) > 0.9999);
+    }
 }
