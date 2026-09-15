@@ -30,10 +30,13 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, RendererError> {
+        #[cfg(not(target_arch = "wasm32"))]
         let size = cc
             .winit_window()
             .map(|window| window.inner_size())
             .map_or([1280, 720], |size| [size.width, size.height]);
+        #[cfg(target_arch = "wasm32")]
+        let size = [1280, 720];
         let render_state = cc
             .wgpu_render_state
             .as_ref()
@@ -285,6 +288,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
     Ok(workspace)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     env_logger::init();
     println!(
@@ -303,4 +307,33 @@ fn main() -> eframe::Result {
         native_options,
         Box::new(|cc| Ok(Box::new(App::new(cc)?))),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn main() {
+    use wasm_bindgen::JsCast as _;
+
+    wasm_bindgen_futures::spawn_local(async {
+        console_error_panic_hook::set_once();
+
+        let canvas = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id("the_canvas_id"))
+            .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+            .expect("failed to find canvas with id `the_canvas_id`");
+
+        let web_options = eframe::WebOptions {
+            renderer: eframe::Renderer::Wgpu,
+            ..Default::default()
+        };
+
+        eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|cc| Ok(Box::new(App::new(cc)?))),
+            )
+            .await
+            .expect("failed to start eframe");
+    });
 }

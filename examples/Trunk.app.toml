@@ -1,0 +1,4 @@
+[build]
+target = "../assets/web/index.html"
+dist = "dist.app"
+example = "app"

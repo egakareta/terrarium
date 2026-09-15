@@ -50,19 +50,19 @@ run = "cargo bench --benches"
 
 [tasks."serve:examples:app"]
 description = "Serve the example app with Trunk"
-dir = "{{config_root}}/examples/app"
-run = "trunk serve"
+dir = "{{config_root}}"
+run = "trunk serve --config examples/Trunk.app.toml"
 
 [tasks."run:examples:app"]
 description = "Run the example app natively"
-dir = "{{config_root}}/examples/app"
-run = "cargo run"
+dir = "{{config_root}}"
+run = "cargo run --example app"
 
 [tasks."wsl:examples:app"]
 description = "Run the example app in WSL"
-dir = "{{config_root}}/examples/app"
+dir = "{{config_root}}"
 env = { CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER = "/usr/bin/env" }
-run = "cargo xwin run --target x86_64-pc-windows-msvc"
+run = "cargo xwin run --example app --target x86_64-pc-windows-msvc"
 
 [env]
 _.path = { path = ["{{ exec(command='cmdshim path') }}"], tools = true }
