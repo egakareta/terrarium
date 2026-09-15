@@ -1,10 +1,12 @@
+use std::rc::Rc;
+
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, Texture, TextureError,
-    TextureHandle, TweenManager,
+    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Texture,
+    TextureError, TextureHandle, TweenManager,
 };
 
 /// The 3D root that owns its child [`Instance`] values, CPU textures, and active camera.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Workspace {
     instance: InstanceData,
     /// The camera used when this workspace is rendered.
@@ -12,18 +14,23 @@ pub struct Workspace {
     camera_controller: CameraController,
     tween_manager: TweenManager,
     textures: Vec<Texture>,
+    lookup: Rc<InstanceLookup>,
 }
 
 impl Workspace {
     /// Creates an empty workspace with the default camera and controller.
     pub fn new() -> Self {
-        Self {
+        let lookup = Rc::new(InstanceLookup::default());
+        let workspace = Self {
             instance: InstanceData::new("Workspace"),
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
             textures: Vec::new(),
-        }
+            lookup,
+        };
+        crate::instance::register_instance_lookup(workspace.id(), &workspace.lookup);
+        workspace
     }
 
     /// Takes ownership of a validated CPU-side texture and returns its workspace handle.
@@ -62,12 +69,22 @@ impl Workspace {
 
     /// Returns a child by its stable identifier.
     pub fn instance(&self, id: InstanceId) -> Option<&dyn Instance> {
-        self.find_descendant(id)
+        if id == self.id() {
+            return None;
+        }
+        let instance = self.lookup.get(id)?;
+        // The index only stores pointers to boxed children owned by this workspace.
+        Some(unsafe { instance.as_ref() })
     }
 
     /// Returns a mutable child by its stable identifier.
     pub fn instance_mut(&mut self, id: InstanceId) -> Option<&mut dyn Instance> {
-        self.find_descendant_mut(id)
+        if id == self.id() {
+            return None;
+        }
+        let mut instance = self.lookup.get(id)?;
+        // Boxed children have stable addresses while they are owned by the workspace.
+        Some(unsafe { instance.as_mut() })
     }
 
     /// Applies the controller's accumulated input to the active camera.
@@ -123,6 +140,25 @@ impl Workspace {
     #[cfg(feature = "eframe")]
     pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
         self.camera_controller.process_eframe_input(input);
+    }
+}
+
+impl Clone for Workspace {
+    fn clone(&self) -> Self {
+        let lookup = Rc::new(InstanceLookup::default());
+        let mut workspace = Self {
+            instance: self.instance.clone(),
+            current_camera: self.current_camera.clone(),
+            camera_controller: self.camera_controller.clone(),
+            tween_manager: self.tween_manager.clone(),
+            textures: self.textures.clone(),
+            lookup: lookup.clone(),
+        };
+        crate::instance::register_instance_lookup(workspace.id(), &lookup);
+        for child in workspace.instance.children_mut() {
+            child.set_instance_lookup(Some(lookup.clone()));
+        }
+        workspace
     }
 }
 
@@ -210,6 +246,25 @@ mod tests {
                 .instances()
                 .all(|instance| instance.parent() == Some(cloned_workspace.id()))
         );
+        let cloned_part_id = cloned_workspace.children()[0].id();
+        assert!(cloned_workspace.get::<Part>(cloned_part_id).is_some());
+    }
+
+    #[test]
+    fn lookup_index_tracks_nested_instances_and_stays_workspace_local() {
+        let mut workspace = Workspace::new();
+        let parent_id = workspace.add_child(Part::new("parent"));
+        let child_id = {
+            workspace
+                .get_mut::<Part>(parent_id)
+                .unwrap()
+                .add_child(Part::new("child"))
+        };
+
+        assert_eq!(workspace.get::<Part>(child_id).unwrap().name(), "child");
+
+        let other_workspace = Workspace::new();
+        assert!(other_workspace.instance(child_id).is_none());
     }
 
     #[test]

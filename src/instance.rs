@@ -1,6 +1,10 @@
 use std::{
     any::Any,
+    cell::RefCell,
+    collections::HashMap,
     fmt::Debug,
+    ptr::NonNull,
+    rc::{Rc, Weak},
     sync::{Mutex, OnceLock},
 };
 
@@ -15,8 +19,60 @@ slotmap::new_key_type! {
 
 static INSTANCE_IDS: OnceLock<Mutex<SlotMap<InstanceId, ()>>> = OnceLock::new();
 
+thread_local! {
+    static INSTANCE_LOOKUPS: RefCell<HashMap<InstanceId, Weak<InstanceLookup>>> =
+        RefCell::new(HashMap::new());
+}
+
 fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
     INSTANCE_IDS.get_or_init(|| Mutex::new(SlotMap::with_key()))
+}
+
+/// Internal index used to resolve instances by their stable identifier.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct InstanceLookup {
+    instances: RefCell<HashMap<InstanceId, NonNull<dyn Instance>>>,
+}
+
+impl InstanceLookup {
+    /// Registers an instance pointer in this lookup index.
+    #[doc(hidden)]
+    pub fn register(&self, instance: &mut dyn Instance) {
+        self.instances
+            .borrow_mut()
+            .insert(instance.id(), NonNull::from(instance));
+    }
+
+    fn unregister(&self, id: InstanceId) {
+        self.instances.borrow_mut().remove(&id);
+    }
+
+    pub(crate) fn get(&self, id: InstanceId) -> Option<NonNull<dyn Instance>> {
+        self.instances.borrow().get(&id).copied()
+    }
+}
+
+#[doc(hidden)]
+pub fn register_instance_lookup(id: InstanceId, lookup: &Rc<InstanceLookup>) {
+    INSTANCE_LOOKUPS.with_borrow_mut(|lookups| {
+        lookups.insert(id, Rc::downgrade(lookup));
+    });
+}
+
+#[doc(hidden)]
+pub fn unregister_instance_lookup(id: InstanceId) {
+    INSTANCE_LOOKUPS.with_borrow_mut(|lookups| {
+        if let Some(lookup) = lookups.remove(&id).and_then(|lookup| lookup.upgrade()) {
+            lookup.unregister(id);
+        }
+    });
+}
+
+/// Returns the lookup index associated with an instance, if it is parented.
+#[doc(hidden)]
+pub fn instance_lookup(id: InstanceId) -> Option<Rc<InstanceLookup>> {
+    INSTANCE_LOOKUPS.with_borrow(|lookups| lookups.get(&id).and_then(Weak::upgrade))
 }
 
 /// Implements the common [`Instance`] plumbing for a type backed by
@@ -75,6 +131,22 @@ macro_rules! impl_instance {
 
             fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any {
                 self
+            }
+
+            fn set_instance_lookup(
+                &mut self,
+                lookup: Option<::std::rc::Rc<$crate::InstanceLookup>>,
+            ) {
+                if let Some(lookup) = &lookup {
+                    $crate::register_instance_lookup(self.id(), lookup);
+                    lookup.register(self);
+                } else {
+                    $crate::unregister_instance_lookup(self.id());
+                }
+
+                for child in self.children_mut() {
+                    child.set_instance_lookup(lookup.clone());
+                }
             }
         }
     };
@@ -139,12 +211,19 @@ impl InstanceData {
         let child_id = child.id();
         child.set_instance_parent(Some(self.id));
         self.children.push(child);
+        if let Some(lookup) = instance_lookup(self.id) {
+            self.children
+                .last_mut()
+                .expect("just pushed child")
+                .set_instance_lookup(Some(lookup));
+        }
         child_id
     }
 }
 
 impl Drop for InstanceData {
     fn drop(&mut self) {
+        unregister_instance_lookup(self.id);
         instance_ids()
             .lock()
             .expect("instance ID registry poisoned")
@@ -264,6 +343,14 @@ pub trait Instance: Any + Debug + InstanceClone {
 
     /// Returns this value as mutable [`Any`] for downcasting.
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Internal hook used to register an instance subtree in its workspace index.
+    #[doc(hidden)]
+    fn set_instance_lookup(&mut self, lookup: Option<Rc<InstanceLookup>>) {
+        for child in self.children_mut() {
+            child.set_instance_lookup(lookup.clone());
+        }
+    }
 
     /// Parents an isolated instance to any instance.
     ///
