@@ -295,7 +295,6 @@ fn main() {
     {
         let native_options = eframe::NativeOptions {
             renderer: eframe::Renderer::Wgpu,
-            depth_buffer: 32,
             viewport: egui::ViewportBuilder::default()
                 .with_title("Courtyard")
                 .with_inner_size([1280.0, 720.0]),

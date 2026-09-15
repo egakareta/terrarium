@@ -435,7 +435,6 @@ fn main() {
 
     let native_options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
-        depth_buffer: 32,
         viewport: egui::ViewportBuilder::default()
             .with_title("Terrarium render benchmark")
             .with_inner_size([config.width as f32, config.height as f32]),
