@@ -137,7 +137,6 @@ impl Workspace {
     }
 
     /// Forwards eframe input to the active camera controller.
-    #[cfg(feature = "eframe")]
     pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
         self.camera_controller.process_eframe_input(input);
     }

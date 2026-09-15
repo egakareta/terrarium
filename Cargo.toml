@@ -10,7 +10,7 @@ eframe = { version = "0.36", default-features = false, features = [
   "wayland",
   "wgpu",
   "x11",
-], optional = true }
+] }
 env_logger = "0.11"
 glam = "0.33"
 image = { version = "0.25" }
@@ -30,7 +30,3 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
-
-[features]
-default = ["eframe"]
-eframe = ["dep:eframe"]

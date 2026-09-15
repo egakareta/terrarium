@@ -221,7 +221,6 @@ impl CameraController {
     }
 
     /// Feeds eframe's normalized input state into the controller.
-    #[cfg(feature = "eframe")]
     pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
         if !input.focused {
             self.clear_keys();
@@ -376,7 +375,6 @@ fn set_key(key: &mut bool, pressed: bool) -> bool {
     true
 }
 
-#[cfg(feature = "eframe")]
 fn eframe_key(key: KeyCode) -> Option<crate::egui::Key> {
     use crate::egui::Key;
 
@@ -398,7 +396,6 @@ fn eframe_key(key: KeyCode) -> Option<crate::egui::Key> {
     })
 }
 
-#[cfg(feature = "eframe")]
 fn eframe_button(button: MouseButton) -> Option<crate::egui::PointerButton> {
     use crate::egui::PointerButton;
 

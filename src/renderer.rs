@@ -61,7 +61,6 @@ pub enum RendererError {
     #[error("the renderer does not own a presentation surface")]
     NoSurface,
     /// Eframe did not provide the WGPU state required by the eframe renderer.
-    #[cfg(feature = "eframe")]
     #[error("eframe did not provide a WGPU render state")]
     EframeRenderStateUnavailable,
 }
@@ -152,7 +151,6 @@ struct GpuMesh {
     index_count: u32,
 }
 
-#[cfg(feature = "eframe")]
 struct EframeSceneTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -176,7 +174,6 @@ pub struct Renderer {
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
-    #[cfg(feature = "eframe")]
     eframe_scene: Option<EframeSceneTarget>,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
@@ -299,7 +296,6 @@ impl Renderer {
     }
 
     /// Creates a renderer that draws into eframe's WGPU render pass.
-    #[cfg(feature = "eframe")]
     pub fn new_eframe(
         render_state: &crate::egui_wgpu::RenderState,
         size: [u32; 2],
@@ -605,7 +601,6 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
-        #[cfg(feature = "eframe")]
         let eframe_scene = use_offscreen_scene
             .then(|| EframeSceneTarget::new(&device, config.format, config.width, config.height));
 
@@ -621,7 +616,6 @@ impl Renderer {
             _shadow_sampler: shadow_sampler,
             pipeline,
             shadow_pipeline,
-            #[cfg(feature = "eframe")]
             eframe_scene,
             camera_buffer,
             camera_bind_group,
@@ -711,14 +705,12 @@ impl Renderer {
             self.depth_texture = Some(depth_texture);
             self.depth_view = Some(depth_view);
         }
-        #[cfg(feature = "eframe")]
         if let Some(eframe_scene) = self.eframe_scene.as_mut() {
             eframe_scene.resize(&self.device, width, height);
         }
     }
 
     /// Prepares a workspace for drawing in an eframe WGPU paint callback.
-    #[cfg(feature = "eframe")]
     pub fn prepare_eframe_scene(
         &mut self,
         workspace: &Workspace,
@@ -748,7 +740,6 @@ impl Renderer {
     }
 
     /// Draws the prepared workspace into an eframe WGPU render pass.
-    #[cfg(feature = "eframe")]
     pub fn paint_eframe_scene<'a>(&mut self, pass: &mut wgpu::RenderPass<'a>) {
         if let Some(eframe_scene) = &self.eframe_scene {
             pass.set_pipeline(&eframe_scene.pipeline);
@@ -1264,7 +1255,6 @@ impl Renderer {
         self.draw_shadow_scene(&mut pass);
     }
 
-    #[cfg(feature = "eframe")]
     fn encode_scene_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1299,7 +1289,6 @@ impl Renderer {
         self.draw_scene(&mut pass);
     }
 
-    #[cfg(feature = "eframe")]
     fn submit_eframe_scene(&self) {
         let Some(eframe_scene) = &self.eframe_scene else {
             return;
@@ -1317,7 +1306,6 @@ impl Renderer {
         self.queue.submit(Some(encoder.finish()));
     }
 
-    #[cfg(feature = "eframe")]
     fn submit_shadow_map(&self) {
         let mut encoder = self
             .device
@@ -1464,7 +1452,6 @@ impl Renderer {
     }
 }
 
-#[cfg(feature = "eframe")]
 impl EframeSceneTarget {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1562,7 +1549,6 @@ impl EframeSceneTarget {
     }
 }
 
-#[cfg(feature = "eframe")]
 fn create_eframe_scene_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -1585,7 +1571,6 @@ fn create_eframe_scene_bind_group(
     })
 }
 
-#[cfg(feature = "eframe")]
 fn create_eframe_scene_texture(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
