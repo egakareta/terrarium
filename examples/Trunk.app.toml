@@ -4,4 +4,4 @@ dist = "dist.app"
 example = "app"
 
 [watch]
-watch = ["../src"]
+watch = ["../src", "app.rs"]
