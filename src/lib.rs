@@ -3,6 +3,7 @@
 
 mod camera;
 mod color3;
+mod framework;
 mod instance;
 mod material;
 mod part;
@@ -15,6 +16,7 @@ mod workspace;
 pub use camera::*;
 pub use color3::*;
 pub use eframe::{self, egui, egui_wgpu, wgpu};
+pub use framework::*;
 pub use glam;
 pub use instance::*;
 pub use material::*;

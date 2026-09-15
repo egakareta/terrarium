@@ -3,13 +3,12 @@ use std::{
     fmt::Display,
     process,
     str::FromStr,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use terrarium::{
-    Camera, Color3, Instance, InstanceId, Part, PartShape, Renderer, RendererError, Workspace,
-    eframe, egui, egui_wgpu,
+    Camera, Color3, Framework, Instance, InstanceId, Part, PartShape, RendererError, Workspace,
+    eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
 };
 
@@ -46,27 +45,9 @@ struct Sample {
     gpu_complete: Duration,
 }
 
-struct SceneCallback {
-    renderer: Arc<Mutex<Renderer>>,
-}
-
-impl egui_wgpu::CallbackTrait for SceneCallback {
-    fn paint(
-        &self,
-        _info: egui::PaintCallbackInfo,
-        render_pass: &mut egui_wgpu::wgpu::RenderPass<'static>,
-        _callback_resources: &egui_wgpu::CallbackResources,
-    ) {
-        self.renderer
-            .lock()
-            .expect("benchmark renderer lock poisoned")
-            .paint_eframe_scene(render_pass);
-    }
-}
-
 struct App {
     config: Config,
-    renderer: Arc<Mutex<Renderer>>,
+    framework: Framework,
     workspace: Workspace,
     base_camera_pivot: Mat4,
     part_ids: Vec<InstanceId>,
@@ -86,14 +67,11 @@ impl App {
             create_benchmark_workspace(config.parts, config.width, config.height);
         let base_camera_pivot = workspace.current_camera.pivot();
         let base_parts = workspace.get_all::<Part>().cloned().collect();
-        let render_state = cc
-            .wgpu_render_state
-            .as_ref()
-            .expect("eframe WGPU render state is required");
-        let renderer = Renderer::new(render_state, [config.width, config.height])?;
+        let mut framework = Framework::new(cc, [config.width, config.height])?;
+        framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
         Ok(Self {
             config,
-            renderer: Arc::new(Mutex::new(renderer)),
+            framework,
             workspace,
             base_camera_pivot,
             part_ids,
@@ -112,12 +90,7 @@ impl App {
         let Some(started) = self.frame_started.take() else {
             return;
         };
-        if let Err(error) = self
-            .renderer
-            .lock()
-            .expect("benchmark renderer lock poisoned")
-            .wait_for_gpu()
-        {
+        if let Err(error) = self.framework.renderer().wait_for_gpu() {
             report_renderer_error(error);
             self.finished = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -223,7 +196,7 @@ impl App {
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.012, 0.019, 0.050, 1.0]
+        self.framework.clear_color()
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -242,21 +215,8 @@ impl eframe::App for App {
         if self.finished {
             return;
         }
-        let size = ui.ctx().input(|input| {
-            let rect = input.viewport_rect();
-            [
-                (rect.width() * input.pixels_per_point).round() as u32,
-                (rect.height() * input.pixels_per_point).round() as u32,
-            ]
-        });
-        self.workspace.current_camera.resize(size[0], size[1]);
         let started = Instant::now();
-        if let Err(error) = self
-            .renderer
-            .lock()
-            .expect("benchmark renderer lock poisoned")
-            .prepare_eframe_scene(&self.workspace, size)
-        {
+        if let Err(error) = self.framework.prepare(ui, &mut self.workspace) {
             report_renderer_error(error);
             self.finished = true;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -264,14 +224,7 @@ impl eframe::App for App {
         }
         self.cpu_submission = Some(started.elapsed());
         self.frame_started = Some(started);
-
-        let callback = egui_wgpu::Callback::new_paint_callback(
-            ui.max_rect(),
-            SceneCallback {
-                renderer: Arc::clone(&self.renderer),
-            },
-        );
-        ui.painter().add(egui::Shape::Callback(callback));
+        self.framework.paint(ui);
     }
 }
 
@@ -433,16 +386,9 @@ fn main() {
         config.parts, config.warmup_frames, config.measured_frames
     );
 
-    let native_options = eframe::NativeOptions {
-        renderer: eframe::Renderer::Wgpu,
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Terrarium render benchmark")
-            .with_inner_size([config.width as f32, config.height as f32]),
-        ..Default::default()
-    };
-    eframe::run_native(
+    Framework::run_native(
         "Terrarium render benchmark",
-        native_options,
+        [config.width, config.height],
         Box::new(move |cc| Ok(Box::new(App::new(cc, config)?))),
     )
     .expect("run benchmark eframe application");

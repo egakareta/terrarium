@@ -1,106 +1,40 @@
-use std::sync::{Arc, Mutex};
-
 use terrarium::{
-    Color3, Easing, Instance, Material, MaterialSlot, Part, PartShape, Renderer, RendererError,
-    Repeat, Texture, TextureColorSpace, Tween, Workspace, eframe, egui, egui_wgpu, glam::Vec3,
+    Color3, Easing, Framework, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
+    Repeat, Texture, TextureColorSpace, Tween, Workspace, eframe, egui, glam::Vec3,
 };
-
-struct SceneCallback {
-    renderer: Arc<Mutex<Renderer>>,
-}
-
-impl egui_wgpu::CallbackTrait for SceneCallback {
-    fn paint(
-        &self,
-        _info: egui::PaintCallbackInfo,
-        render_pass: &mut egui_wgpu::wgpu::RenderPass<'static>,
-        _callback_resources: &egui_wgpu::CallbackResources,
-    ) {
-        self.renderer
-            .lock()
-            .expect("scene renderer lock poisoned")
-            .paint_eframe_scene(render_pass);
-    }
-}
 
 struct App {
     workspace: Workspace,
-    renderer: Arc<Mutex<Renderer>>,
+    framework: Framework,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, RendererError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        let size = cc
-            .winit_window()
-            .map(|window| window.inner_size())
-            .map_or([1280, 720], |size| [size.width, size.height]);
-        #[cfg(target_arch = "wasm32")]
-        let size = [1280, 720];
-        let render_state = cc
-            .wgpu_render_state
-            .as_ref()
-            .expect("eframe WGPU render state is required");
-        let mut workspace = create_workspace()?;
-        workspace.current_camera.resize(size[0], size[1]);
-
-        let mut renderer = Renderer::new(render_state, size)?;
-        renderer.set_clear_color(egui_wgpu::wgpu::Color {
-            r: 0.012,
-            g: 0.019,
-            b: 0.050,
-            a: 1.0,
-        });
+        let workspace = create_workspace()?;
+        let mut framework = Framework::new(cc, [1280, 720])?;
+        framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
         Ok(Self {
             workspace,
-            renderer: Arc::new(Mutex::new(renderer)),
+            framework,
         })
     }
 }
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.012, 0.019, 0.050, 1.0]
+        self.framework.clear_color()
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let delta = ctx.input(|input| input.stable_dt.min(0.1));
-        ctx.input(|input| self.workspace.process_eframe_input(input));
-        self.workspace.update(delta);
-        ctx.request_repaint();
+        self.framework.update(ctx, &mut self.workspace);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let size = ui.ctx().input(|input| {
-            let rect = input.viewport_rect();
-            [
-                (rect.width() * input.pixels_per_point).round() as u32,
-                (rect.height() * input.pixels_per_point).round() as u32,
-            ]
-        });
-        self.workspace.current_camera.resize(size[0], size[1]);
-        if let Err(error) = self
-            .renderer
-            .lock()
-            .expect("scene renderer lock poisoned")
-            .prepare_eframe_scene(&self.workspace, size)
-        {
+        if let Err(error) = self.framework.render(ui, &mut self.workspace) {
             log::error!("scene preparation failed: {error}");
         }
 
-        let callback = egui_wgpu::Callback::new_paint_callback(
-            ui.max_rect(),
-            SceneCallback {
-                renderer: Arc::clone(&self.renderer),
-            },
-        );
-        ui.painter().add(egui::Shape::Callback(callback));
-
-        let fps = self
-            .renderer
-            .lock()
-            .expect("scene renderer lock poisoned")
-            .fps();
+        let fps = self.framework.renderer().fps();
         egui::Area::new("fps_counter".into())
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
             .order(egui::Order::Foreground)
@@ -293,16 +227,9 @@ fn main() {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let native_options = eframe::NativeOptions {
-            renderer: eframe::Renderer::Wgpu,
-            viewport: egui::ViewportBuilder::default()
-                .with_title("Courtyard")
-                .with_inner_size([1280.0, 720.0]),
-            ..Default::default()
-        };
-        eframe::run_native(
+        Framework::run_native(
             "Courtyard",
-            native_options,
+            [1280, 720],
             Box::new(|cc| Ok(Box::new(App::new(cc)?))),
         )
         .unwrap();
@@ -310,30 +237,7 @@ fn main() {
 
     #[cfg(target_arch = "wasm32")]
     {
-        use wasm_bindgen::JsCast as _;
-
-        wasm_bindgen_futures::spawn_local(async {
-            console_error_panic_hook::set_once();
-
-            let canvas = web_sys::window()
-                .and_then(|window| window.document())
-                .and_then(|document| document.get_element_by_id("the_canvas_id"))
-                .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-                .expect("failed to find canvas with id `the_canvas_id`");
-
-            let web_options = eframe::WebOptions {
-                renderer: eframe::Renderer::Wgpu,
-                ..Default::default()
-            };
-
-            eframe::WebRunner::new()
-                .start(
-                    canvas,
-                    web_options,
-                    Box::new(|cc| Ok(Box::new(App::new(cc)?))),
-                )
-                .await
-                .expect("failed to start eframe");
-        });
+        console_error_panic_hook::set_once();
+        Framework::run_web("the_canvas_id", Box::new(|cc| Ok(Box::new(App::new(cc)?))));
     }
 }
