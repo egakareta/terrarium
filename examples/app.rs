@@ -288,52 +288,53 @@ fn create_workspace() -> Result<Workspace, RendererError> {
     Ok(workspace)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn main() -> eframe::Result {
+fn main() {
     env_logger::init();
-    println!(
-        "WASD move | drag with left mouse to look | Space/Ctrl rise and descend | Shift sprint"
-    );
-    let native_options = eframe::NativeOptions {
-        renderer: eframe::Renderer::Wgpu,
-        depth_buffer: 32,
-        viewport: egui::ViewportBuilder::default()
-            .with_title("Courtyard")
-            .with_inner_size([1280.0, 720.0]),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "Courtyard",
-        native_options,
-        Box::new(|cc| Ok(Box::new(App::new(cc)?))),
-    )
-}
 
-#[cfg(target_arch = "wasm32")]
-pub fn main() {
-    use wasm_bindgen::JsCast as _;
-
-    wasm_bindgen_futures::spawn_local(async {
-        console_error_panic_hook::set_once();
-
-        let canvas = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id("the_canvas_id"))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-            .expect("failed to find canvas with id `the_canvas_id`");
-
-        let web_options = eframe::WebOptions {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let native_options = eframe::NativeOptions {
             renderer: eframe::Renderer::Wgpu,
+            depth_buffer: 32,
+            viewport: egui::ViewportBuilder::default()
+                .with_title("Courtyard")
+                .with_inner_size([1280.0, 720.0]),
             ..Default::default()
         };
+        let _ = eframe::run_native(
+            "Courtyard",
+            native_options,
+            Box::new(|cc| Ok(Box::new(App::new(cc)?))),
+        )
+        .unwrap();
+    }
 
-        eframe::WebRunner::new()
-            .start(
-                canvas,
-                web_options,
-                Box::new(|cc| Ok(Box::new(App::new(cc)?))),
-            )
-            .await
-            .expect("failed to start eframe");
-    });
+    #[cfg(target_arch = "wasm32")]
+    {
+        use wasm_bindgen::JsCast as _;
+
+        wasm_bindgen_futures::spawn_local(async {
+            console_error_panic_hook::set_once();
+
+            let canvas = web_sys::window()
+                .and_then(|window| window.document())
+                .and_then(|document| document.get_element_by_id("the_canvas_id"))
+                .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                .expect("failed to find canvas with id `the_canvas_id`");
+
+            let web_options = eframe::WebOptions {
+                renderer: eframe::Renderer::Wgpu,
+                ..Default::default()
+            };
+
+            eframe::WebRunner::new()
+                .start(
+                    canvas,
+                    web_options,
+                    Box::new(|cc| Ok(Box::new(App::new(cc)?))),
+                )
+                .await
+                .expect("failed to start eframe");
+        });
+    }
 }
