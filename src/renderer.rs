@@ -13,7 +13,7 @@ use crate::{
     winit::window::Window,
 };
 
-const SHADOW_MAP_SIZE: u32 = 2048;
+const SHADOW_MAP_SIZE: u32 = 4096;
 const SHADOW_ORTHOGRAPHIC_EXTENT: f32 = 35.0;
 const SHADOW_NEAR: f32 = 20.0;
 const SHADOW_FAR: f32 = 80.0;
@@ -152,6 +152,17 @@ struct GpuMesh {
     index_count: u32,
 }
 
+#[cfg(feature = "eframe")]
+struct EframeSceneTarget {
+    _texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    format: wgpu::TextureFormat,
+    sampler: wgpu::Sampler,
+    bind_group_layout: wgpu::BindGroupLayout,
+    bind_group: wgpu::BindGroup,
+    pipeline: wgpu::RenderPipeline,
+}
+
 /// The wgpu state and built-in PBR mesh pipeline.
 pub struct Renderer {
     surface: Option<wgpu::Surface<'static>>,
@@ -165,6 +176,8 @@ pub struct Renderer {
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    #[cfg(feature = "eframe")]
+    eframe_scene: Option<EframeSceneTarget>,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     shadow_camera_bind_group: wgpu::BindGroup,
@@ -282,7 +295,7 @@ impl Renderer {
         };
         surface.configure(&device, &config);
 
-        Self::from_gpu(Some(surface), device, queue, config)
+        Self::from_gpu(Some(surface), device, queue, config, false)
     }
 
     /// Creates a renderer that draws into eframe's WGPU render pass.
@@ -307,6 +320,7 @@ impl Renderer {
             render_state.device.clone(),
             render_state.queue.clone(),
             config,
+            cfg!(target_arch = "wasm32"),
         )
     }
 
@@ -315,19 +329,22 @@ impl Renderer {
         device: wgpu::Device,
         queue: wgpu::Queue,
         config: wgpu::SurfaceConfiguration,
+        use_offscreen_scene: bool,
     ) -> Result<Self, RendererError> {
-        let (depth_texture, depth_view) = surface.as_ref().map_or((None, None), |_| {
+        let (depth_texture, depth_view) = if surface.is_some() || use_offscreen_scene {
             let (texture, view) = create_depth_texture(&device, &config);
             (Some(texture), Some(view))
-        });
+        } else {
+            (None, None)
+        };
         let (shadow_texture, shadow_view) = create_shadow_texture(&device);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow comparison sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             lod_min_clamp: 0.0,
             lod_max_clamp: 0.0,
@@ -479,10 +496,13 @@ impl Renderer {
             label: Some("PBR mesh shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
-        let shader_constants = [(
-            "FRAMEBUFFER_IS_SRGB",
-            if config.format.is_srgb() { 1.0 } else { 0.0 },
-        )];
+        let shader_constants = [
+            (
+                "FRAMEBUFFER_IS_SRGB",
+                if config.format.is_srgb() { 1.0 } else { 0.0 },
+            ),
+            ("SHADOW_MAP_SIZE", SHADOW_MAP_SIZE as f64),
+        ];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh pipeline layout"),
             bind_group_layouts: &[
@@ -516,7 +536,7 @@ impl Renderer {
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: surface.as_ref().map(|_| wgpu::DepthStencilState {
+            depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::Less),
@@ -585,6 +605,9 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        #[cfg(feature = "eframe")]
+        let eframe_scene = use_offscreen_scene
+            .then(|| EframeSceneTarget::new(&device, config.format, config.width, config.height));
 
         let mut renderer = Self {
             surface,
@@ -598,6 +621,8 @@ impl Renderer {
             _shadow_sampler: shadow_sampler,
             pipeline,
             shadow_pipeline,
+            #[cfg(feature = "eframe")]
+            eframe_scene,
             camera_buffer,
             camera_bind_group,
             shadow_camera_bind_group,
@@ -686,6 +711,10 @@ impl Renderer {
             self.depth_texture = Some(depth_texture);
             self.depth_view = Some(depth_view);
         }
+        #[cfg(feature = "eframe")]
+        if let Some(eframe_scene) = self.eframe_scene.as_mut() {
+            eframe_scene.resize(&self.device, width, height);
+        }
     }
 
     /// Prepares a workspace for drawing in an eframe WGPU paint callback.
@@ -695,17 +724,39 @@ impl Renderer {
         workspace: &Workspace,
         size: [u32; 2],
     ) -> Result<(), RendererError> {
-        self.config.width = size[0].max(1);
-        self.config.height = size[1].max(1);
+        let width = size[0].max(1);
+        let height = size[1].max(1);
+        if self.config.width != width || self.config.height != height {
+            self.config.width = width;
+            self.config.height = height;
+            if self.depth_texture.is_some() {
+                let (depth_texture, depth_view) = create_depth_texture(&self.device, &self.config);
+                self.depth_texture = Some(depth_texture);
+                self.depth_view = Some(depth_view);
+            }
+            if let Some(eframe_scene) = self.eframe_scene.as_mut() {
+                eframe_scene.resize(&self.device, width, height);
+            }
+        }
         self.prepare_scene(workspace)?;
-        self.submit_shadow_map();
+        if self.eframe_scene.is_some() {
+            self.submit_eframe_scene();
+        } else {
+            self.submit_shadow_map();
+        }
         Ok(())
     }
 
     /// Draws the prepared workspace into an eframe WGPU render pass.
     #[cfg(feature = "eframe")]
     pub fn paint_eframe_scene<'a>(&mut self, pass: &mut wgpu::RenderPass<'a>) {
-        self.draw_scene(pass);
+        if let Some(eframe_scene) = &self.eframe_scene {
+            pass.set_pipeline(&eframe_scene.pipeline);
+            pass.set_bind_group(0, &eframe_scene.bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        } else {
+            self.draw_scene(pass);
+        }
         self.record_frame();
     }
 
@@ -1214,6 +1265,59 @@ impl Renderer {
     }
 
     #[cfg(feature = "eframe")]
+    fn encode_scene_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+    ) {
+        let color_attachment = wgpu::RenderPassColorAttachment {
+            view: color_view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(self.clear_color),
+                store: wgpu::StoreOp::Store,
+            },
+        };
+        let depth_attachment = wgpu::RenderPassDepthStencilAttachment {
+            view: depth_view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("scene render pass"),
+            color_attachments: &[Some(color_attachment)],
+            depth_stencil_attachment: Some(depth_attachment),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        self.draw_scene(&mut pass);
+    }
+
+    #[cfg(feature = "eframe")]
+    fn submit_eframe_scene(&self) {
+        let Some(eframe_scene) = &self.eframe_scene else {
+            return;
+        };
+        let Some(depth_view) = self.depth_view.as_ref() else {
+            return;
+        };
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("eframe scene command encoder"),
+            });
+        self.encode_shadow_pass(&mut encoder);
+        self.encode_scene_pass(&mut encoder, &eframe_scene.view, depth_view);
+        self.queue.submit(Some(encoder.finish()));
+    }
+
+    #[cfg(feature = "eframe")]
     fn submit_shadow_map(&self) {
         let mut encoder = self
             .device
@@ -1358,6 +1462,150 @@ impl Renderer {
         self.record_frame();
         Ok(())
     }
+}
+
+#[cfg(feature = "eframe")]
+impl EframeSceneTarget {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, width: u32, height: u32) -> Self {
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("eframe scene texture layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("eframe scene sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 0.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("eframe scene composite shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("eframe scene composite pipeline layout"),
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("eframe scene composite pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        let texture = create_eframe_scene_texture(device, format, width, height);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group =
+            create_eframe_scene_bind_group(device, &bind_group_layout, &view, &sampler);
+        Self {
+            _texture: texture,
+            view,
+            format,
+            sampler,
+            bind_group_layout,
+            bind_group,
+            pipeline,
+        }
+    }
+
+    fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        let texture = create_eframe_scene_texture(device, self.format, width, height);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group =
+            create_eframe_scene_bind_group(device, &self.bind_group_layout, &view, &self.sampler);
+        self._texture = texture;
+        self.view = view;
+        self.bind_group = bind_group;
+    }
+}
+
+#[cfg(feature = "eframe")]
+fn create_eframe_scene_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("eframe scene texture bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
+}
+
+#[cfg(feature = "eframe")]
+fn create_eframe_scene_texture(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    width: u32,
+    height: u32,
+) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("eframe scene color"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
 }
 
 fn upload_texture(
@@ -1596,6 +1844,19 @@ mod tests {
         validator
             .validate(&module)
             .expect("material shader should validate");
+    }
+
+    #[test]
+    fn eframe_composite_shader_validates() {
+        let module = wgpu::naga::front::wgsl::parse_str(include_str!("blit.wgsl"))
+            .expect("eframe composite shader should parse");
+        let mut validator = wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        );
+        validator
+            .validate(&module)
+            .expect("eframe composite shader should validate");
     }
 
     #[test]

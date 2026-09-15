@@ -8,6 +8,7 @@ struct Camera {
 };
 
 override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
+override SHADOW_MAP_SIZE: f32 = 2048.0;
 
 @group(0) @binding(0)
 var<uniform> camera: Camera;
@@ -199,24 +200,27 @@ fn sample_shadow(shadow_position: vec4<f32>, normal_dot_light: f32) -> f32 {
         return 1.0;
     }
 
-    let texel_size = 1.0 / 2048.0;
+    let texel_size = 1.0 / SHADOW_MAP_SIZE;
     // Base bias covers ~1.5 texels of depth quantization: slope term grows
     // toward grazing angles where depth changes fastest across a texel.
-    let depth_bias = 0.0006 + 0.0012 * (1.0 - normal_dot_light);
+    let depth_bias = 0.0003 + 0.0006 * (1.0 - normal_dot_light);
     let depth = projected.z - depth_bias;
     var visibility = 0.0;
-    for (var x: i32 = -1; x <= 1; x = x + 1) {
-        for (var y: i32 = -1; y <= 1; y = y + 1) {
+    for (var x: i32 = -2; x <= 2; x = x + 1) {
+        let weight_x = select(1.0, 4.0, abs(x) == 1) * select(1.0, 6.0, x == 0);
+        for (var y: i32 = -2; y <= 2; y = y + 1) {
+            let weight_y = select(1.0, 4.0, abs(y) == 1) * select(1.0, 6.0, y == 0);
+            let weight = weight_x * weight_y;
             let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
             visibility += textureSampleCompareLevel(
                 shadow_map,
                 shadow_sampler,
                 shadow_uv + offset,
                 depth,
-            );
+            ) * weight;
         }
     }
-    return visibility / 9.0;
+    return visibility / 256.0;
 }
 
 @fragment
