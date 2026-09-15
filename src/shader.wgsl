@@ -54,12 +54,10 @@ struct VertexInput {
     @location(7) model_1: vec4<f32>,
     @location(8) model_2: vec4<f32>,
     @location(9) model_3: vec4<f32>,
-    @location(10) normal_0: vec4<f32>,
-    @location(11) normal_1: vec4<f32>,
-    @location(12) normal_2: vec4<f32>,
-    @location(13) base_color: vec4<f32>,
-    @location(14) metallic_roughness: vec4<f32>,
-    @location(15) emissive: vec4<f32>,
+    @location(10) normal_scales: vec3<f32>,
+    @location(11) base_color: vec4<f32>,
+    @location(12) metallic_roughness: vec2<f32>,
+    @location(13) emissive: vec3<f32>,
 };
 
 struct VertexOutput {
@@ -71,9 +69,16 @@ struct VertexOutput {
     @location(4) @interpolate(flat) material_slot: u32,
     @location(5) vertex_color: vec4<f32>,
     @location(6) base_color: vec4<f32>,
-    @location(7) metallic_roughness: vec4<f32>,
-    @location(8) emissive: vec4<f32>,
-    @location(9) shadow_position: vec4<f32>,
+    @location(7) metallic_roughness: vec2<f32>,
+    @location(8) emissive: vec3<f32>,
+};
+
+struct ShadowVertexInput {
+    @location(0) position: vec3<f32>,
+    @location(6) model_0: vec4<f32>,
+    @location(7) model_1: vec4<f32>,
+    @location(8) model_2: vec4<f32>,
+    @location(9) model_3: vec4<f32>,
 };
 
 @vertex
@@ -87,14 +92,13 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     );
     let world_position = model * vec4<f32>(vertex.position, 1.0);
     let normal_matrix = mat3x3<f32>(
-        vertex.normal_0.xyz,
-        vertex.normal_1.xyz,
-        vertex.normal_2.xyz,
+        vertex.model_0.xyz * vertex.normal_scales.x,
+        vertex.model_1.xyz * vertex.normal_scales.y,
+        vertex.model_2.xyz * vertex.normal_scales.z,
     );
     let world_normal = normalize(normal_matrix * vertex.normal);
     let world_tangent = normalize((model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz);
     output.position = camera.view_projection * world_position;
-    output.shadow_position = camera.light_view_projection * world_position;
     output.world_position = world_position.xyz;
     output.normal = world_normal;
     output.tangent = vec4<f32>(world_tangent, vertex.tangent.w);
@@ -108,7 +112,7 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
 }
 
 @vertex
-fn vs_shadow(vertex: VertexInput) -> @builtin(position) vec4<f32> {
+fn vs_shadow(vertex: ShadowVertexInput) -> @builtin(position) vec4<f32> {
     let model = mat4x4<f32>(
         vertex.model_0,
         vertex.model_1,

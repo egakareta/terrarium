@@ -424,13 +424,15 @@ fn find_child_mut<'a, T: Instance>(
 
 /// Depth-first iterator over an instance's descendants.
 pub struct Descendants<'a> {
-    pending: Vec<&'a dyn Instance>,
+    current: std::slice::Iter<'a, Box<dyn Instance>>,
+    parents: Vec<std::slice::Iter<'a, Box<dyn Instance>>>,
 }
 
 impl<'a> Descendants<'a> {
     fn new(children: &'a [Box<dyn Instance>]) -> Self {
         Self {
-            pending: children.iter().rev().map(Box::as_ref).collect(),
+            current: children.iter(),
+            parents: Vec::new(),
         }
     }
 }
@@ -439,10 +441,18 @@ impl<'a> Iterator for Descendants<'a> {
     type Item = &'a dyn Instance;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let instance = self.pending.pop()?;
-        self.pending
-            .extend(instance.children().iter().rev().map(Box::as_ref));
-        Some(instance)
+        loop {
+            if let Some(instance) = self.current.next() {
+                let instance = instance.as_ref();
+                let children = instance.children();
+                if !children.is_empty() {
+                    self.parents
+                        .push(std::mem::replace(&mut self.current, children.iter()));
+                }
+                return Some(instance);
+            }
+            self.current = self.parents.pop()?;
+        }
     }
 }
 
@@ -640,6 +650,13 @@ mod tests {
         assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
         assert_eq!(workspace.get_all::<Part>().count(), 1);
         assert_eq!(workspace.instances().count(), 3);
+        assert_eq!(
+            workspace
+                .instances()
+                .map(|instance| instance.name())
+                .collect::<Vec<_>>(),
+            ["model", "part", "Camera"]
+        );
     }
 
     #[test]

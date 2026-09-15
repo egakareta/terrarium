@@ -47,12 +47,10 @@ pub enum RendererError {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct InstanceRaw {
     model: [[f32; 4]; 4],
-    normal_0: [f32; 4],
-    normal_1: [f32; 4],
-    normal_2: [f32; 4],
+    normal_scales: [f32; 3],
     base_color: [f32; 4],
-    metallic_roughness: [f32; 4],
-    emissive: [f32; 4],
+    metallic_roughness: [f32; 2],
+    emissive: [f32; 3],
 }
 
 impl InstanceRaw {
@@ -62,12 +60,25 @@ impl InstanceRaw {
             7 => Float32x4,
             8 => Float32x4,
             9 => Float32x4,
-            10 => Float32x4,
+            10 => Float32x3,
             11 => Float32x4,
-            12 => Float32x4,
-            13 => Float32x4,
-            14 => Float32x4,
-            15 => Float32x4,
+            12 => Float32x2,
+            13 => Float32x3,
+        ];
+
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: ATTRIBUTES,
+        }
+    }
+
+    fn shadow_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+            6 => Float32x4,
+            7 => Float32x4,
+            8 => Float32x4,
+            9 => Float32x4,
         ];
 
         wgpu::VertexBufferLayout {
@@ -165,7 +176,6 @@ pub struct Renderer {
     packed_material_textures: HashMap<MaterialTextures, PackedMaterialTextures>,
     gpu_material_textures: Vec<GpuMaterialTexture>,
     instance_buffer: wgpu::Buffer,
-    instance_data: Vec<InstanceRaw>,
     meshes: Vec<GpuMesh>,
     primitive_meshes: [MeshHandle; PartShape::COUNT],
     clear_color: wgpu::Color,
@@ -448,7 +458,7 @@ impl Renderer {
                     constants: &shader_constants,
                     ..Default::default()
                 },
-                buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
+                buffers: &[Some(Vertex::layout()), Some(InstanceRaw::shadow_layout())],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -504,7 +514,6 @@ impl Renderer {
             packed_material_textures: HashMap::new(),
             gpu_material_textures: Vec::new(),
             instance_buffer,
-            instance_data: Vec::new(),
             meshes: Vec::new(),
             primitive_meshes: [MeshHandle(usize::MAX); PartShape::COUNT],
             clear_color: wgpu::Color {
@@ -935,24 +944,22 @@ impl Renderer {
             {
                 continue;
             }
-            let textures =
-                self.material_textures(workspace, &part.material, &part.material_slots)?;
-            let batch_index = if textures == default_textures {
-                let slot = part.shape.index();
-                if let Some(batch_index) = default_batch_for_shape[slot] {
-                    batch_index
-                } else {
-                    let batch_index = batches.len();
-                    default_batch_for_shape[slot] = Some(batch_index);
-                    batches.push(RenderBatch {
-                        shape: part.shape,
-                        textures,
-                        instances: Vec::new(),
-                        instance_start: 0,
-                    });
-                    batch_index
-                }
+            let has_custom_textures = part.material.textures.base_color.is_some()
+                || part.material.textures.normal.is_some()
+                || part.material.textures.metallic_roughness.is_some()
+                || part.material_slots.slots.iter().any(|material| {
+                    material.textures.base_color.is_some()
+                        || material.textures.normal.is_some()
+                        || material.textures.metallic_roughness.is_some()
+                });
+            let custom_textures = if has_custom_textures {
+                let textures =
+                    self.material_textures(workspace, &part.material, &part.material_slots)?;
+                (textures != default_textures).then_some(textures)
             } else {
+                None
+            };
+            let batch_index = if let Some(textures) = custom_textures {
                 let key = (part.shape, textures);
                 if let Some(&batch_index) = batch_indices.get(&key) {
                     batch_index
@@ -967,16 +974,29 @@ impl Renderer {
                     });
                     batch_index
                 }
+            } else {
+                let slot = part.shape.index();
+                if let Some(batch_index) = default_batch_for_shape[slot] {
+                    batch_index
+                } else {
+                    let batch_index = batches.len();
+                    default_batch_for_shape[slot] = Some(batch_index);
+                    batches.push(RenderBatch {
+                        shape: part.shape,
+                        textures: default_textures,
+                        instances: Vec::new(),
+                        instance_start: 0,
+                    });
+                    batch_index
+                }
             };
             let model = part.transform();
-            let (normal_0, normal_1, normal_2) = normal_columns_from_model(&model);
-            let material = part.material;
+            let normal_scales = normal_scales_from_model(&model);
+            let material = &part.material;
             let tint = part.color.rgba();
             batches[batch_index].instances.push(InstanceRaw {
                 model: model.to_cols_array_2d(),
-                normal_0: [normal_0[0], normal_0[1], normal_0[2], 0.0],
-                normal_1: [normal_1[0], normal_1[1], normal_1[2], 0.0],
-                normal_2: [normal_2[0], normal_2[1], normal_2[2], 0.0],
+                normal_scales,
                 base_color: [
                     material.base_color[0] * tint[0],
                     material.base_color[1] * tint[1],
@@ -986,33 +1006,40 @@ impl Renderer {
                 metallic_roughness: [
                     material.metallic.clamp(0.0, 1.0),
                     material.roughness.clamp(0.04, 1.0),
-                    0.0,
-                    0.0,
                 ],
-                emissive: [
-                    material.emissive[0],
-                    material.emissive[1],
-                    material.emissive[2],
-                    0.0,
-                ],
+                emissive: material.emissive,
             });
         }
 
-        self.instance_data.clear();
-        // Reserve once so repeated frames never reallocate the flattened list.
         let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
-        self.instance_data.reserve(total_instances);
+        let mut instance_start = 0;
         for batch in &mut batches {
-            batch.instance_start = self.instance_data.len();
-            self.instance_data.extend_from_slice(&batch.instances);
+            batch.instance_start = instance_start;
+            instance_start += batch.instances.len();
         }
-        self.ensure_instance_capacity(self.instance_data.len());
-        if !self.instance_data.is_empty() {
-            self.queue.write_buffer(
-                &self.instance_buffer,
-                0,
-                bytemuck::cast_slice(&self.instance_data),
-            );
+        self.ensure_instance_capacity(total_instances);
+        let upload_size = std::mem::size_of::<InstanceRaw>() as u64 * total_instances as u64;
+        if let Some(upload_size) = wgpu::BufferSize::new(upload_size)
+            && let Some(mut upload) =
+                self.queue
+                    .write_buffer_with(&self.instance_buffer, 0, upload_size)
+        {
+            let mut byte_offset = 0;
+            for batch in &batches {
+                let bytes = bytemuck::cast_slice(&batch.instances);
+                upload
+                    .slice(byte_offset..byte_offset + bytes.len())
+                    .copy_from_slice(bytes);
+                byte_offset += bytes.len();
+            }
+        } else {
+            for batch in &batches {
+                self.queue.write_buffer(
+                    &self.instance_buffer,
+                    batch.instance_start as u64 * std::mem::size_of::<InstanceRaw>() as u64,
+                    bytemuck::cast_slice(&batch.instances),
+                );
+            }
         }
 
         self.prepared_batches.clear();
@@ -1423,21 +1450,21 @@ fn light_view_projection(light_direction: Vec3) -> Mat4 {
     projection * view
 }
 
-/// Normal-matrix columns for a `pivot * scale` model without a full inverse.
+/// Factors used to reconstruct normal-matrix columns from a `pivot * scale` model.
 ///
 /// `Part::transform` is always a rigid pivot multiplied by an axis-aligned
 /// scale, so with `M3 = R * S` each column is a unit rotation axis scaled by
-/// its axis scale. Dividing by the squared length recovers `R * S^-1`, which
-/// is exactly the inverse-transpose for this TRS form at a fraction of the
-/// cost of `Mat4::inverse`.
-fn normal_columns_from_model(model: &Mat4) -> ([f32; 3], [f32; 3], [f32; 3]) {
+/// its axis scale. Multiplying by the reciprocal squared length recovers
+/// `R * S^-1`, which is exactly the inverse-transpose for this TRS form.
+fn normal_scales_from_model(model: &Mat4) -> [f32; 3] {
     let c0 = model.x_axis.truncate();
     let c1 = model.y_axis.truncate();
     let c2 = model.z_axis.truncate();
-    let n0 = c0 / c0.length_squared().max(1e-12);
-    let n1 = c1 / c1.length_squared().max(1e-12);
-    let n2 = c2 / c2.length_squared().max(1e-12);
-    (n0.to_array(), n1.to_array(), n2.to_array())
+    [
+        c0.length_squared().max(1e-12).recip(),
+        c1.length_squared().max(1e-12).recip(),
+        c2.length_squared().max(1e-12).recip(),
+    ]
 }
 
 /// Extracts normalized clip planes from a DirectX-style (depth 0..1)
@@ -1555,15 +1582,21 @@ mod tests {
     }
 
     #[test]
-    fn cheap_normal_columns_match_inverse_transpose_for_trs() {
+    fn compact_normal_scales_match_inverse_transpose_for_trs() {
         use crate::glam::{Quat, Vec3};
+        assert_eq!(std::mem::size_of::<InstanceRaw>(), 112);
         let rotation = Quat::from_euler(crate::glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
         let pivot = Mat4::from_rotation_translation(rotation, Vec3::new(1.0, -2.0, 3.0));
         let size = Vec3::new(0.82, 1.1, 0.6);
         let model = pivot * Mat4::from_scale(size);
-        let (n0, n1, n2) = normal_columns_from_model(&model);
+        let scales = normal_scales_from_model(&model);
+        let columns = [
+            (model.x_axis.truncate() * scales[0]).to_array(),
+            (model.y_axis.truncate() * scales[1]).to_array(),
+            (model.z_axis.truncate() * scales[2]).to_array(),
+        ];
         let reference = model.inverse().transpose().to_cols_array_2d();
-        for (computed, expected) in [n0, n1, n2].iter().zip([
+        for (computed, expected) in columns.iter().zip([
             [reference[0][0], reference[0][1], reference[0][2]],
             [reference[1][0], reference[1][1], reference[1][2]],
             [reference[2][0], reference[2][1], reference[2][2]],
