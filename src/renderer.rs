@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
@@ -10,7 +10,6 @@ use crate::{
     Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
-    winit::window::Window,
 };
 
 const SHADOW_MAP_SIZE: u32 = 4096;
@@ -21,18 +20,6 @@ const SHADOW_FAR: f32 = 80.0;
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
 pub enum RendererError {
-    /// The window surface could not be created.
-    #[error("could not create the rendering surface: {0}")]
-    SurfaceCreation(#[from] wgpu::CreateSurfaceError),
-    /// No compatible GPU adapter was available.
-    #[error("could not find a compatible GPU adapter: {0}")]
-    AdapterRequest(#[from] wgpu::RequestAdapterError),
-    /// The selected adapter could not create a device and queue.
-    #[error("could not create the GPU device: {0}")]
-    DeviceRequest(#[from] wgpu::RequestDeviceError),
-    /// The window surface exposed no texture format.
-    #[error("the window surface did not expose any texture formats")]
-    NoSurfaceFormat,
     /// A custom mesh had no vertices or indices.
     #[error("mesh must contain at least one vertex and one index")]
     EmptyMesh,
@@ -51,18 +38,9 @@ pub enum RendererError {
         /// The invalid workspace-local texture index.
         index: usize,
     },
-    /// The surface reported a validation error while acquiring a frame.
-    #[error("the surface reported a validation error while acquiring a frame")]
-    SurfaceValidation,
     /// Waiting for GPU work failed.
     #[error("could not wait for submitted GPU work: {0}")]
     DevicePoll(#[from] wgpu::PollError),
-    /// The renderer was created for eframe and cannot present directly.
-    #[error("the renderer does not own a presentation surface")]
-    NoSurface,
-    /// Eframe did not provide the WGPU state required by the eframe renderer.
-    #[error("eframe did not provide a WGPU render state")]
-    EframeRenderStateUnavailable,
 }
 
 #[repr(C)]
@@ -161,20 +139,20 @@ struct EframeSceneTarget {
     pipeline: wgpu::RenderPipeline,
 }
 
-/// The wgpu state and built-in PBR mesh pipeline.
+/// The eframe WGPU state and built-in PBR mesh pipeline.
 pub struct Renderer {
-    surface: Option<wgpu::Surface<'static>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    depth_texture: Option<wgpu::Texture>,
-    depth_view: Option<wgpu::TextureView>,
+    width: u32,
+    height: u32,
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
     _shadow_texture: wgpu::Texture,
     shadow_view: wgpu::TextureView,
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
-    eframe_scene: Option<EframeSceneTarget>,
+    eframe_scene: EframeSceneTarget,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     shadow_camera_bind_group: wgpu::BindGroup,
@@ -220,119 +198,17 @@ pub struct CameraUniform {
 }
 
 impl Renderer {
-    /// Creates a renderer and keeps the supplied window alive through its surface.
-    pub async fn new(window: Arc<Window>) -> Result<Self, RendererError> {
-        Self::new_with_present_mode(window, wgpu::PresentMode::Fifo).await
-    }
-
-    /// Creates a renderer with the requested surface presentation mode.
-    ///
-    /// FIFO presentation is used when the surface does not support the requested mode.
-    /// [`Renderer::new`] retains the normal FIFO presentation behavior.
-    pub async fn new_with_present_mode(
-        window: Arc<Window>,
-        requested_present_mode: wgpu::PresentMode,
-    ) -> Result<Self, RendererError> {
-        let size = window.inner_size();
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: Default::default(),
-            flags: wgpu::InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER,
-            backend_options: Default::default(),
-            display: Default::default(),
-            memory_budget_thresholds: Default::default(),
-        });
-        let surface = instance.create_surface(window.clone())?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::HighPerformance,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-                apply_limit_buckets: false,
-            })
-            .await?;
-        log::info!("selected wgpu adapter: {:?}", adapter.get_info());
-        let required_limits = wgpu::Limits {
-            max_sampled_textures_per_shader_stage: MATERIAL_SLOT_COUNT as u32 + 1,
-            ..Default::default()
-        };
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                label: Some("terrarium device"),
-                required_features: wgpu::Features::empty(),
-                required_limits,
-                experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                memory_hints: wgpu::MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-            })
-            .await?;
-
-        let capabilities = surface.get_capabilities(&adapter);
-        let format = capabilities
-            .formats
-            .iter()
-            .copied()
-            .find(wgpu::TextureFormat::is_srgb)
-            .or_else(|| capabilities.formats.first().copied())
-            .ok_or(RendererError::NoSurfaceFormat)?;
-        let present_mode = if capabilities.present_modes.contains(&requested_present_mode) {
-            requested_present_mode
-        } else {
-            wgpu::PresentMode::Fifo
-        };
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            color_space: wgpu::SurfaceColorSpace::Auto,
-            width: size.width.max(1),
-            height: size.height.max(1),
-            present_mode,
-            desired_maximum_frame_latency: 2,
-            alpha_mode: capabilities.alpha_modes[0],
-            view_formats: vec![],
-        };
-        surface.configure(&device, &config);
-
-        Self::from_gpu(Some(surface), device, queue, config, false)
-    }
-
     /// Creates a renderer that draws into eframe's WGPU render pass.
-    pub fn new_eframe(
+    pub fn new(
         render_state: &crate::egui_wgpu::RenderState,
         size: [u32; 2],
     ) -> Result<Self, RendererError> {
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: render_state.target_format,
-            color_space: wgpu::SurfaceColorSpace::Auto,
-            width: size[0].max(1),
-            height: size[1].max(1),
-            present_mode: wgpu::PresentMode::AutoVsync,
-            desired_maximum_frame_latency: 2,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            view_formats: vec![],
-        };
-        Self::from_gpu(
-            None,
-            render_state.device.clone(),
-            render_state.queue.clone(),
-            config,
-            cfg!(target_arch = "wasm32"),
-        )
-    }
-
-    fn from_gpu(
-        surface: Option<wgpu::Surface<'static>>,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
-        config: wgpu::SurfaceConfiguration,
-        use_offscreen_scene: bool,
-    ) -> Result<Self, RendererError> {
-        let (depth_texture, depth_view) = if surface.is_some() || use_offscreen_scene {
-            let (texture, view) = create_depth_texture(&device, &config);
-            (Some(texture), Some(view))
-        } else {
-            (None, None)
-        };
+        let format = render_state.target_format;
+        let width = size[0].max(1);
+        let height = size[1].max(1);
+        let device = render_state.device.clone();
+        let queue = render_state.queue.clone();
+        let (depth_texture, depth_view) = create_depth_texture(&device, width, height);
         let (shadow_texture, shadow_view) = create_shadow_texture(&device);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow comparison sampler"),
@@ -495,7 +371,7 @@ impl Renderer {
         let shader_constants = [
             (
                 "FRAMEBUFFER_IS_SRGB",
-                if config.format.is_srgb() { 1.0 } else { 0.0 },
+                if format.is_srgb() { 1.0 } else { 0.0 },
             ),
             ("SHADOW_MAP_SIZE", SHADOW_MAP_SIZE as f64),
         ];
@@ -548,7 +424,7 @@ impl Renderer {
                     ..Default::default()
                 },
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -601,14 +477,13 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
-        let eframe_scene = use_offscreen_scene
-            .then(|| EframeSceneTarget::new(&device, config.format, config.width, config.height));
+        let eframe_scene = EframeSceneTarget::new(&device, format, width, height);
 
         let mut renderer = Self {
-            surface,
             device,
             queue,
-            config,
+            width,
+            height,
             depth_texture,
             depth_view,
             _shadow_texture: shadow_texture,
@@ -659,7 +534,7 @@ impl Renderer {
         self.clear_color = color;
     }
 
-    /// Returns the average number of successfully presented frames per second over the last
+    /// Returns the average number of successfully rendered frames per second over the last
     /// measurement interval.
     pub fn fps(&self) -> f32 {
         self.fps
@@ -687,7 +562,7 @@ impl Renderer {
             .map_err(RendererError::DevicePoll)
     }
 
-    /// Reconfigures the surface and depth buffer for a new non-zero size.
+    /// Resizes the eframe scene and depth buffer for a new non-zero size.
     ///
     /// Zero dimensions are ignored, which is useful while a window is
     /// minimized.
@@ -695,19 +570,12 @@ impl Renderer {
         if width == 0 || height == 0 {
             return;
         }
-        self.config.width = width;
-        self.config.height = height;
-        if let Some(surface) = &self.surface {
-            surface.configure(&self.device, &self.config);
-        }
-        if self.depth_texture.is_some() {
-            let (depth_texture, depth_view) = create_depth_texture(&self.device, &self.config);
-            self.depth_texture = Some(depth_texture);
-            self.depth_view = Some(depth_view);
-        }
-        if let Some(eframe_scene) = self.eframe_scene.as_mut() {
-            eframe_scene.resize(&self.device, width, height);
-        }
+        self.width = width;
+        self.height = height;
+        let (depth_texture, depth_view) = create_depth_texture(&self.device, width, height);
+        self.depth_texture = depth_texture;
+        self.depth_view = depth_view;
+        self.eframe_scene.resize(&self.device, width, height);
     }
 
     /// Prepares a workspace for drawing in an eframe WGPU paint callback.
@@ -718,36 +586,19 @@ impl Renderer {
     ) -> Result<(), RendererError> {
         let width = size[0].max(1);
         let height = size[1].max(1);
-        if self.config.width != width || self.config.height != height {
-            self.config.width = width;
-            self.config.height = height;
-            if self.depth_texture.is_some() {
-                let (depth_texture, depth_view) = create_depth_texture(&self.device, &self.config);
-                self.depth_texture = Some(depth_texture);
-                self.depth_view = Some(depth_view);
-            }
-            if let Some(eframe_scene) = self.eframe_scene.as_mut() {
-                eframe_scene.resize(&self.device, width, height);
-            }
+        if self.width != width || self.height != height {
+            self.resize(width, height);
         }
         self.prepare_scene(workspace)?;
-        if self.eframe_scene.is_some() {
-            self.submit_eframe_scene();
-        } else {
-            self.submit_shadow_map();
-        }
+        self.submit_scene();
         Ok(())
     }
 
     /// Draws the prepared workspace into an eframe WGPU render pass.
     pub fn paint_eframe_scene<'a>(&mut self, pass: &mut wgpu::RenderPass<'a>) {
-        if let Some(eframe_scene) = &self.eframe_scene {
-            pass.set_pipeline(&eframe_scene.pipeline);
-            pass.set_bind_group(0, &eframe_scene.bind_group, &[]);
-            pass.draw(0..3, 0..1);
-        } else {
-            self.draw_scene(pass);
-        }
+        pass.set_pipeline(&self.eframe_scene.pipeline);
+        pass.set_bind_group(0, &self.eframe_scene.bind_group, &[]);
+        pass.draw(0..3, 0..1);
         self.record_frame();
     }
 
@@ -965,7 +816,7 @@ impl Renderer {
         }
 
         let mut packed_textures = [PackedTextureHandle(usize::MAX); MATERIAL_SLOT_COUNT];
-        for slot in 0..MATERIAL_SLOT_COUNT {
+        for (slot, packed_texture) in packed_textures.iter_mut().enumerate() {
             let base_texture = self.textures[textures.base_color[slot].0].source.clone();
             let normal_texture = self.textures[textures.normal[slot].0].source.clone();
             let metallic_roughness_texture = self.textures[textures.metallic_roughness[slot].0]
@@ -981,8 +832,7 @@ impl Renderer {
                     base_texture.height,
                 ),
             )?;
-            packed_textures[slot] =
-                self.upload_material_texture(&base_texture, &surface_texture)?;
+            *packed_texture = self.upload_material_texture(&base_texture, &surface_texture)?;
         }
         let packed = PackedMaterialTextures {
             textures: packed_textures,
@@ -1289,30 +1139,14 @@ impl Renderer {
         self.draw_scene(&mut pass);
     }
 
-    fn submit_eframe_scene(&self) {
-        let Some(eframe_scene) = &self.eframe_scene else {
-            return;
-        };
-        let Some(depth_view) = self.depth_view.as_ref() else {
-            return;
-        };
+    fn submit_scene(&self) {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("eframe scene command encoder"),
             });
         self.encode_shadow_pass(&mut encoder);
-        self.encode_scene_pass(&mut encoder, &eframe_scene.view, depth_view);
-        self.queue.submit(Some(encoder.finish()));
-    }
-
-    fn submit_shadow_map(&self) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("shadow command encoder"),
-            });
-        self.encode_shadow_pass(&mut encoder);
+        self.encode_scene_pass(&mut encoder, &self.eframe_scene.view, &self.depth_view);
         self.queue.submit(Some(encoder.finish()));
     }
 
@@ -1324,131 +1158,6 @@ impl Renderer {
             self.frame_count = 0;
             self.fps_timer = Instant::now();
         }
-    }
-
-    /// Renders a workspace using its current camera. A lost or outdated surface is reconfigured
-    /// and retried on the next frame; minimized and occluded windows simply skip their frame.
-    pub fn render(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
-        self.render_with_overlay(
-            workspace,
-            |_device, _queue, _encoder, _view, _format, _size| Vec::new(),
-        )
-    }
-
-    /// Renders a workspace and gives an overlay access to the frame before it is presented.
-    ///
-    /// The callback can encode additional commands into the frame, such as an egui render pass,
-    /// and return command buffers that must be submitted alongside the scene command buffer.
-    pub fn render_with_overlay<F>(
-        &mut self,
-        workspace: &Workspace,
-        draw_overlay: F,
-    ) -> Result<(), RendererError>
-    where
-        F: FnOnce(
-            &wgpu::Device,
-            &wgpu::Queue,
-            &mut wgpu::CommandEncoder,
-            &wgpu::TextureView,
-            wgpu::TextureFormat,
-            [u32; 2],
-        ) -> Vec<wgpu::CommandBuffer>,
-    {
-        self.render_with_overlay_internal(workspace, |renderer, encoder, view| {
-            draw_overlay(
-                &renderer.device,
-                &renderer.queue,
-                encoder,
-                view,
-                renderer.config.format,
-                [renderer.config.width, renderer.config.height],
-            )
-        })
-    }
-
-    pub(crate) fn render_with_overlay_internal<F>(
-        &mut self,
-        workspace: &Workspace,
-        draw_overlay: F,
-    ) -> Result<(), RendererError>
-    where
-        F: FnOnce(
-            &mut Self,
-            &mut wgpu::CommandEncoder,
-            &wgpu::TextureView,
-        ) -> Vec<wgpu::CommandBuffer>,
-    {
-        let frame = {
-            let Some(surface) = &self.surface else {
-                return Err(RendererError::NoSurface);
-            };
-            match surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(frame)
-                | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                    return Ok(());
-                }
-                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                    surface.configure(&self.device, &self.config);
-                    return Ok(());
-                }
-                wgpu::CurrentSurfaceTexture::Validation => {
-                    return Err(RendererError::SurfaceValidation);
-                }
-            }
-        };
-
-        self.prepare_scene(workspace)?;
-
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let color_attachment = wgpu::RenderPassColorAttachment {
-            view: &view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(self.clear_color),
-                store: wgpu::StoreOp::Store,
-            },
-        };
-        let Some(depth_view) = self.depth_view.as_ref() else {
-            return Err(RendererError::NoSurface);
-        };
-        let depth_attachment = wgpu::RenderPassDepthStencilAttachment {
-            view: depth_view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
-                store: wgpu::StoreOp::Store,
-            }),
-            stencil_ops: None,
-        };
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("scene command encoder"),
-            });
-        self.encode_shadow_pass(&mut encoder);
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("scene render pass"),
-                color_attachments: &[Some(color_attachment)],
-                depth_stencil_attachment: Some(depth_attachment),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            self.draw_scene(&mut pass);
-        }
-        let overlay_command_buffers = draw_overlay(self, &mut encoder, &view);
-        self.queue.submit(
-            overlay_command_buffers
-                .into_iter()
-                .chain(std::iter::once(encoder.finish())),
-        );
-        self.queue.present(frame);
-        self.record_frame();
-        Ok(())
     }
 }
 
@@ -1783,13 +1492,14 @@ fn create_shadow_texture(device: &wgpu::Device) -> (wgpu::Texture, wgpu::Texture
 
 fn create_depth_texture(
     device: &wgpu::Device,
-    config: &wgpu::SurfaceConfiguration,
+    width: u32,
+    height: u32,
 ) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("depth texture"),
         size: wgpu::Extent3d {
-            width: config.width,
-            height: config.height,
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,

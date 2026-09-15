@@ -3,20 +3,14 @@ use std::{
     fmt::Display,
     process,
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use terrarium::{
     Camera, Color3, Instance, InstanceId, Part, PartShape, Renderer, RendererError, Workspace,
+    eframe, egui, egui_wgpu,
     glam::{EulerRot, Mat4, Quat, Vec3},
-    winit::{
-        application::ApplicationHandler,
-        dpi::PhysicalSize,
-        event::WindowEvent,
-        event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-        window::{Window, WindowId},
-    },
 };
 
 const ANIMATED_PARTS_RATIO: usize = 4;
@@ -52,10 +46,27 @@ struct Sample {
     gpu_complete: Duration,
 }
 
+struct SceneCallback {
+    renderer: Arc<Mutex<Renderer>>,
+}
+
+impl egui_wgpu::CallbackTrait for SceneCallback {
+    fn paint(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut egui_wgpu::wgpu::RenderPass<'static>,
+        _callback_resources: &egui_wgpu::CallbackResources,
+    ) {
+        self.renderer
+            .lock()
+            .expect("benchmark renderer lock poisoned")
+            .paint_eframe_scene(render_pass);
+    }
+}
+
 struct App {
     config: Config,
-    window: Option<Arc<Window>>,
-    renderer: Option<Renderer>,
+    renderer: Arc<Mutex<Renderer>>,
     workspace: Workspace,
     base_camera_pivot: Mat4,
     part_ids: Vec<InstanceId>,
@@ -64,18 +75,25 @@ struct App {
     animation_pool_start: usize,
     warmup_remaining: usize,
     samples: Vec<Sample>,
+    frame_started: Option<Instant>,
+    cpu_submission: Option<Duration>,
+    finished: bool,
 }
 
 impl App {
-    fn new(config: Config) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Result<Self, RendererError> {
         let (workspace, part_ids) =
             create_benchmark_workspace(config.parts, config.width, config.height);
         let base_camera_pivot = workspace.current_camera.pivot();
         let base_parts = workspace.get_all::<Part>().cloned().collect();
-        Self {
+        let render_state = cc
+            .wgpu_render_state
+            .as_ref()
+            .expect("eframe WGPU render state is required");
+        let renderer = Renderer::new(render_state, [config.width, config.height])?;
+        Ok(Self {
             config,
-            window: None,
-            renderer: None,
+            renderer: Arc::new(Mutex::new(renderer)),
             workspace,
             base_camera_pivot,
             part_ids,
@@ -84,26 +102,25 @@ impl App {
             animation_pool_start: 0,
             warmup_remaining: config.warmup_frames,
             samples: Vec::with_capacity(config.measured_frames),
-        }
+            frame_started: None,
+            cpu_submission: None,
+            finished: false,
+        })
     }
 
-    fn render_frame(&mut self, event_loop: &ActiveEventLoop) {
-        let started = Instant::now();
-        self.animate_parts();
-
-        let Some(renderer) = self.renderer.as_mut() else {
+    fn finish_previous_frame(&mut self, ctx: &egui::Context) {
+        let Some(started) = self.frame_started.take() else {
             return;
         };
-
-        if let Err(error) = renderer.render(&self.workspace) {
+        if let Err(error) = self
+            .renderer
+            .lock()
+            .expect("benchmark renderer lock poisoned")
+            .wait_for_gpu()
+        {
             report_renderer_error(error);
-            event_loop.exit();
-            return;
-        }
-        let cpu_submission = started.elapsed();
-        if let Err(error) = renderer.wait_for_gpu() {
-            report_renderer_error(error);
-            event_loop.exit();
+            self.finished = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
         }
 
@@ -111,12 +128,16 @@ impl App {
             self.warmup_remaining -= 1;
         } else {
             self.samples.push(Sample {
-                cpu_submission,
+                cpu_submission: self
+                    .cpu_submission
+                    .take()
+                    .expect("scene submission time should be recorded"),
                 gpu_complete: started.elapsed(),
             });
             if self.samples.len() == self.config.measured_frames {
                 print_report(self.config, &self.samples);
-                event_loop.exit();
+                self.finished = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
     }
@@ -200,81 +221,57 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
+impl eframe::App for App {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.012, 0.019, 0.050, 1.0]
+    }
+
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.finished {
             return;
         }
+        self.finish_previous_frame(ctx);
+        if self.finished {
+            return;
+        }
+        self.animate_parts();
+        ctx.request_repaint();
+    }
 
-        let window = Arc::new(
-            event_loop
-                .create_window(
-                    Window::default_attributes()
-                        .with_title("Terrarium render benchmark")
-                        .with_inner_size(PhysicalSize::new(self.config.width, self.config.height)),
-                )
-                .expect("create benchmark window"),
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.finished {
+            return;
+        }
+        let size = ui.ctx().input(|input| {
+            let rect = input.viewport_rect();
+            [
+                (rect.width() * input.pixels_per_point).round() as u32,
+                (rect.height() * input.pixels_per_point).round() as u32,
+            ]
+        });
+        self.workspace.current_camera.resize(size[0], size[1]);
+        let started = Instant::now();
+        if let Err(error) = self
+            .renderer
+            .lock()
+            .expect("benchmark renderer lock poisoned")
+            .prepare_eframe_scene(&self.workspace, size)
+        {
+            report_renderer_error(error);
+            self.finished = true;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        self.cpu_submission = Some(started.elapsed());
+        self.frame_started = Some(started);
+
+        let callback = egui_wgpu::Callback::new_paint_callback(
+            ui.max_rect(),
+            SceneCallback {
+                renderer: Arc::clone(&self.renderer),
+            },
         );
-        let size = window.inner_size();
-        self.workspace
-            .current_camera
-            .resize(size.width, size.height);
-
-        let renderer = match pollster::block_on(Renderer::new_with_present_mode(
-            window.clone(),
-            wgpu::PresentMode::Immediate,
-        )) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                report_renderer_error(error);
-                event_loop.exit();
-                return;
-            }
-        };
-
-        self.window = Some(window.clone());
-        self.renderer = Some(renderer);
-        window.request_redraw();
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        let Some(window) = self.window.clone() else {
-            return;
-        };
-        if window.id() != window_id {
-            return;
-        }
-
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => {
-                self.workspace
-                    .current_camera
-                    .resize(size.width, size.height);
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.resize(size.width, size.height);
-                }
-            }
-            WindowEvent::RedrawRequested => {
-                self.render_frame(event_loop);
-                if !self.samples.is_empty() && self.samples.len() == self.config.measured_frames {
-                    return;
-                }
-                window.request_redraw();
-            }
-            _ => {}
-        }
-    }
-
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = &self.window {
-            window.request_redraw();
-        }
+        ui.painter().add(egui::Shape::Callback(callback));
     }
 }
 
@@ -436,9 +433,18 @@ fn main() {
         config.parts, config.warmup_frames, config.measured_frames
     );
 
-    let event_loop = EventLoop::new().expect("create event loop");
-    event_loop.set_control_flow(ControlFlow::Poll);
-    event_loop
-        .run_app(&mut App::new(config))
-        .expect("run benchmark event loop");
+    let native_options = eframe::NativeOptions {
+        renderer: eframe::Renderer::Wgpu,
+        depth_buffer: 32,
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Terrarium render benchmark")
+            .with_inner_size([config.width as f32, config.height as f32]),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "Terrarium render benchmark",
+        native_options,
+        Box::new(move |cc| Ok(Box::new(App::new(cc, config)?))),
+    )
+    .expect("run benchmark eframe application");
 }

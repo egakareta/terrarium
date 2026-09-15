@@ -40,11 +40,11 @@ impl App {
         let render_state = cc
             .wgpu_render_state
             .as_ref()
-            .ok_or(RendererError::EframeRenderStateUnavailable)?;
+            .expect("eframe WGPU render state is required");
         let mut workspace = create_workspace()?;
         workspace.current_camera.resize(size[0], size[1]);
 
-        let mut renderer = Renderer::new_eframe(render_state, size)?;
+        let mut renderer = Renderer::new(render_state, size)?;
         renderer.set_clear_color(egui_wgpu::wgpu::Color {
             r: 0.012,
             g: 0.019,
@@ -301,7 +301,7 @@ fn main() {
                 .with_inner_size([1280.0, 720.0]),
             ..Default::default()
         };
-        let _ = eframe::run_native(
+        eframe::run_native(
             "Courtyard",
             native_options,
             Box::new(|cc| Ok(Box::new(App::new(cc)?))),
