@@ -8,7 +8,7 @@ use crate::{
     DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
     Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
     Workspace,
-    glam::{Mat4, Vec3},
+    glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
     winit::window::Window,
 };
@@ -113,7 +113,7 @@ struct RenderBatch {
 
 struct PreparedRenderBatch {
     shape: PartShape,
-    bind_group: wgpu::BindGroup,
+    packed_textures: PackedMaterialTextures,
     instance_start: usize,
     instance_count: u32,
 }
@@ -186,6 +186,9 @@ pub struct Renderer {
     frame_count: u32,
     fps: f32,
     prepared_batches: Vec<PreparedRenderBatch>,
+    batch_scratch: Vec<RenderBatch>,
+    batch_indices_scratch: HashMap<(PartShape, MaterialTextures), usize>,
+    material_bind_groups: HashMap<PackedMaterialTextures, wgpu::BindGroup>,
 }
 
 #[repr(C)]
@@ -504,7 +507,11 @@ impl Renderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
+                // All primitive meshes are closed solids, so backfaces never
+                // contribute a visible pixel: they are always behind a front
+                // face and depth-rejected after shading. Culling them skips
+                // roughly half the fragment work with identical output.
+                cull_mode: Some(wgpu::Face::Back),
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -555,7 +562,9 @@ impl Renderer {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
+                // Same reasoning as the main pass: shadow depth keeps the
+                // nearest front face either way.
+                cull_mode: Some(wgpu::Face::Back),
                 unclipped_depth: false,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 conservative: false,
@@ -615,6 +624,9 @@ impl Renderer {
             frame_count: 0,
             fps: 0.0,
             prepared_batches: Vec::new(),
+            batch_scratch: Vec::new(),
+            batch_indices_scratch: HashMap::new(),
+            material_bind_groups: HashMap::new(),
         };
         for shape in PartShape::ALL {
             let mesh = renderer.add_mesh(&shape.mesh([1.0; 4]))?;
@@ -937,6 +949,14 @@ impl Renderer {
         Ok(packed)
     }
 
+    fn material_bind_group(&mut self, textures: PackedMaterialTextures) -> &wgpu::BindGroup {
+        if !self.material_bind_groups.contains_key(&textures) {
+            let bind_group = self.create_material_bind_group(textures);
+            self.material_bind_groups.insert(textures, bind_group);
+        }
+        &self.material_bind_groups[&textures]
+    }
+
     fn create_material_bind_group(&self, textures: PackedMaterialTextures) -> wgpu::BindGroup {
         let mut entries = Vec::with_capacity(MATERIAL_SLOT_COUNT + 1);
         for (slot, texture) in textures.textures.into_iter().enumerate() {
@@ -975,13 +995,11 @@ impl Renderer {
 
     fn prepare_scene(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
         self.prepared_batches.clear();
+        let camera_vp = workspace.current_camera.view_projection_matrix();
+        let light_vp = light_view_projection(Vec3::new(-0.45, 0.85, 0.35));
         let camera_uniform = CameraUniform {
-            view_projection: workspace
-                .current_camera
-                .view_projection_matrix()
-                .to_cols_array_2d(),
-            light_view_projection: light_view_projection(Vec3::new(-0.45, 0.85, 0.35))
-                .to_cols_array_2d(),
+            view_projection: camera_vp.to_cols_array_2d(),
+            light_view_projection: light_vp.to_cols_array_2d(),
             camera_position: workspace
                 .current_camera
                 .pivot()
@@ -995,50 +1013,78 @@ impl Renderer {
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+        let camera_planes = frustum_planes(camera_vp);
+        let light_planes = frustum_planes(light_vp);
+        let default_textures = self.default_material_textures;
 
-        let mut batches = Vec::<RenderBatch>::new();
-        let mut batch_indices = HashMap::new();
+        // Reuse allocations across frames: clearing retains backing capacity,
+        // so the steady state performs no batching allocations.
+        for batch in &mut self.batch_scratch {
+            batch.instances.clear();
+        }
+        // Temporarily take ownership to build this frame; returned below.
+        let mut batches = std::mem::take(&mut self.batch_scratch);
+        batches.clear();
+        let mut batch_indices = std::mem::take(&mut self.batch_indices_scratch);
+        batch_indices.clear();
+        // Fast path for the common untextured case: index directly by shape
+        // instead of hashing a 168-byte key per part.
+        let mut default_batch_for_shape: [Option<usize>; PartShape::COUNT] =
+            [None; PartShape::COUNT];
         for part in workspace.get_all::<Part>() {
+            // Exact union culling: keep anything visible to the camera or able
+            // to cast into view. Culled parts contribute zero pixels to either
+            // pass, so this changes no rendered pixel.
+            let max_scale = part.size.max_element().max(0.0);
+            let radius = part.shape.bounding_radius() * max_scale * 1.01;
+            let center = part.position();
+            if !sphere_visible(&camera_planes, center, radius)
+                && !sphere_visible(&light_planes, center, radius)
+            {
+                continue;
+            }
             let textures =
                 self.material_textures(workspace, &part.material, &part.material_slots)?;
-            let key = (part.shape, textures);
-            let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
-                batch_index
+            let batch_index = if textures == default_textures {
+                let slot = part.shape.index();
+                if let Some(batch_index) = default_batch_for_shape[slot] {
+                    batch_index
+                } else {
+                    let batch_index = batches.len();
+                    default_batch_for_shape[slot] = Some(batch_index);
+                    batches.push(RenderBatch {
+                        shape: part.shape,
+                        textures,
+                        instances: Vec::new(),
+                        instance_start: 0,
+                    });
+                    batch_index
+                }
             } else {
-                let batch_index = batches.len();
-                batch_indices.insert(key, batch_index);
-                batches.push(RenderBatch {
-                    shape: part.shape,
-                    textures,
-                    instances: Vec::new(),
-                    instance_start: 0,
-                });
-                batch_index
+                let key = (part.shape, textures);
+                if let Some(&batch_index) = batch_indices.get(&key) {
+                    batch_index
+                } else {
+                    let batch_index = batches.len();
+                    batch_indices.insert(key, batch_index);
+                    batches.push(RenderBatch {
+                        shape: part.shape,
+                        textures,
+                        instances: Vec::new(),
+                        instance_start: 0,
+                    });
+                    batch_index
+                }
             };
             let model = part.transform();
-            let normal_matrix = model.inverse().transpose().to_cols_array_2d();
+            let (normal_0, normal_1, normal_2) = normal_columns_from_model(&model);
             let material = part.material;
             let tint = part.color.rgba();
             batches[batch_index].instances.push(InstanceRaw {
                 model: model.to_cols_array_2d(),
-                normal_0: [
-                    normal_matrix[0][0],
-                    normal_matrix[0][1],
-                    normal_matrix[0][2],
-                    0.0,
-                ],
-                normal_1: [
-                    normal_matrix[1][0],
-                    normal_matrix[1][1],
-                    normal_matrix[1][2],
-                    0.0,
-                ],
-                normal_2: [
-                    normal_matrix[2][0],
-                    normal_matrix[2][1],
-                    normal_matrix[2][2],
-                    0.0,
-                ],
+                normal_0: [normal_0[0], normal_0[1], normal_0[2], 0.0],
+                normal_1: [normal_1[0], normal_1[1], normal_1[2], 0.0],
+                normal_2: [normal_2[0], normal_2[1], normal_2[2], 0.0],
                 base_color: [
                     material.base_color[0] * tint[0],
                     material.base_color[1] * tint[1],
@@ -1061,6 +1107,9 @@ impl Renderer {
         }
 
         self.instance_data.clear();
+        // Reserve once so repeated frames never reallocate the flattened list.
+        let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
+        self.instance_data.reserve(total_instances);
         for batch in &mut batches {
             batch.instance_start = self.instance_data.len();
             self.instance_data.extend_from_slice(&batch.instances);
@@ -1074,17 +1123,28 @@ impl Renderer {
             );
         }
 
-        let mut prepared_batches = Vec::with_capacity(batches.len());
-        for batch in batches {
-            let textures = self.pack_material_textures(batch.textures)?;
-            prepared_batches.push(PreparedRenderBatch {
+        self.prepared_batches.clear();
+        self.prepared_batches.reserve(batches.len());
+        for batch in &batches {
+            let packed = self.pack_material_textures(batch.textures)?;
+            // Populate the bind-group cache once per material; steady-state
+            // frames create zero bind groups.
+            self.material_bind_group(packed);
+            self.prepared_batches.push(PreparedRenderBatch {
                 shape: batch.shape,
-                bind_group: self.create_material_bind_group(textures),
+                packed_textures: packed,
                 instance_start: batch.instance_start,
                 instance_count: batch.instances.len() as u32,
             });
         }
-        self.prepared_batches = prepared_batches;
+        // Return scratch storage for reuse next frame.
+        for batch in &mut batches {
+            batch.instances.clear();
+        }
+        self.batch_scratch = batches;
+        self.batch_indices_scratch = batch_indices;
+        // Keep scratch capacities warm for the next frame's batch count.
+        self.batch_scratch.reserve(PartShape::COUNT);
         Ok(())
     }
 
@@ -1112,8 +1172,10 @@ impl Renderer {
             let instance_end = instance_start
                 + batch.instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
             pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
-            if use_materials {
-                pass.set_bind_group(1, &batch.bind_group, &[]);
+            if use_materials
+                && let Some(bind_group) = self.material_bind_groups.get(&batch.packed_textures)
+            {
+                pass.set_bind_group(1, bind_group, &[]);
             }
             pass.draw_indexed(0..mesh.index_count, 0, 0..batch.instance_count);
         }
@@ -1419,6 +1481,54 @@ fn light_view_projection(light_direction: Vec3) -> Mat4 {
     projection * view
 }
 
+/// Normal-matrix columns for a `pivot * scale` model without a full inverse.
+///
+/// `Part::transform` is always a rigid pivot multiplied by an axis-aligned
+/// scale, so with `M3 = R * S` each column is a unit rotation axis scaled by
+/// its axis scale. Dividing by the squared length recovers `R * S^-1`, which
+/// is exactly the inverse-transpose for this TRS form at a fraction of the
+/// cost of `Mat4::inverse`.
+fn normal_columns_from_model(model: &Mat4) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let c0 = model.x_axis.truncate();
+    let c1 = model.y_axis.truncate();
+    let c2 = model.z_axis.truncate();
+    let n0 = c0 / c0.length_squared().max(1e-12);
+    let n1 = c1 / c1.length_squared().max(1e-12);
+    let n2 = c2 / c2.length_squared().max(1e-12);
+    (n0.to_array(), n1.to_array(), n2.to_array())
+}
+
+/// Extracts normalized clip planes from a DirectX-style (depth 0..1)
+/// view-projection matrix. Each plane is `(normal, distance)` with points
+/// inside satisfying `dot(normal, p) + distance >= 0`.
+fn frustum_planes(view_projection: Mat4) -> [Vec4; 6] {
+    let m = view_projection.to_cols_array_2d();
+    // Rows of the column-major matrix.
+    let row = |i: usize| Vec4::new(m[0][i], m[1][i], m[2][i], m[3][i]);
+    let (r0, r1, r2, r3) = (row(0), row(1), row(2), row(3));
+    let normalize = |p: Vec4| {
+        let length = p.truncate().length().max(1e-12);
+        p / length
+    };
+    [
+        normalize(r3 + r0), // left
+        normalize(r3 - r0), // right
+        normalize(r3 + r1), // bottom
+        normalize(r3 - r1), // top
+        normalize(r2),      // near (0..1 depth)
+        normalize(r3 - r2), // far
+    ]
+}
+
+fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> bool {
+    for plane in planes {
+        if plane.truncate().dot(center) + plane.w < -radius {
+            return false;
+        }
+    }
+    true
+}
+
 fn create_shadow_texture(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("directional shadow map"),
@@ -1486,5 +1596,41 @@ mod tests {
         validator
             .validate(&module)
             .expect("material shader should validate");
+    }
+
+    #[test]
+    fn cheap_normal_columns_match_inverse_transpose_for_trs() {
+        use crate::glam::{Quat, Vec3};
+        let rotation = Quat::from_euler(crate::glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
+        let pivot = Mat4::from_rotation_translation(rotation, Vec3::new(1.0, -2.0, 3.0));
+        let size = Vec3::new(0.82, 1.1, 0.6);
+        let model = pivot * Mat4::from_scale(size);
+        let (n0, n1, n2) = normal_columns_from_model(&model);
+        let reference = model.inverse().transpose().to_cols_array_2d();
+        for (computed, expected) in [n0, n1, n2].iter().zip([
+            [reference[0][0], reference[0][1], reference[0][2]],
+            [reference[1][0], reference[1][1], reference[1][2]],
+            [reference[2][0], reference[2][1], reference[2][2]],
+        ]) {
+            for (a, b) in computed.iter().zip(expected.iter()) {
+                assert!((a - b).abs() < 1e-5, "got {computed:?}, want {expected:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn frustum_culling_keeps_visible_and_rejects_outside() {
+        use crate::Camera;
+        let camera = Camera::new(Vec3::new(0.0, 2.0, 6.0), Vec3::ZERO, 16.0 / 9.0);
+        let planes = frustum_planes(camera.view_projection_matrix());
+        assert!(sphere_visible(&planes, Vec3::ZERO, 0.5));
+        // Far behind the camera must be culled.
+        assert!(!sphere_visible(&planes, Vec3::new(0.0, 2.0, 20.0), 0.5));
+        // Far beyond far plane must be culled.
+        assert!(!sphere_visible(
+            &planes,
+            camera.pivot().w_axis.truncate() + camera.forward() * 500.0,
+            0.5
+        ));
     }
 }

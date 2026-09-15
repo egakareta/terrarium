@@ -171,50 +171,21 @@ fn unpack_normal(surface_sample: vec4<f32>) -> vec3<f32> {
     return normalize(vec3<f32>(xy, z));
 }
 
-fn sample_normal(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec3<f32> {
+fn sample_surface(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
     if slot == 1u {
-        return unpack_normal(textureSampleGrad(material_texture_1, material_sampler, uv, 1, uv_dx, uv_dy));
+        return textureSampleGrad(material_texture_1, material_sampler, uv, 1, uv_dx, uv_dy);
     } else if slot == 2u {
-        return unpack_normal(textureSampleGrad(material_texture_2, material_sampler, uv, 1, uv_dx, uv_dy));
+        return textureSampleGrad(material_texture_2, material_sampler, uv, 1, uv_dx, uv_dy);
     } else if slot == 3u {
-        return unpack_normal(textureSampleGrad(material_texture_3, material_sampler, uv, 1, uv_dx, uv_dy));
+        return textureSampleGrad(material_texture_3, material_sampler, uv, 1, uv_dx, uv_dy);
     } else if slot == 4u {
-        return unpack_normal(textureSampleGrad(material_texture_4, material_sampler, uv, 1, uv_dx, uv_dy));
+        return textureSampleGrad(material_texture_4, material_sampler, uv, 1, uv_dx, uv_dy);
     } else if slot == 5u {
-        return unpack_normal(textureSampleGrad(material_texture_5, material_sampler, uv, 1, uv_dx, uv_dy));
+        return textureSampleGrad(material_texture_5, material_sampler, uv, 1, uv_dx, uv_dy);
     } else if slot == 6u {
-        return unpack_normal(textureSampleGrad(material_texture_6, material_sampler, uv, 1, uv_dx, uv_dy));
+        return textureSampleGrad(material_texture_6, material_sampler, uv, 1, uv_dx, uv_dy);
     }
-    return unpack_normal(textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy));
-}
-
-fn sample_metallic_roughness(
-    slot: u32,
-    uv: vec2<f32>,
-    uv_dx: vec2<f32>,
-    uv_dy: vec2<f32>,
-) -> vec4<f32> {
-    if slot == 1u {
-        let sample = textureSampleGrad(material_texture_1, material_sampler, uv, 1, uv_dx, uv_dy);
-        return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if slot == 2u {
-        let sample = textureSampleGrad(material_texture_2, material_sampler, uv, 1, uv_dx, uv_dy);
-        return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if slot == 3u {
-        let sample = textureSampleGrad(material_texture_3, material_sampler, uv, 1, uv_dx, uv_dy);
-        return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if slot == 4u {
-        let sample = textureSampleGrad(material_texture_4, material_sampler, uv, 1, uv_dx, uv_dy);
-        return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if slot == 5u {
-        let sample = textureSampleGrad(material_texture_5, material_sampler, uv, 1, uv_dx, uv_dy);
-        return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    } else if slot == 6u {
-        let sample = textureSampleGrad(material_texture_6, material_sampler, uv, 1, uv_dx, uv_dy);
-        return vec4<f32>(0.0, sample.a, sample.b, 1.0);
-    }
-    let sample = textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy);
-    return vec4<f32>(0.0, sample.a, sample.b, 1.0);
+    return textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy);
 }
 
 fn sample_shadow(shadow_position: vec4<f32>, normal_dot_light: f32) -> f32 {
@@ -254,7 +225,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let uv_dy = dpdy(vertex.uv);
     let base_color_sample = sample_base_color(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
     let base_color = base_color_sample * vertex.vertex_color * vertex.base_color;
-    let normal_sample = sample_normal(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+    // The normal (RG) and metallic-roughness (B=metallic, A=roughness) live in
+    // the same surface layer, so one fetch serves both: previously this sampled
+    // the identical texel twice with bitwise-identical results.
+    let surface_sample = sample_surface(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+    let normal_sample = unpack_normal(surface_sample);
+    let metallic_roughness_sample = vec4<f32>(0.0, surface_sample.a, surface_sample.b, 1.0);
     let world_normal = normalize(vertex.normal);
     let tangent = normalize(vertex.tangent.xyz - world_normal * dot(world_normal, vertex.tangent.xyz));
     let bitangent = normalize(cross(world_normal, tangent)) * vertex.tangent.w;
@@ -262,7 +238,6 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         tangent * normal_sample.x + bitangent * normal_sample.y + world_normal * normal_sample.z,
     );
 
-    let metallic_roughness_sample = sample_metallic_roughness(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
     let metallic = clamp(
         vertex.metallic_roughness.x * metallic_roughness_sample.b,
         0.0,

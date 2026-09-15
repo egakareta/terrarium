@@ -40,11 +40,27 @@ impl PartShape {
         }
     }
 
+    /// Conservative bounding-sphere radius of the unit mesh centered at the
+    /// origin, used for exact frustum culling.
+    pub(crate) const fn bounding_radius(self) -> f32 {
+        match self {
+            // Unit cube corners at (±0.5, ±0.5, ±0.5): sqrt(3)/2.
+            Self::Block | Self::Wedge | Self::CornerWedge => 0.866_025_4,
+            // Sphere radius 0.5.
+            Self::Ball => 0.5,
+            // Rim at (0.5, ±0.5): sqrt(0.5).
+            Self::Cylinder => std::f32::consts::FRAC_1_SQRT_2,
+        }
+    }
+
     pub(crate) fn mesh(self, color: [f32; 4]) -> Mesh {
         match self {
             Self::Block => Mesh::block(1.0, color),
-            Self::Ball => Mesh::ball(0.5, 16, 24, color),
-            Self::Cylinder => Mesh::cylinder(0.5, 1.0, 24, color),
+            // 12x18 sphere: shading uses analytic normals so lighting is
+            // smooth; only the silhouette differs from 16x24 by ~1% of radius
+            // (subpixel at typical multi-object distances) for 44% fewer tris.
+            Self::Ball => Mesh::ball(0.5, 12, 18, color),
+            Self::Cylinder => Mesh::cylinder(0.5, 1.0, 16, color),
             Self::Wedge => Mesh::wedge(color),
             Self::CornerWedge => Mesh::corner_wedge(color),
         }
@@ -159,11 +175,11 @@ impl Mesh {
                 let bottom_right = bottom_left + 1;
                 indices.extend([
                     top_left,
-                    bottom_left,
-                    top_right,
                     top_right,
                     bottom_left,
+                    top_right,
                     bottom_right,
+                    bottom_left,
                 ]);
             }
         }
@@ -501,6 +517,32 @@ mod tests {
 
         for (range, expected) in faces {
             assert_face_normal(&mesh.vertices[range], expected);
+        }
+    }
+
+    #[test]
+    fn ball_winding_matches_outward_normals_for_backface_culling() {
+        let mesh = Mesh::ball(0.5, 8, 12, [1.0; 4]);
+        assert!(!mesh.indices.is_empty());
+        for triangle in mesh.indices.chunks_exact(3) {
+            let positions = [
+                Vec3::from_array(mesh.vertices[triangle[0] as usize].position),
+                Vec3::from_array(mesh.vertices[triangle[1] as usize].position),
+                Vec3::from_array(mesh.vertices[triangle[2] as usize].position),
+            ];
+            // Pole fans duplicate the pole vertex per longitude, so one
+            // triangle per polar quad is degenerate (zero area, no pixels).
+            // Skip by unnormalized area instead of the normalized normal.
+            let cross = (positions[1] - positions[0]).cross(positions[2] - positions[0]);
+            if cross.length_squared() < 1e-12 {
+                continue;
+            }
+            let centroid = (positions[0] + positions[1] + positions[2]) / 3.0;
+            // Outward winding => derived CCW normal points along the radius.
+            assert!(
+                cross.normalize().dot(centroid.normalize()) > 0.99,
+                "ball triangle {triangle:?} winds inward"
+            );
         }
     }
 }
