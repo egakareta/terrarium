@@ -274,7 +274,13 @@ fn create_benchmark_workspace(
         part_ids.push(part.set_parent(&mut workspace));
     }
 
-    (workspace, part_ids)
+    let mut floor = Part::unnamed();
+    floor.pivot_to(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)));
+    floor.size = Vec3::new(extent + spacing * 2.0, 0.1, extent + spacing * 2.0);
+    floor.color = Color3::new(0.08, 0.10, 0.14);
+    floor.set_parent(&mut workspace);
+
+    (workspace, part_ids, extent)
 }
 
 fn print_report(config: Config, samples: &[Sample]) {
