@@ -126,47 +126,87 @@ impl Framework {
         Ok(())
     }
 
-    /// Runs a native eframe application with the WGPU backend and requested initial size.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn run_native(
-        app_name: &str,
-        size: [u32; 2],
-        app_creator: eframe::AppCreator<'_>,
-    ) -> eframe::Result {
-        let native_options = eframe::NativeOptions {
-            renderer: eframe::Renderer::Wgpu,
-            viewport: egui::ViewportBuilder::default()
-                .with_title(app_name)
-                .with_inner_size([size[0] as f32, size[1] as f32]),
-            ..Default::default()
-        };
-        eframe::run_native(app_name, native_options, app_creator)
-    }
-
-    /// Starts a web eframe application with the WGPU backend on the named canvas.
-    ///
-    /// This spawns eframe's asynchronous startup task and panics if the canvas is missing or
-    /// eframe cannot start.
-    #[cfg(target_arch = "wasm32")]
-    pub fn run_web(canvas_id: &str, app_creator: eframe::AppCreator<'static>) {
-        use wasm_bindgen::JsCast as _;
-
-        let canvas_id = canvas_id.to_owned();
-        wasm_bindgen_futures::spawn_local(async move {
-            let canvas = web_sys::window()
-                .and_then(|window| window.document())
-                .and_then(|document| document.get_element_by_id(&canvas_id))
-                .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
-                .unwrap_or_else(|| panic!("failed to find canvas with id `{canvas_id}`"));
-            let web_options = eframe::WebOptions {
+    /// Runs a new eframe application with the specified configuration and app creator.
+    pub fn run(config: RunConfig<'_>, app_creator: eframe::AppCreator<'_>) -> eframe::Result {
+        let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
+        (config.wgpu_options)(&mut wgpu_options);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let native_options = eframe::NativeOptions {
                 renderer: eframe::Renderer::Wgpu,
+                viewport: egui::ViewportBuilder::default()
+                    .with_title(config.title)
+                    .with_inner_size([config.size[0] as f32, config.size[1] as f32]),
+                wgpu_options,
                 ..Default::default()
             };
 
-            eframe::WebRunner::new()
-                .start(canvas, web_options, app_creator)
-                .await
-                .expect("failed to start eframe");
-        });
+            eframe::run_native(config.title, native_options, app_creator)
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::JsCast as _;
+
+            let canvas_id = config.canvas_id.to_owned();
+
+            wasm_bindgen_futures::spawn_local(async move {
+                let canvas = web_sys::window()
+                    .and_then(|window| window.document())
+                    .and_then(|document| document.get_element_by_id(&canvas_id))
+                    .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+                    .unwrap_or_else(|| panic!("failed to find canvas `{canvas_id}`"));
+
+                let web_options = eframe::WebOptions {
+                    renderer: eframe::Renderer::Wgpu,
+                    wgpu_options,
+                    ..Default::default()
+                };
+
+                eframe::WebRunner::new()
+                    .start(canvas, web_options, app_creator)
+                    .await
+                    .expect("failed to start eframe");
+            });
+
+            Ok(())
+        }
+    }
+}
+
+/// Options controlling the behavior of the window.
+pub struct RunConfig<'a> {
+    /// The application title on native platforms.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub title: &'a str,
+    /// The window size on native platforms.
+    pub size: [u32; 2],
+    /// The element to render the web application.
+    #[cfg(target_arch = "wasm32")]
+    pub canvas_id: &'a str,
+    /// Configures wgpu instance/device/adapter/surface creation and renderloop.
+    pub wgpu_options: Box<dyn FnOnce(&mut eframe::egui_wgpu::WgpuConfiguration) + 'a>,
+}
+
+impl<'a> Default for RunConfig<'a> {
+    fn default() -> Self {
+        Self {
+            title: "app",
+            size: [1280, 720],
+            #[cfg(target_arch = "wasm32")]
+            canvas_id: "app",
+            wgpu_options: Box::new(|_| {}),
+        }
+    }
+}
+
+impl<'a> RunConfig<'a> {
+    /// Configures wgpu instance/device/adapter/surface creation and renderloop.
+    pub fn with_wgpu_options(
+        mut self,
+        f: impl FnOnce(&mut eframe::egui_wgpu::WgpuConfiguration) + 'a,
+    ) -> Self {
+        self.wgpu_options = Box::new(f);
+        self
     }
 }

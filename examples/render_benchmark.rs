@@ -1,15 +1,15 @@
 use std::{
     env,
     fmt::Display,
-    process,
     str::FromStr,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use terrarium::{
-    Camera, Color3, Framework, Instance, InstanceId, Part, PartShape, RendererError, Workspace,
-    eframe, egui,
+    Camera, Color3, Framework, Instance, InstanceId, Part, PartShape, RendererError, RunConfig,
+    Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
+    wgpu,
 };
 
 const ANIMATED_PARTS_RATIO: usize = 4;
@@ -17,6 +17,10 @@ const ANIMATION_POOL_CHANGE_INTERVAL: usize = 30;
 const CAMERA_DISTANCE_MIN_SCALE: f32 = 0.05;
 const CAMERA_DISTANCE_MAX_SCALE: f32 = 0.90;
 const CAMERA_ZOOM_SPEED: f32 = 0.45;
+const DYNAMIC_LAYER_CHANGE_INTERVAL: usize = 30;
+const DYNAMIC_LAYER_MIN_BLOCKS: usize = 1_000;
+const DYNAMIC_LAYER_MAX_BLOCKS: usize = 2_000;
+const DYNAMIC_LAYER_HEIGHT: f32 = 1.35;
 
 #[derive(Clone, Copy)]
 struct Config {
@@ -42,7 +46,7 @@ impl Default for Config {
 #[derive(Clone, Copy)]
 struct Sample {
     cpu_submission: Duration,
-    gpu_complete: Duration,
+    frame_complete: Duration,
 }
 
 struct App {
@@ -52,10 +56,14 @@ struct App {
     base_camera_pivot: Mat4,
     part_ids: Vec<InstanceId>,
     base_parts: Vec<Part>,
+    upper_layer_extent: f32,
+    upper_layer_ids: Vec<InstanceId>,
+    random_state: u64,
     animation_frame: usize,
     animation_pool_start: usize,
     warmup_remaining: usize,
     samples: Vec<Sample>,
+    logic_started: Option<Instant>,
     frame_started: Option<Instant>,
     cpu_submission: Option<Duration>,
     finished: bool,
@@ -63,27 +71,37 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Result<Self, RendererError> {
-        let (workspace, part_ids) =
+        let (workspace, part_ids, upper_layer_extent) =
             create_benchmark_workspace(config.parts, config.width, config.height);
         let base_camera_pivot = workspace.current_camera.pivot();
         let base_parts = workspace.get_all::<Part>().cloned().collect();
         let mut framework = Framework::new(cc, [config.width, config.height])?;
         framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
-        Ok(Self {
+        let random_state = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(1, |duration| duration.as_nanos() as u64)
+            | 1;
+        let mut app = Self {
             config,
             framework,
             workspace,
             base_camera_pivot,
             part_ids,
             base_parts,
+            upper_layer_extent,
+            upper_layer_ids: Vec::new(),
+            random_state,
             animation_frame: 0,
             animation_pool_start: 0,
             warmup_remaining: config.warmup_frames,
             samples: Vec::with_capacity(config.measured_frames),
+            logic_started: None,
             frame_started: None,
             cpu_submission: None,
             finished: false,
-        })
+        };
+        app.replace_upper_layer();
+        Ok(app)
     }
 
     fn finish_previous_frame(&mut self, ctx: &egui::Context) {
@@ -105,7 +123,7 @@ impl App {
                     .cpu_submission
                     .take()
                     .expect("scene submission time should be recorded"),
-                gpu_complete: started.elapsed(),
+                frame_complete: started.elapsed(),
             });
             if self.samples.len() == self.config.measured_frames {
                 print_report(self.config, &self.samples);
@@ -130,6 +148,14 @@ impl App {
                 self.reset_part(index);
             }
             self.animation_pool_start = (self.animation_pool_start + animated_count) % part_count;
+        }
+
+        if self.animation_frame != 0
+            && self
+                .animation_frame
+                .is_multiple_of(DYNAMIC_LAYER_CHANGE_INTERVAL)
+        {
+            self.replace_upper_layer();
         }
 
         let time = self.animation_frame as f32 * 0.02;
@@ -183,6 +209,53 @@ impl App {
         self.animation_frame += 1;
     }
 
+    fn replace_upper_layer(&mut self) {
+        let previous_layer = std::mem::take(&mut self.upper_layer_ids);
+        for id in previous_layer {
+            if let Some(instance) = self.workspace.instance_mut(id) {
+                instance.destroy();
+            }
+        }
+
+        let block_count = DYNAMIC_LAYER_MIN_BLOCKS
+            + (self.next_random()
+                % (DYNAMIC_LAYER_MAX_BLOCKS - DYNAMIC_LAYER_MIN_BLOCKS + 1) as u64)
+                as usize;
+        self.upper_layer_ids.reserve(block_count);
+
+        for _ in 0..block_count {
+            let mut block = Part::unnamed();
+            block.shape = PartShape::Block;
+            block.pivot_to(Mat4::from_rotation_translation(
+                Quat::from_rotation_y(self.random_f32() * std::f32::consts::TAU),
+                Vec3::new(
+                    (self.random_f32() - 0.5) * self.upper_layer_extent,
+                    DYNAMIC_LAYER_HEIGHT + self.random_f32() * 0.1,
+                    (self.random_f32() - 0.5) * self.upper_layer_extent,
+                ),
+            ));
+            block.size = Vec3::splat(0.82);
+            block.color = Color3::new(
+                0.30 + self.random_f32() * 0.22,
+                0.34 + self.random_f32() * 0.22,
+                0.44 + self.random_f32() * 0.22,
+            );
+            self.upper_layer_ids
+                .push(block.set_parent(&mut self.workspace));
+        }
+    }
+
+    fn next_random(&mut self) -> u64 {
+        self.random_state ^= self.random_state << 13;
+        self.random_state ^= self.random_state >> 7;
+        self.random_state ^= self.random_state << 17;
+        self.random_state
+    }
+
+    fn random_f32(&mut self) -> f32 {
+        self.next_random() as f32 / u64::MAX as f32
+    }
+
     fn reset_part(&mut self, index: usize) {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
@@ -207,6 +280,7 @@ impl eframe::App for App {
         if self.finished {
             return;
         }
+        self.logic_started = Some(Instant::now());
         self.animate_parts();
         ctx.request_repaint();
     }
@@ -215,7 +289,7 @@ impl eframe::App for App {
         if self.finished {
             return;
         }
-        let started = Instant::now();
+        let started = self.logic_started.take().unwrap_or_else(Instant::now);
         if let Err(error) = self.framework.prepare(ui, &mut self.workspace) {
             report_renderer_error(error);
             self.finished = true;
@@ -232,7 +306,7 @@ fn create_benchmark_workspace(
     part_count: usize,
     width: u32,
     height: u32,
-) -> (Workspace, Vec<InstanceId>) {
+) -> (Workspace, Vec<InstanceId>, f32) {
     let side = (part_count as f64).sqrt().ceil() as usize;
     let spacing = 1.2;
     let extent = side as f32 * spacing;
@@ -288,14 +362,14 @@ fn print_report(config: Config, samples: &[Sample]) {
         .iter()
         .map(|sample| sample.cpu_submission.as_secs_f64() * 1_000.0)
         .collect::<Vec<_>>();
-    let mut gpu_complete = samples
+    let mut frame_complete = samples
         .iter()
-        .map(|sample| sample.gpu_complete.as_secs_f64() * 1_000.0)
+        .map(|sample| sample.frame_complete.as_secs_f64() * 1_000.0)
         .collect::<Vec<_>>();
     cpu_submission.sort_unstable_by(f64::total_cmp);
-    gpu_complete.sort_unstable_by(f64::total_cmp);
+    frame_complete.sort_unstable_by(f64::total_cmp);
 
-    let gpu_average = average(&gpu_complete);
+    let frame_average = average(&frame_complete);
     println!("render benchmark");
     println!("  parts: {}", config.parts);
     println!(
@@ -307,11 +381,8 @@ fn print_report(config: Config, samples: &[Sample]) {
     println!("  warmup frames: {}", config.warmup_frames);
     println!("  measured frames: {}", samples.len());
     println!("  CPU submission: {}", format_statistics(&cpu_submission));
-    println!(
-        "  CPU + GPU completion: {}",
-        format_statistics(&gpu_complete)
-    );
-    println!("  completed-frame FPS: {:.1}", 1_000.0 / gpu_average);
+    println!("  End-to-end frame: {}", format_statistics(&frame_complete));
+    println!("  completed-frame FPS: {:.1}", 1_000.0 / frame_average);
 }
 
 fn format_statistics(samples: &[f64]) -> String {
@@ -386,9 +457,15 @@ fn main() {
         config.parts, config.warmup_frames, config.measured_frames
     );
 
-    Framework::run_native(
-        "Terrarium render benchmark",
-        [config.width, config.height],
+    Framework::run(
+        RunConfig {
+            title: "Render benchmark",
+            size: [config.width, config.height],
+            ..Default::default()
+        }
+        .with_wgpu_options(|wgpu_options| {
+            wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
+        }),
         Box::new(move |cc| Ok(Box::new(App::new(cc, config)?))),
     )
     .expect("run benchmark eframe application");

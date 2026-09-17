@@ -1,6 +1,6 @@
 use terrarium::{
     Color3, Easing, Framework, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
-    Repeat, Texture, TextureColorSpace, Tween, Workspace, eframe, egui, glam::Vec3,
+    Repeat, RunConfig, Texture, TextureColorSpace, Tween, Workspace, eframe, egui, glam::Vec3,
 };
 
 struct App {
@@ -224,20 +224,19 @@ fn create_workspace() -> Result<Workspace, RendererError> {
 
 fn main() {
     env_logger::init();
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Framework::run_native(
-            "Courtyard",
-            [1280, 720],
-            Box::new(|cc| Ok(Box::new(App::new(cc)?))),
-        )
-        .unwrap();
-    }
-
     #[cfg(target_arch = "wasm32")]
     {
         console_error_panic_hook::set_once();
-        Framework::run_web("the_canvas_id", Box::new(|cc| Ok(Box::new(App::new(cc)?))));
     }
+
+    Framework::run(
+        RunConfig {
+            title: "App",
+            #[cfg(target_arch = "wasm32")]
+            canvas_id: "the_canvas_id",
+            ..Default::default()
+        },
+        Box::new(|cc| Ok(Box::new(App::new(cc)?))),
+    )
+    .unwrap();
 }
