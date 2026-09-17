@@ -380,13 +380,7 @@ fn parse_config() -> Result<Config, String> {
 
 fn main() {
     env_logger::init();
-    let config = match parse_config() {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("{error}\nUse --help for usage.");
-            process::exit(2);
-        }
-    };
+    let config = parse_config().unwrap();
     println!(
         "Rendering {} parts for {} warmup + {} measured frames...",
         config.parts, config.warmup_frames, config.measured_frames
