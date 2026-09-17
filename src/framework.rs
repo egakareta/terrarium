@@ -177,7 +177,6 @@ impl Framework {
 /// Options controlling the behavior of the window.
 pub struct RunConfig<'a> {
     /// The application title on native platforms.
-    #[cfg(not(target_arch = "wasm32"))]
     pub title: &'a str,
     /// The window size on native platforms.
     pub size: [u32; 2],
