@@ -6,8 +6,8 @@ use std::{
 };
 
 use terrarium::{
-    Camera, Color3, Framework, Instance, InstanceId, Part, PartShape, RendererError, RunConfig,
-    Workspace, eframe, egui,
+    Camera, Color3, Framework, Instance, InstanceId, Material, MaterialSlot, Part, PartShape,
+    RendererError, RunConfig, Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
 };
@@ -21,6 +21,7 @@ const DYNAMIC_LAYER_CHANGE_INTERVAL: usize = 30;
 const DYNAMIC_LAYER_MIN_BLOCKS: usize = 1_000;
 const DYNAMIC_LAYER_MAX_BLOCKS: usize = 2_000;
 const DYNAMIC_LAYER_HEIGHT: f32 = 1.35;
+const TEXTURED_PART_DIVISOR: usize = 5;
 
 #[derive(Clone, Copy)]
 struct Config {
@@ -58,6 +59,7 @@ struct App {
     base_parts: Vec<Part>,
     upper_layer_extent: f32,
     upper_layer_ids: Vec<InstanceId>,
+    benchmark_materials: Vec<Material>,
     random_state: u64,
     animation_frame: usize,
     animation_pool_start: usize,
@@ -71,8 +73,8 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Result<Self, RendererError> {
-        let (workspace, part_ids, upper_layer_extent) =
-            create_benchmark_workspace(config.parts, config.width, config.height);
+        let (workspace, part_ids, upper_layer_extent, benchmark_materials) =
+            create_benchmark_workspace(config.parts, config.width, config.height)?;
         let base_camera_pivot = workspace.current_camera.pivot();
         let base_parts = workspace.get_all::<Part>().cloned().collect();
         let mut framework = Framework::new(cc, [config.width, config.height])?;
@@ -90,6 +92,7 @@ impl App {
             base_parts,
             upper_layer_extent,
             upper_layer_ids: Vec::new(),
+            benchmark_materials,
             random_state,
             animation_frame: 0,
             animation_pool_start: 0,
@@ -126,7 +129,7 @@ impl App {
                 frame_complete: started.elapsed(),
             });
             if self.samples.len() == self.config.measured_frames {
-                print_report(self.config, &self.samples);
+                print_report(self.config, &self.samples, self.benchmark_materials.len());
                 self.finished = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -240,6 +243,14 @@ impl App {
                 0.34 + self.random_f32() * 0.22,
                 0.44 + self.random_f32() * 0.22,
             );
+            if self.random_f32() < 1.0 / TEXTURED_PART_DIVISOR as f32 {
+                let slot = MaterialSlot::ALL_DIRECTIONS
+                    [(self.next_random() % MaterialSlot::ALL_DIRECTIONS.len() as u64) as usize];
+                let material_index =
+                    (self.next_random() % self.benchmark_materials.len() as u64) as usize;
+                let material = self.benchmark_materials[material_index];
+                block.set_material_slot(slot, material);
+            }
             self.upper_layer_ids
                 .push(block.set_parent(&mut self.workspace));
         }
@@ -306,12 +317,13 @@ fn create_benchmark_workspace(
     part_count: usize,
     width: u32,
     height: u32,
-) -> (Workspace, Vec<InstanceId>, f32) {
+) -> Result<(Workspace, Vec<InstanceId>, f32, Vec<Material>), RendererError> {
     let side = (part_count as f64).sqrt().ceil() as usize;
     let spacing = 1.2;
     let extent = side as f32 * spacing;
     let camera_distance = extent * 1.25 + 5.0;
     let mut workspace = Workspace::new();
+    let benchmark_materials = load_benchmark_materials(&mut workspace)?;
     workspace.current_camera = Camera::new(
         Vec3::new(0.0, camera_distance * 0.72, camera_distance),
         Vec3::ZERO,
@@ -345,6 +357,12 @@ fn create_benchmark_workspace(
             0.32 + (index % 3) as f32 * 0.16,
             0.40 + (index % 4) as f32 * 0.11,
         );
+        if index.is_multiple_of(TEXTURED_PART_DIVISOR) {
+            let slot = MaterialSlot::ALL_DIRECTIONS[index % MaterialSlot::ALL_DIRECTIONS.len()];
+            let material =
+                benchmark_materials[(index / TEXTURED_PART_DIVISOR) % benchmark_materials.len()];
+            part.set_material_slot(slot, material);
+        }
         part_ids.push(part.set_parent(&mut workspace));
     }
 
@@ -354,10 +372,70 @@ fn create_benchmark_workspace(
     floor.color = Color3::new(0.08, 0.10, 0.14);
     floor.set_parent(&mut workspace);
 
-    (workspace, part_ids, extent)
+    Ok((workspace, part_ids, extent, benchmark_materials))
 }
 
-fn print_report(config: Config, samples: &[Sample]) {
+/// Loads one workspace texture per benchmark material so textured parts cycle
+/// through distinct base-color maps, filters, and PBR factors instead of
+/// sharing a single material.
+fn load_benchmark_materials(workspace: &mut Workspace) -> Result<Vec<Material>, RendererError> {
+    let cobblestone = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/cobblestone.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let dirt = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/dirt.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let grass_top = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/grass_top.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let grass_side = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/grass_side.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let castle_brick = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/castle_brick.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+    let festival_lantern = workspace.add_texture(Texture::from_bytes(
+        include_bytes!("../assets/festival_lantern.png"),
+        TextureColorSpace::Srgb,
+    )?)?;
+
+    let mut cobblestone_material = Material::textured(cobblestone);
+    cobblestone_material.roughness = 0.82;
+
+    let mut dirt_material = Material::textured(dirt);
+    dirt_material.roughness = 0.9;
+
+    let mut grass_top_material = Material::textured(grass_top).with_filter(TextureFilter::Nearest);
+    grass_top_material.roughness = 0.82;
+
+    let mut grass_side_material =
+        Material::textured(grass_side).with_filter(TextureFilter::Nearest);
+    grass_side_material.roughness = 0.82;
+
+    let mut castle_brick_material = Material::textured(castle_brick);
+    castle_brick_material.roughness = 0.75;
+    castle_brick_material.metallic = 0.05;
+
+    let mut lantern_material = Material::textured(festival_lantern);
+    lantern_material.roughness = 0.6;
+    lantern_material.emissive = [0.55, 0.32, 0.12];
+
+    Ok(vec![
+        cobblestone_material,
+        dirt_material,
+        grass_top_material,
+        grass_side_material,
+        castle_brick_material,
+        lantern_material,
+    ])
+}
+
+fn print_report(config: Config, samples: &[Sample], material_count: usize) {
     let mut cpu_submission = samples
         .iter()
         .map(|sample| sample.cpu_submission.as_secs_f64() * 1_000.0)
@@ -372,6 +450,12 @@ fn print_report(config: Config, samples: &[Sample]) {
     let frame_average = average(&frame_complete);
     println!("render benchmark");
     println!("  parts: {}", config.parts);
+    println!(
+        "  textured parts: {} ({}%), one random face each across {} materials",
+        config.parts / TEXTURED_PART_DIVISOR,
+        100 / TEXTURED_PART_DIVISOR,
+        material_count
+    );
     println!(
         "  animated parts: {} (25%), pool changes every {} frames",
         config.parts / ANIMATED_PARTS_RATIO
