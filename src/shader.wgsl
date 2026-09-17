@@ -64,10 +64,10 @@ struct VertexInput {
     @location(3) tangent: vec4<f32>,
     @location(4) vertex_color: vec4<f32>,
     @location(5) material_slot: u32,
-    @location(6) model_0: vec4<f32>,
-    @location(7) model_1: vec4<f32>,
-    @location(8) model_2: vec4<f32>,
-    @location(9) model_3: vec4<f32>,
+    @location(6) model_0: vec3<f32>,
+    @location(7) model_1: vec3<f32>,
+    @location(8) model_2: vec3<f32>,
+    @location(9) model_3: vec3<f32>,
     @location(10) normal_scales: vec3<f32>,
     @location(11) base_color: vec4<f32>,
     @location(12) metallic_roughness: vec2<f32>,
@@ -89,26 +89,26 @@ struct VertexOutput {
 
 struct ShadowVertexInput {
     @location(0) position: vec3<f32>,
-    @location(6) model_0: vec4<f32>,
-    @location(7) model_1: vec4<f32>,
-    @location(8) model_2: vec4<f32>,
-    @location(9) model_3: vec4<f32>,
+    @location(6) model_0: vec3<f32>,
+    @location(7) model_1: vec3<f32>,
+    @location(8) model_2: vec3<f32>,
+    @location(9) model_3: vec3<f32>,
 };
 
 @vertex
 fn vs_main(vertex: VertexInput) -> VertexOutput {
     var output: VertexOutput;
     let model = mat4x4<f32>(
-        vertex.model_0,
-        vertex.model_1,
-        vertex.model_2,
-        vertex.model_3,
+        vec4<f32>(vertex.model_0, 0.0),
+        vec4<f32>(vertex.model_1, 0.0),
+        vec4<f32>(vertex.model_2, 0.0),
+        vec4<f32>(vertex.model_3, 1.0),
     );
     let world_position = model * vec4<f32>(vertex.position, 1.0);
     let normal_matrix = mat3x3<f32>(
-        vertex.model_0.xyz * vertex.normal_scales.x,
-        vertex.model_1.xyz * vertex.normal_scales.y,
-        vertex.model_2.xyz * vertex.normal_scales.z,
+        vertex.model_0 * vertex.normal_scales.x,
+        vertex.model_1 * vertex.normal_scales.y,
+        vertex.model_2 * vertex.normal_scales.z,
     );
     let world_normal = normalize(normal_matrix * vertex.normal);
     let world_tangent = normalize((model * vec4<f32>(vertex.tangent.xyz, 0.0)).xyz);
@@ -128,10 +128,10 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
 @vertex
 fn vs_shadow(vertex: ShadowVertexInput) -> @builtin(position) vec4<f32> {
     let model = mat4x4<f32>(
-        vertex.model_0,
-        vertex.model_1,
-        vertex.model_2,
-        vertex.model_3,
+        vec4<f32>(vertex.model_0, 0.0),
+        vec4<f32>(vertex.model_1, 0.0),
+        vec4<f32>(vertex.model_2, 0.0),
+        vec4<f32>(vertex.model_3, 1.0),
     );
     return shadow_camera.light_view_projection * model * vec4<f32>(vertex.position, 1.0);
 }

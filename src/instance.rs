@@ -3,6 +3,7 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     fmt::Debug,
+    hash::{BuildHasherDefault, Hasher},
     ptr::NonNull,
     rc::{Rc, Weak},
     sync::{Mutex, OnceLock},
@@ -12,6 +13,29 @@ use slotmap::SlotMap;
 
 use crate::glam::{EulerRot, Mat4, Quat, Vec3};
 
+#[derive(Default)]
+struct InstanceIdHasher(u64);
+
+impl Hasher for InstanceIdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut hash = 0xcbf2_9ce4_8422_2325;
+        for &byte in bytes {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self.0 = hash;
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+type InstanceMap<T> = HashMap<InstanceId, T, BuildHasherDefault<InstanceIdHasher>>;
+
 slotmap::new_key_type! {
     /// Stable identifier for an [`Instance`].
     pub struct InstanceId;
@@ -20,8 +44,8 @@ slotmap::new_key_type! {
 static INSTANCE_IDS: OnceLock<Mutex<SlotMap<InstanceId, ()>>> = OnceLock::new();
 
 thread_local! {
-    static INSTANCE_LOOKUPS: RefCell<HashMap<InstanceId, Weak<InstanceLookup>>> =
-        RefCell::new(HashMap::new());
+    static INSTANCE_LOOKUPS: RefCell<InstanceMap<Weak<InstanceLookup>>> =
+        RefCell::new(InstanceMap::default());
 }
 
 fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
@@ -32,7 +56,7 @@ fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
 #[doc(hidden)]
 #[derive(Debug, Default)]
 pub struct InstanceLookup {
-    instances: RefCell<HashMap<InstanceId, NonNull<dyn Instance>>>,
+    instances: RefCell<InstanceMap<NonNull<dyn Instance>>>,
     root: Cell<Option<(InstanceId, NonNull<InstanceData>)>>,
 }
 
@@ -190,14 +214,14 @@ impl InstanceId {
 #[derive(Debug)]
 struct IndexedVec<T> {
     values: Vec<T>,
-    indices: HashMap<InstanceId, usize>,
+    indices: InstanceMap<usize>,
 }
 
 impl<T> Default for IndexedVec<T> {
     fn default() -> Self {
         Self {
             values: Vec::new(),
-            indices: HashMap::new(),
+            indices: InstanceMap::default(),
         }
     }
 }

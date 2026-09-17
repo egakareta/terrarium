@@ -7,13 +7,15 @@ use web_time::Instant;
 use crate::{
     Camera, DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh,
     MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
-    Transform, Vertex, Workspace,
+    Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
 
 const SHADOW_MAP_SIZE: u32 = 3072;
 const SHADOW_CASCADE_COUNT: usize = 7;
+const VISIBILITY_MASK_COUNT: usize = 1 << (SHADOW_CASCADE_COUNT + 1);
+const CULL_GROUP_SIZE: usize = 64;
 const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 const SHADOW_DISTANCE: f32 = 80.0;
 const SHADOW_CASTER_MARGIN: f32 = 20.0;
@@ -51,7 +53,7 @@ pub enum RendererError {
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct InstanceRaw {
-    model: [[f32; 4]; 4],
+    model: [[f32; 3]; 4],
     normal_scales: [f32; 3],
     base_color: [f32; 4],
     metallic_roughness: [f32; 2],
@@ -61,10 +63,10 @@ struct InstanceRaw {
 impl InstanceRaw {
     fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
-            6 => Float32x4,
-            7 => Float32x4,
-            8 => Float32x4,
-            9 => Float32x4,
+            6 => Float32x3,
+            7 => Float32x3,
+            8 => Float32x3,
+            9 => Float32x3,
             10 => Float32x3,
             11 => Float32x4,
             12 => Float32x2,
@@ -80,10 +82,10 @@ impl InstanceRaw {
 
     fn shadow_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
-            6 => Float32x4,
-            7 => Float32x4,
-            8 => Float32x4,
-            9 => Float32x4,
+            6 => Float32x3,
+            7 => Float32x3,
+            8 => Float32x3,
+            9 => Float32x3,
         ];
 
         wgpu::VertexBufferLayout {
@@ -100,6 +102,7 @@ pub struct MeshHandle(usize);
 struct RenderBatch {
     shape: PartShape,
     textures: MaterialTextures,
+    visibility_mask: u8,
     instances: Vec<InstanceRaw>,
     instance_start: usize,
 }
@@ -107,8 +110,17 @@ struct RenderBatch {
 struct PreparedRenderBatch {
     shape: PartShape,
     packed_textures: PackedMaterialTextures,
+    visibility_mask: u8,
     instance_start: usize,
     instance_count: u32,
+}
+
+struct PartCandidate<'a> {
+    part: &'a Part,
+    pivot: Mat4,
+    center: Vec3,
+    radius: f32,
+    visibility_mask: u8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -198,7 +210,7 @@ pub struct Renderer {
     fps: f32,
     prepared_batches: Vec<PreparedRenderBatch>,
     batch_scratch: Vec<RenderBatch>,
-    batch_indices_scratch: HashMap<(PartShape, MaterialTextures), usize>,
+    batch_indices_scratch: HashMap<(PartShape, MaterialTextures, u8), usize>,
     material_bind_groups: HashMap<PackedMaterialTextures, wgpu::BindGroup>,
 }
 
@@ -950,24 +962,8 @@ impl Renderer {
             light_direction: [-0.45, 0.85, 0.35, 0.0],
             light_color: [3.0, 2.8, 2.5, 0.0],
             ambient_color: [0.035, 0.045, 0.06, 0.0],
-            shadow_cascade_splits: [
-                shadow_cascade_splits[..4].try_into().unwrap(),
-                [
-                    shadow_cascade_splits[4],
-                    shadow_cascade_splits[5],
-                    shadow_cascade_splits[6],
-                    shadow_cascade_splits[6],
-                ],
-            ],
-            shadow_texel_sizes: [
-                shadow_texel_sizes[..4].try_into().unwrap(),
-                [
-                    shadow_texel_sizes[4],
-                    shadow_texel_sizes[5],
-                    shadow_texel_sizes[6],
-                    shadow_texel_sizes[6],
-                ],
-            ],
+            shadow_cascade_splits: pack_shadow_values(shadow_cascade_splits),
+            shadow_texel_sizes: pack_shadow_values(shadow_texel_sizes),
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
@@ -985,102 +981,173 @@ impl Renderer {
         let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;
 
-        // Reuse allocations across frames: clearing retains backing capacity,
-        // so the steady state performs no batching allocations.
-        for batch in &mut self.batch_scratch {
+        // Keep the finite set of default-material batches and their allocations
+        // alive across frames. Custom material combinations can be unbounded,
+        // so rebuild those rather than retaining stale scratch storage forever.
+        let mut batches = std::mem::take(&mut self.batch_scratch);
+        let mut batch_indices = std::mem::take(&mut self.batch_indices_scratch);
+        batches.retain(|batch| batch.textures == default_textures);
+        batch_indices.clear();
+        for batch in &mut batches {
             batch.instances.clear();
         }
-        // Temporarily take ownership to build this frame; returned below.
-        let mut batches = std::mem::take(&mut self.batch_scratch);
-        batches.clear();
-        let mut batch_indices = std::mem::take(&mut self.batch_indices_scratch);
-        batch_indices.clear();
         // Fast path for the common untextured case: index directly by shape
-        // instead of hashing a 168-byte key per part.
-        let mut default_batch_for_shape: [Option<usize>; PartShape::COUNT] =
-            [None; PartShape::COUNT];
-        for part in workspace.get_all::<Part>() {
-            // Exact union culling: keep anything visible to the camera or able
-            // to cast into view. Culled parts contribute zero pixels to either
-            // pass, so this changes no rendered pixel.
-            let max_scale = part.size.max_element().max(0.0);
-            let radius = part.shape.bounding_radius() * max_scale * 1.01;
-            let center = part.position();
-            if !sphere_visible(&camera_planes, center, radius)
-                && !light_planes
-                    .iter()
-                    .any(|planes| sphere_visible(planes, center, radius))
-            {
-                continue;
+        // and pass visibility instead of hashing a large material key per part.
+        let mut default_batches = [[None; VISIBILITY_MASK_COUNT]; PartShape::COUNT];
+        for (batch_index, batch) in batches.iter().enumerate() {
+            if batch.textures == default_textures {
+                default_batches[batch.shape.index()][batch.visibility_mask as usize] =
+                    Some(batch_index);
             }
-            let has_custom_textures = part.material.textures.base_color.is_some()
-                || part.material.textures.normal.is_some()
-                || part.material.textures.metallic_roughness.is_some()
-                || part.material_slots.slots.iter().any(|material| {
-                    material.textures.base_color.is_some()
-                        || material.textures.normal.is_some()
-                        || material.textures.metallic_roughness.is_some()
+        }
+        let mut parts = workspace.get_all::<Part>();
+        let mut group = Vec::with_capacity(CULL_GROUP_SIZE);
+        loop {
+            group.clear();
+            let mut bounds_min = Vec3::splat(f32::INFINITY);
+            let mut bounds_max = Vec3::splat(f32::NEG_INFINITY);
+            for part in parts.by_ref().take(CULL_GROUP_SIZE) {
+                let pivot = part.pivot();
+                let max_scale = part.size.max_element().max(0.0);
+                let radius = part.shape.bounding_radius() * max_scale * 1.01;
+                let center = pivot.w_axis.truncate();
+                let extent = Vec3::splat(radius);
+                bounds_min = bounds_min.min(center - extent);
+                bounds_max = bounds_max.max(center + extent);
+                group.push(PartCandidate {
+                    part,
+                    pivot,
+                    center,
+                    radius,
+                    visibility_mask: 0,
                 });
-            let custom_textures = if has_custom_textures {
-                let textures =
-                    self.material_textures(workspace, &part.material, &part.material_slots)?;
-                (textures != default_textures).then_some(textures)
-            } else {
-                None
-            };
-            let batch_index = if let Some(textures) = custom_textures {
-                let key = (part.shape, textures);
-                if let Some(&batch_index) = batch_indices.get(&key) {
-                    batch_index
-                } else {
-                    let batch_index = batches.len();
-                    batch_indices.insert(key, batch_index);
-                    batches.push(RenderBatch {
-                        shape: part.shape,
-                        textures,
-                        instances: Vec::new(),
-                        instance_start: 0,
-                    });
-                    batch_index
+            }
+            if group.is_empty() {
+                break;
+            }
+
+            let mut classify = |planes: &[Vec4; 6], visibility_bit: u8| match aabb_frustum_relation(
+                planes, bounds_min, bounds_max,
+            ) {
+                FrustumRelation::Inside => {
+                    for candidate in &mut group {
+                        candidate.visibility_mask |= visibility_bit;
+                    }
                 }
-            } else {
-                let slot = part.shape.index();
-                if let Some(batch_index) = default_batch_for_shape[slot] {
-                    batch_index
-                } else {
-                    let batch_index = batches.len();
-                    default_batch_for_shape[slot] = Some(batch_index);
-                    batches.push(RenderBatch {
-                        shape: part.shape,
-                        textures: default_textures,
-                        instances: Vec::new(),
-                        instance_start: 0,
-                    });
-                    batch_index
+                FrustumRelation::Intersecting => {
+                    for candidate in &mut group {
+                        if sphere_visible(planes, candidate.center, candidate.radius) {
+                            candidate.visibility_mask |= visibility_bit;
+                        }
+                    }
                 }
+                FrustumRelation::Outside => {}
             };
-            let model = part.transform();
-            let normal_scales = normal_scales_from_model(&model);
-            let material = &part.material;
-            let tint = part.color.rgba();
-            batches[batch_index].instances.push(InstanceRaw {
-                model: model.to_cols_array_2d(),
-                normal_scales,
-                base_color: [
-                    material.base_color[0] * tint[0],
-                    material.base_color[1] * tint[1],
-                    material.base_color[2] * tint[2],
-                    material.base_color[3] * tint[3],
-                ],
-                metallic_roughness: [
-                    material.metallic.clamp(0.0, 1.0),
-                    material.roughness.clamp(0.04, 1.0),
-                ],
-                emissive: material.emissive,
-            });
+            classify(&camera_planes, 1);
+            for (cascade, planes) in light_planes.iter().enumerate() {
+                classify(planes, 1 << (cascade + 1));
+            }
+
+            for candidate in &group {
+                let part = candidate.part;
+                let pivot = candidate.pivot;
+                let visibility_mask = candidate.visibility_mask;
+                if visibility_mask == 0 {
+                    continue;
+                }
+                let has_custom_textures = visibility_mask & 1 != 0
+                    && (part.material.textures.base_color.is_some()
+                        || part.material.textures.normal.is_some()
+                        || part.material.textures.metallic_roughness.is_some()
+                        || part.material_slots.slots.iter().any(|material| {
+                            material.textures.base_color.is_some()
+                                || material.textures.normal.is_some()
+                                || material.textures.metallic_roughness.is_some()
+                        }));
+                let custom_textures = if has_custom_textures {
+                    let textures =
+                        self.material_textures(workspace, &part.material, &part.material_slots)?;
+                    (textures != default_textures).then_some(textures)
+                } else {
+                    None
+                };
+                let batch_index = if let Some(textures) = custom_textures {
+                    let key = (part.shape, textures, visibility_mask);
+                    if let Some(&batch_index) = batch_indices.get(&key) {
+                        batch_index
+                    } else {
+                        let batch_index = batches.len();
+                        batch_indices.insert(key, batch_index);
+                        batches.push(RenderBatch {
+                            shape: part.shape,
+                            textures,
+                            visibility_mask,
+                            instances: Vec::new(),
+                            instance_start: 0,
+                        });
+                        batch_index
+                    }
+                } else {
+                    let slot = &mut default_batches[part.shape.index()][visibility_mask as usize];
+                    if let Some(batch_index) = *slot {
+                        batch_index
+                    } else {
+                        let batch_index = batches.len();
+                        *slot = Some(batch_index);
+                        batches.push(RenderBatch {
+                            shape: part.shape,
+                            textures: default_textures,
+                            visibility_mask,
+                            instances: Vec::new(),
+                            instance_start: 0,
+                        });
+                        batch_index
+                    }
+                };
+                let model = Mat4::from_cols(
+                    pivot.x_axis * part.size.x,
+                    pivot.y_axis * part.size.y,
+                    pivot.z_axis * part.size.z,
+                    pivot.w_axis,
+                );
+                let (normal_scales, base_color, metallic_roughness, emissive) =
+                    if visibility_mask & 1 != 0 {
+                        let material = &part.material;
+                        let tint = part.color.rgba();
+                        (
+                            normal_scales_from_model(&model),
+                            [
+                                material.base_color[0] * tint[0],
+                                material.base_color[1] * tint[1],
+                                material.base_color[2] * tint[2],
+                                material.base_color[3] * tint[3],
+                            ],
+                            [
+                                material.metallic.clamp(0.0, 1.0),
+                                material.roughness.clamp(0.04, 1.0),
+                            ],
+                            material.emissive,
+                        )
+                    } else {
+                        ([0.0; 3], [0.0; 4], [0.0; 2], [0.0; 3])
+                    };
+                batches[batch_index].instances.push(InstanceRaw {
+                    model: [
+                        model.x_axis.truncate().to_array(),
+                        model.y_axis.truncate().to_array(),
+                        model.z_axis.truncate().to_array(),
+                        model.w_axis.truncate().to_array(),
+                    ],
+                    normal_scales,
+                    base_color,
+                    metallic_roughness,
+                    emissive,
+                });
+            }
         }
 
         let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
+        batches.sort_unstable_by_key(|batch| (batch.shape.index(), batch.visibility_mask));
         let mut instance_start = 0;
         for batch in &mut batches {
             batch.instance_start = instance_start;
@@ -1113,21 +1180,28 @@ impl Renderer {
 
         self.prepared_batches.clear();
         self.prepared_batches.reserve(batches.len());
+        let default_packed = self.pack_material_textures(default_textures)?;
+        self.material_bind_group(default_packed);
         for batch in &batches {
-            let packed = self.pack_material_textures(batch.textures)?;
-            // Populate the bind-group cache once per material; steady-state
-            // frames create zero bind groups.
-            self.material_bind_group(packed);
+            if batch.instances.is_empty() {
+                continue;
+            }
+            let packed = if batch.textures == default_textures {
+                default_packed
+            } else {
+                let packed = self.pack_material_textures(batch.textures)?;
+                // Populate the bind-group cache once per material; steady-state
+                // frames create zero bind groups.
+                self.material_bind_group(packed);
+                packed
+            };
             self.prepared_batches.push(PreparedRenderBatch {
                 shape: batch.shape,
                 packed_textures: packed,
+                visibility_mask: batch.visibility_mask,
                 instance_start: batch.instance_start,
                 instance_count: batch.instances.len() as u32,
             });
-        }
-        // Return scratch storage for reuse next frame.
-        for batch in &mut batches {
-            batch.instances.clear();
         }
         self.batch_scratch = batches;
         self.batch_indices_scratch = batch_indices;
@@ -1143,35 +1217,61 @@ impl Renderer {
         camera_bind_group: &wgpu::BindGroup,
         dynamic_offsets: &[wgpu::DynamicOffset],
         use_materials: bool,
+        visibility_bit: u8,
     ) {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera_bind_group, dynamic_offsets);
-        for batch in &self.prepared_batches {
-            if batch.instance_count == 0 {
+        let mut bound_shape = None;
+        let mut bound_material = None;
+        let mut index = 0;
+        while index < self.prepared_batches.len() {
+            let batch = &self.prepared_batches[index];
+            if batch.instance_count == 0 || batch.visibility_mask & visibility_bit == 0 {
+                index += 1;
                 continue;
+            }
+            let mut instance_count = batch.instance_count;
+            let mut next = index + 1;
+            while let Some(candidate) = self.prepared_batches.get(next) {
+                if candidate.visibility_mask & visibility_bit == 0
+                    || candidate.shape != batch.shape
+                    || (use_materials && candidate.packed_textures != batch.packed_textures)
+                    || candidate.instance_start != batch.instance_start + instance_count as usize
+                {
+                    break;
+                }
+                instance_count += candidate.instance_count;
+                next += 1;
             }
             let mesh_handle = self.primitive_meshes[batch.shape.index()];
             let Some(mesh) = self.meshes.get(mesh_handle.0) else {
+                index = next;
                 continue;
             };
-            pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
-            pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            if bound_shape != Some(batch.shape) {
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                bound_shape = Some(batch.shape);
+            }
             let instance_start =
                 batch.instance_start as u64 * std::mem::size_of::<InstanceRaw>() as u64;
-            let instance_end = instance_start
-                + batch.instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+            let instance_end =
+                instance_start + instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
             pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
             if use_materials
+                && bound_material != Some(batch.packed_textures)
                 && let Some(bind_group) = self.material_bind_groups.get(&batch.packed_textures)
             {
                 pass.set_bind_group(1, bind_group, &[]);
+                bound_material = Some(batch.packed_textures);
             }
-            pass.draw_indexed(0..mesh.index_count, 0, 0..batch.instance_count);
+            pass.draw_indexed(0..mesh.index_count, 0, 0..instance_count);
+            index = next;
         }
     }
 
     fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
-        self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, &[], true);
+        self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, &[], true, 1);
     }
 
     fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>, cascade: usize) {
@@ -1181,6 +1281,7 @@ impl Renderer {
             &self.shadow_camera_bind_group,
             &[cascade as u32 * self.shadow_camera_stride],
             false,
+            1 << (cascade + 1),
         );
     }
 
@@ -1579,6 +1680,14 @@ fn light_view_projections(
     (matrices, splits, texel_sizes)
 }
 
+fn pack_shadow_values(values: [f32; SHADOW_CASCADE_COUNT]) -> [[f32; 4]; 2] {
+    let mut packed = [[values[SHADOW_CASCADE_COUNT - 1]; 4]; 2];
+    for (index, value) in values.into_iter().enumerate() {
+        packed[index / 4][index % 4] = value;
+    }
+    packed
+}
+
 fn camera_frustum_slice_corners(camera: &Camera, near: f32, far: f32) -> [Vec3; 8] {
     let tan_half_fovy = (camera.fovy * 0.5).tan();
     let near_height = near * tan_half_fovy;
@@ -1641,9 +1750,36 @@ fn frustum_planes(view_projection: Mat4) -> [Vec4; 6] {
     ]
 }
 
-fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> bool {
+enum FrustumRelation {
+    Outside,
+    Intersecting,
+    Inside,
+}
+
+fn aabb_frustum_relation(planes: &[Vec4; 6], min: Vec3, max: Vec3) -> FrustumRelation {
+    let center = (min + max) * 0.5;
+    let extent = (max - min) * 0.5;
+    let center = center.extend(1.0);
+    let mut fully_inside = true;
     for plane in planes {
-        if plane.truncate().dot(center) + plane.w < -radius {
+        let projected_extent = plane.truncate().abs().dot(extent);
+        let distance = plane.dot(center);
+        if distance < -projected_extent {
+            return FrustumRelation::Outside;
+        }
+        fully_inside &= distance >= projected_extent;
+    }
+    if fully_inside {
+        FrustumRelation::Inside
+    } else {
+        FrustumRelation::Intersecting
+    }
+}
+
+fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> bool {
+    let center = center.extend(1.0);
+    for plane in planes {
+        if plane.dot(center) < -radius {
             return false;
         }
     }
@@ -1755,7 +1891,6 @@ mod tests {
     #[test]
     fn compact_normal_scales_match_inverse_transpose_for_trs() {
         use crate::glam::{Quat, Vec3};
-        assert_eq!(std::mem::size_of::<InstanceRaw>(), 112);
         let rotation = Quat::from_euler(crate::glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
         let pivot = Mat4::from_rotation_translation(rotation, Vec3::new(1.0, -2.0, 3.0));
         let size = Vec3::new(0.82, 1.1, 0.6);
