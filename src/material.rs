@@ -16,6 +16,16 @@ pub struct TextureHandle(
 );
 
 /// The material slot selected by a mesh vertex.
+///
+/// Directional slots describe the orientation of a face in the mesh's local
+/// space, so they apply to any mesh.
+///
+/// [`Top`](Self::Top) faces toward `+Y`,
+/// [`Bottom`](Self::Bottom) toward `-Y`,
+/// [`Front`](Self::Front) toward `+Z`,
+/// [`Back`](Self::Back) toward `-Z`,
+/// [`Right`](Self::Right) toward `+X`,
+/// and [`Left`](Self::Left) toward `-X`.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MaterialSlot {
@@ -36,9 +46,43 @@ pub enum MaterialSlot {
 }
 
 impl MaterialSlot {
+    /// All directional slots in GPU slot order.
+    pub const ALL_DIRECTIONS: [Self; MATERIAL_SLOT_COUNT - 1] = [
+        Self::Top,
+        Self::Bottom,
+        Self::Front,
+        Self::Back,
+        Self::Left,
+        Self::Right,
+    ];
+
     /// Returns the zero-based GPU slot index.
     pub const fn index(self) -> usize {
         self as usize
+    }
+
+    /// Selects the directional slot whose axis best matches a face normal.
+    ///
+    /// The dominant axis of `normal` wins: `|y|` beats `|x|` beats `|z|` on
+    /// ties, so an up-facing slope maps to [`Top`](Self::Top) rather than a
+    /// side. A zero normal maps to [`Base`](Self::Base).
+    pub fn from_normal(normal: [f32; 3]) -> Self {
+        let [x, y, z] = normal;
+        let ax = x.abs();
+        let ay = y.abs();
+        let az = z.abs();
+        if ax == 0.0 && ay == 0.0 && az == 0.0 {
+            return Self::Base;
+        }
+        if ay >= ax && ay >= az {
+            if y >= 0.0 { Self::Top } else { Self::Bottom }
+        } else if ax >= az {
+            if x >= 0.0 { Self::Right } else { Self::Left }
+        } else if z >= 0.0 {
+            Self::Front
+        } else {
+            Self::Back
+        }
     }
 }
 
@@ -56,8 +100,10 @@ pub struct TextureSet {
 /// PBR factors and optional texture maps used by a [`crate::Part`].
 ///
 /// The metallic-roughness map follows the glTF convention: metallic is read
-/// from the blue channel and roughness from the green channel. All scalar
-/// factors are supplied per instance, so parts can remain instanced efficiently.
+/// from the blue channel and roughness from the green channel. Scalar factors
+/// are resolved per face, so each directional [`MaterialSlot`] renders its own
+/// base color, metallic, roughness, and emissive values; the part tint
+/// ([`crate::BasePart::color`]) still multiplies every face.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
     /// RGBA multiplier for the base color. Values are not clamped on assignment.
@@ -120,23 +166,59 @@ impl Material {
 /// Materials assigned to the non-default slots of a mesh.
 ///
 /// Slot zero is the [`crate::Part::material`] field. The first element in this list
-/// is slot one, the second is slot two, and so on.
+/// is slot one, the second is slot two, and so on. Entries are `Some` only for
+/// slots assigned through [`MeshMaterialSlots::set`]; skipped slots stay `None`
+/// and fall back to the base material at render time.
+///
+/// Slots are directional (see [`MaterialSlot`]), so the same slot names work
+/// for every shape: setting [`MaterialSlot::Top`] affects the top-facing
+/// triangles of a [`crate::PartShape::Block`], [`crate::PartShape::Cylinder`],
+/// [`crate::PartShape::Wedge`], or any custom [`crate::Mesh`] whose vertices
+/// are tagged by orientation. Unset slots fall back to the base material at
+/// render time, including its scalar PBR factors.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshMaterialSlots {
     /// Materials for slots after [`MaterialSlot::Base`], stored by slot order.
-    pub slots: Vec<Material>,
+    ///
+    /// `None` entries were never assigned and fall back to
+    /// [`crate::Part::material`].
+    pub slots: Vec<Option<Material>>,
 }
 
 impl MeshMaterialSlots {
     /// Assigns a non-base material slot, growing the slot list as needed.
+    ///
+    /// Skipped slots stay `None` and fall back to [`crate::Part::material`].
     ///
     /// Passing [`MaterialSlot::Base`] panics because the base slot belongs in
     /// [`crate::Part::material`].
     pub fn set(&mut self, slot: MaterialSlot, material: Material) {
         assert!(slot != MaterialSlot::Base, "slot zero is Part::material");
         let index = slot.index() - 1;
-        self.slots.resize(index + 1, Material::default());
-        self.slots[index] = material;
+        self.slots.resize(index + 1, None);
+        self.slots[index] = Some(material);
+    }
+
+    /// Returns the material assigned to a non-base slot, if any.
+    ///
+    /// Passing [`MaterialSlot::Base`] returns `None` because the base slot
+    /// belongs in [`crate::Part::material`].
+    pub fn get(&self, slot: MaterialSlot) -> Option<&Material> {
+        if slot == MaterialSlot::Base {
+            return None;
+        }
+        self.slots.get(slot.index() - 1)?.as_ref()
+    }
+
+    /// Returns the mutable material assigned to a non-base slot, if any.
+    ///
+    /// Passing [`MaterialSlot::Base`] returns `None` because the base slot
+    /// belongs in [`crate::Part::material`].
+    pub fn get_mut(&mut self, slot: MaterialSlot) -> Option<&mut Material> {
+        if slot == MaterialSlot::Base {
+            return None;
+        }
+        self.slots.get_mut(slot.index() - 1)?.as_mut()
     }
 }
 
@@ -478,5 +560,72 @@ mod tests {
 
         let levels = texture.mip_levels().unwrap();
         assert_eq!(levels[1].pixels, vec![188, 188, 188, 128]);
+    }
+
+    #[test]
+    fn material_slot_from_normal_selects_the_dominant_axis() {
+        assert_eq!(
+            MaterialSlot::from_normal([0.0, 1.0, 0.0]),
+            MaterialSlot::Top
+        );
+        assert_eq!(
+            MaterialSlot::from_normal([0.0, -1.0, 0.0]),
+            MaterialSlot::Bottom
+        );
+        assert_eq!(
+            MaterialSlot::from_normal([0.0, 0.0, 1.0]),
+            MaterialSlot::Front
+        );
+        assert_eq!(
+            MaterialSlot::from_normal([0.0, 0.0, -1.0]),
+            MaterialSlot::Back
+        );
+        assert_eq!(
+            MaterialSlot::from_normal([1.0, 0.0, 0.0]),
+            MaterialSlot::Right
+        );
+        assert_eq!(
+            MaterialSlot::from_normal([-1.0, 0.0, 0.0]),
+            MaterialSlot::Left
+        );
+        assert_eq!(
+            MaterialSlot::from_normal([0.0, 0.0, 0.0]),
+            MaterialSlot::Base
+        );
+    }
+
+    #[test]
+    fn material_slot_from_normal_prefers_up_on_ties() {
+        // Wedge slopes face up and sideways equally; they should read as top
+        // faces so a grass-top style override covers them.
+        assert_eq!(
+            MaterialSlot::from_normal([
+                -std::f32::consts::FRAC_1_SQRT_2,
+                std::f32::consts::FRAC_1_SQRT_2,
+                0.0
+            ]),
+            MaterialSlot::Top
+        );
+    }
+
+    #[test]
+    fn mesh_material_slots_round_trip_through_get() {
+        let mut slots = MeshMaterialSlots::default();
+        assert!(slots.get(MaterialSlot::Base).is_none());
+        assert!(slots.get(MaterialSlot::Top).is_none());
+
+        let material = Material::from_color(Color3::new(1.0, 0.0, 0.0));
+        slots.set(MaterialSlot::Top, material);
+        assert_eq!(slots.get(MaterialSlot::Top), Some(&material));
+        assert!(slots.get(MaterialSlot::Bottom).is_none());
+    }
+
+    #[test]
+    fn mesh_material_slots_leave_skipped_slots_unset() {
+        let mut slots = MeshMaterialSlots::default();
+        let material = Material::from_color(Color3::new(0.0, 1.0, 0.0));
+        slots.set(MaterialSlot::Right, material);
+        assert!(slots.get(MaterialSlot::Top).is_none());
+        assert_eq!(slots.get(MaterialSlot::Right), Some(&material));
     }
 }

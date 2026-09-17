@@ -110,14 +110,21 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
         part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
-        part.set_material_slot(MaterialSlot::Base, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
-        part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
-        part.set_material_slot(MaterialSlot::Front, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Back, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Left, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
-        part.material.roughness = 0.82;
+        // Each face carries its own full PBR material: the top face is grass,
+        // the bottom is dirt, and the sides blend grass over dirt.
+        let mut grass_side = Material::textured(grass_side);
+        grass_side.roughness = 0.82;
+        let mut grass_top = Material::textured(grass_top);
+        grass_top.roughness = 0.82;
+        let mut dirt = Material::textured(dirt);
+        dirt.roughness = 0.9;
+        part.set_material_slot(MaterialSlot::Base, grass_side);
+        part.set_material_slot(MaterialSlot::Top, grass_top);
+        part.set_material_slot(MaterialSlot::Bottom, dirt);
+        part.set_material_slot(MaterialSlot::Front, grass_side);
+        part.set_material_slot(MaterialSlot::Back, grass_side);
+        part.set_material_slot(MaterialSlot::Left, grass_side);
+        part.set_material_slot(MaterialSlot::Right, grass_side);
     });
 
     let platform = workspace.add_child_with(Part::unnamed(), |part| {

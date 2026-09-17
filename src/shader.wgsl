@@ -57,6 +57,27 @@ var material_texture_6: texture_2d_array<f32>;
 @group(1) @binding(7)
 var material_sampler: sampler;
 
+// Per-face PBR factors for every deduplicated part material set. Each set
+// packs seven slots (base + six directions, in MaterialSlot order) as three
+// vec4s per slot: base color, then emissive RGB + roughness, then metallic.
+@group(2) @binding(0)
+var<storage, read> material_factor_data: array<vec4<f32>>;
+
+const MATERIAL_VEC4S_PER_SLOT: u32 = 3u;
+const MATERIAL_VEC4S_PER_SET: u32 = 21u;
+
+fn slot_base_color(set_index: u32, slot: u32) -> vec4<f32> {
+    return material_factor_data[set_index * MATERIAL_VEC4S_PER_SET + slot * MATERIAL_VEC4S_PER_SLOT];
+}
+
+fn slot_emissive_roughness(set_index: u32, slot: u32) -> vec4<f32> {
+    return material_factor_data[set_index * MATERIAL_VEC4S_PER_SET + slot * MATERIAL_VEC4S_PER_SLOT + 1u];
+}
+
+fn slot_metallic(set_index: u32, slot: u32) -> f32 {
+    return material_factor_data[set_index * MATERIAL_VEC4S_PER_SET + slot * MATERIAL_VEC4S_PER_SLOT + 2u].x;
+}
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -69,9 +90,8 @@ struct VertexInput {
     @location(8) model_2: vec3<f32>,
     @location(9) model_3: vec3<f32>,
     @location(10) normal_scales: vec3<f32>,
-    @location(11) base_color: vec4<f32>,
-    @location(12) metallic_roughness: vec2<f32>,
-    @location(13) emissive: vec3<f32>,
+    @location(11) tint: vec4<f32>,
+    @location(12) material_set: u32,
 };
 
 struct VertexOutput {
@@ -82,9 +102,8 @@ struct VertexOutput {
     @location(3) uv: vec2<f32>,
     @location(4) @interpolate(flat) material_slot: u32,
     @location(5) vertex_color: vec4<f32>,
-    @location(6) base_color: vec4<f32>,
-    @location(7) metallic_roughness: vec2<f32>,
-    @location(8) emissive: vec3<f32>,
+    @location(6) tint: vec4<f32>,
+    @location(7) @interpolate(flat) material_set: u32,
 };
 
 struct ShadowVertexInput {
@@ -119,9 +138,8 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     output.uv = vertex.uv;
     output.material_slot = vertex.material_slot;
     output.vertex_color = vertex.vertex_color;
-    output.base_color = vertex.base_color;
-    output.metallic_roughness = vertex.metallic_roughness;
-    output.emissive = vertex.emissive;
+    output.tint = vertex.tint;
+    output.material_set = vertex.material_set;
     return output;
 }
 
@@ -256,8 +274,12 @@ fn shadow_texel_size(cascade: u32) -> f32 {
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let uv_dx = dpdx(vertex.uv);
     let uv_dy = dpdy(vertex.uv);
+    let slot_factors = slot_base_color(vertex.material_set, vertex.material_slot);
+    let slot_emissive_roughness =
+        slot_emissive_roughness(vertex.material_set, vertex.material_slot);
+    let slot_metallic = slot_metallic(vertex.material_set, vertex.material_slot);
     let base_color_sample = sample_base_color(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
-    let base_color = base_color_sample * vertex.vertex_color * vertex.base_color;
+    let base_color = base_color_sample * vertex.vertex_color * vertex.tint * slot_factors;
     // The normal (RG) and metallic-roughness (B=metallic, A=roughness) live in
     // the same surface layer, so one fetch serves both: previously this sampled
     // the identical texel twice with bitwise-identical results.
@@ -272,12 +294,12 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     );
 
     let metallic = clamp(
-        vertex.metallic_roughness.x * metallic_roughness_sample.b,
+        slot_metallic * metallic_roughness_sample.b,
         0.0,
         1.0,
     );
     let roughness = clamp(
-        vertex.metallic_roughness.y * metallic_roughness_sample.g,
+        slot_emissive_roughness.w * metallic_roughness_sample.g,
         0.04,
         1.0,
     );
@@ -344,7 +366,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         * normal_dot_light
         * shadow_visibility;
     let ambient = base_color.rgb * camera.ambient_color.rgb * (1.0 - metallic);
-    let color = ambient + direct + vertex.emissive.rgb;
+    let color = ambient + direct + slot_emissive_roughness.rgb;
     let tone_mapped = color / (color + vec3<f32>(1.0));
     var display_color = linear_to_srgb(tone_mapped);
     if FRAMEBUFFER_IS_SRGB > 0.5 {

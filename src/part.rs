@@ -99,8 +99,7 @@ pub struct Part {
     pub shape: PartShape,
     /// Material assigned to the base material slot.
     pub material: Material,
-    /// Materials assigned to the mesh's non-base slots.
-    pub material_slots: MeshMaterialSlots,
+    pub(crate) material_slots: MeshMaterialSlots,
 }
 
 impl Part {
@@ -121,11 +120,30 @@ impl Part {
     }
 
     /// Assigns a material to a mesh-selected slot.
+    ///
+    /// Slots are directional, so they work for any [`PartShape`]: setting
+    /// [`MaterialSlot::Top`] affects the top-facing triangles of a block,
+    /// cylinder cap, wedge slope, sphere pole, or custom mesh alike. Setting
+    /// [`MaterialSlot::Base`] replaces the whole-part material, just like
+    /// Roblox's `BasePart.Material`.
     pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
         if slot == MaterialSlot::Base {
             self.material = material;
         } else {
             self.material_slots.set(slot, material);
+        }
+    }
+
+    /// Returns the effective material for a slot.
+    ///
+    /// [`MaterialSlot::Base`] returns [`Self::material`]. Any other slot
+    /// returns its override when one was assigned, or [`Self::material`] as
+    /// the fallback used at render time.
+    pub fn material_slot(&self, slot: MaterialSlot) -> &Material {
+        if slot == MaterialSlot::Base {
+            &self.material
+        } else {
+            self.material_slots.get(slot).unwrap_or(&self.material)
         }
     }
 }
@@ -168,5 +186,19 @@ mod tests {
 
         assert_eq!(part.position(), position);
         assert!((part.orientation() - orientation).abs().max_element() < 0.0001);
+    }
+
+    #[test]
+    fn material_slot_falls_back_to_the_base_material_until_overridden() {
+        let mut part = Part::new("part");
+        assert_eq!(part.material_slot(MaterialSlot::Top), &part.material);
+
+        let top = Material::from_color(Color3::new(1.0, 0.0, 0.0));
+        part.set_material_slot(MaterialSlot::Top, top);
+        assert_eq!(part.material_slot(MaterialSlot::Top), &top);
+        assert_eq!(
+            part.material_slot(MaterialSlot::Bottom),
+            part.material_slot(MaterialSlot::Base)
+        );
     }
 }

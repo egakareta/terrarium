@@ -5,7 +5,7 @@ use thiserror::Error;
 use web_time::Instant;
 
 use crate::{
-    Camera, DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh,
+    Camera, DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, MaterialSlot, Mesh,
     MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
     Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
@@ -55,9 +55,8 @@ pub enum RendererError {
 struct InstanceRaw {
     model: [[f32; 3]; 4],
     normal_scales: [f32; 3],
-    base_color: [f32; 4],
-    metallic_roughness: [f32; 2],
-    emissive: [f32; 3],
+    tint: [f32; 4],
+    material_set: u32,
 }
 
 impl InstanceRaw {
@@ -69,8 +68,7 @@ impl InstanceRaw {
             9 => Float32x3,
             10 => Float32x3,
             11 => Float32x4,
-            12 => Float32x2,
-            13 => Float32x3,
+            12 => Uint32,
         ];
 
         wgpu::VertexBufferLayout {
@@ -141,6 +139,65 @@ struct PackedMaterialTextures {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct PackedTextureHandle(usize);
 
+/// Packed `vec4` count for one deduplicated per-face PBR factor set: seven
+/// slots (base + six directions) times three `vec4`s per slot (base color,
+/// emissive RGB + roughness, metallic).
+const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 3;
+
+/// Hashable per-face PBR factors for one part: bit patterns of base color
+/// RGBA, metallic, roughness, and emissive RGB for each of the seven slots in
+/// [`MaterialSlot`] order, with unset directional slots resolved to the base
+/// material.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct MaterialSetKey([[u32; 9]; MATERIAL_SLOT_COUNT]);
+
+impl MaterialSetKey {
+    fn from_part(part: &Part) -> Self {
+        let mut slots = [[0u32; 9]; MATERIAL_SLOT_COUNT];
+        for (index, slot) in std::iter::once(MaterialSlot::Base)
+            .chain(MaterialSlot::ALL_DIRECTIONS)
+            .enumerate()
+        {
+            let material = part.material_slot(slot);
+            slots[index] = [
+                material.base_color[0].to_bits(),
+                material.base_color[1].to_bits(),
+                material.base_color[2].to_bits(),
+                material.base_color[3].to_bits(),
+                material.metallic.to_bits(),
+                material.roughness.to_bits(),
+                material.emissive[0].to_bits(),
+                material.emissive[1].to_bits(),
+                material.emissive[2].to_bits(),
+            ];
+        }
+        Self(slots)
+    }
+
+    /// Expands the key back into the GPU `vec4` sequence consumed by
+    /// `shader.wgsl`: per slot, base color, then emissive RGB + roughness,
+    /// then metallic.
+    fn vec4s(&self) -> [[f32; 4]; MATERIAL_VEC4S_PER_SET] {
+        let mut vec4s = [[0.0; 4]; MATERIAL_VEC4S_PER_SET];
+        for (index, bits) in self.0.iter().enumerate() {
+            vec4s[index * 3] = [
+                f32::from_bits(bits[0]),
+                f32::from_bits(bits[1]),
+                f32::from_bits(bits[2]),
+                f32::from_bits(bits[3]),
+            ];
+            vec4s[index * 3 + 1] = [
+                f32::from_bits(bits[6]),
+                f32::from_bits(bits[7]),
+                f32::from_bits(bits[8]),
+                f32::from_bits(bits[5]),
+            ];
+            vec4s[index * 3 + 2] = [f32::from_bits(bits[4]), 0.0, 0.0, 0.0];
+        }
+        vec4s
+    }
+}
+
 struct GpuMaterialTexture {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -194,6 +251,11 @@ pub struct Renderer {
     shadow_camera_stride: u32,
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_sampler: wgpu::Sampler,
+    material_factor_bind_group_layout: wgpu::BindGroupLayout,
+    material_factors_buffer: wgpu::Buffer,
+    material_factors_bind_group: wgpu::BindGroup,
+    material_factor_vec4s: Vec<[f32; 4]>,
+    material_factor_indices: HashMap<MaterialSetKey, u32>,
     textures: Vec<GpuTexture>,
     workspace_texture_handles: HashMap<(InstanceId, TextureHandle), GpuTextureHandle>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,
@@ -403,6 +465,34 @@ impl Renderer {
             anisotropy_clamp: 1,
             border_color: None,
         });
+        let material_factor_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("material factor bind group layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let material_factors_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("material factor buffer"),
+            size: (MATERIAL_VEC4S_PER_SET * 16) as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let material_factors_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("material factor bind group"),
+            layout: &material_factor_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: material_factors_buffer.as_entire_binding(),
+            }],
+        });
         let default_base_color = Texture::new(1, 1, vec![255, 255, 255, 255])?;
         let default_normal = Texture::linear(1, 1, vec![128, 128, 255, 255])?;
         let default_metallic_roughness = Texture::linear(1, 1, vec![0, 255, 0, 255])?;
@@ -436,6 +526,7 @@ impl Renderer {
             bind_group_layouts: &[
                 Some(&camera_bind_group_layout),
                 Some(&material_bind_group_layout),
+                Some(&material_factor_bind_group_layout),
             ],
             immediate_size: 0,
         });
@@ -555,6 +646,11 @@ impl Renderer {
             shadow_camera_stride,
             material_bind_group_layout,
             material_sampler,
+            material_factor_bind_group_layout,
+            material_factors_buffer,
+            material_factors_bind_group,
+            material_factor_vec4s: Vec::new(),
+            material_factor_indices: HashMap::new(),
             textures,
             workspace_texture_handles: HashMap::new(),
             texture_dedup,
@@ -728,13 +824,14 @@ impl Renderer {
             normal: [normal; MATERIAL_SLOT_COUNT],
             metallic_roughness: [metallic_roughness; MATERIAL_SLOT_COUNT],
         };
-        for (slot, material) in material_slots
+        for (index, material) in material_slots
             .slots
             .iter()
             .take(MATERIAL_SLOT_COUNT - 1)
             .enumerate()
+            .filter_map(|(index, material)| material.as_ref().map(|material| (index, material)))
         {
-            let slot = slot + 1;
+            let slot = index + 1;
             textures.base_color[slot] = resolve(self, material.textures.base_color, base_color)?;
             textures.normal[slot] = resolve(self, material.textures.normal, normal)?;
             textures.metallic_roughness[slot] = resolve(
@@ -744,6 +841,48 @@ impl Renderer {
             )?;
         }
         Ok(textures)
+    }
+
+    fn material_set_index(&mut self, part: &Part) -> u32 {
+        let key = MaterialSetKey::from_part(part);
+        if let Some(&index) = self.material_factor_indices.get(&key) {
+            return index;
+        }
+        let index = (self.material_factor_vec4s.len() / MATERIAL_VEC4S_PER_SET) as u32;
+        self.material_factor_vec4s.extend(key.vec4s());
+        self.material_factor_indices.insert(key, index);
+        index
+    }
+
+    fn upload_material_factors(&mut self) {
+        if self.material_factor_vec4s.is_empty() {
+            return;
+        }
+        let required_size =
+            self.material_factor_vec4s.len() as u64 * std::mem::size_of::<[f32; 4]>() as u64;
+        if self.material_factors_buffer.size() < required_size {
+            let capacity = required_size.max(self.material_factors_buffer.size() * 2);
+            self.material_factors_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("material factor buffer"),
+                size: capacity,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.material_factors_bind_group =
+                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("material factor bind group"),
+                    layout: &self.material_factor_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.material_factors_buffer.as_entire_binding(),
+                    }],
+                });
+        }
+        self.queue.write_buffer(
+            &self.material_factors_buffer,
+            0,
+            bytemuck::cast_slice(&self.material_factor_vec4s),
+        );
     }
 
     fn upload_workspace_texture(
@@ -1059,7 +1198,7 @@ impl Renderer {
                     && (part.material.textures.base_color.is_some()
                         || part.material.textures.normal.is_some()
                         || part.material.textures.metallic_roughness.is_some()
-                        || part.material_slots.slots.iter().any(|material| {
+                        || part.material_slots.slots.iter().flatten().any(|material| {
                             material.textures.base_color.is_some()
                                 || material.textures.normal.is_some()
                                 || material.textures.metallic_roughness.is_some()
@@ -1110,27 +1249,15 @@ impl Renderer {
                     pivot.z_axis * part.size.z,
                     pivot.w_axis,
                 );
-                let (normal_scales, base_color, metallic_roughness, emissive) =
-                    if visibility_mask & 1 != 0 {
-                        let material = &part.material;
-                        let tint = part.color.rgba();
-                        (
-                            normal_scales_from_model(&model),
-                            [
-                                material.base_color[0] * tint[0],
-                                material.base_color[1] * tint[1],
-                                material.base_color[2] * tint[2],
-                                material.base_color[3] * tint[3],
-                            ],
-                            [
-                                material.metallic.clamp(0.0, 1.0),
-                                material.roughness.clamp(0.04, 1.0),
-                            ],
-                            material.emissive,
-                        )
-                    } else {
-                        ([0.0; 3], [0.0; 4], [0.0; 2], [0.0; 3])
-                    };
+                let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
+                    (
+                        normal_scales_from_model(&model),
+                        part.color.rgba(),
+                        self.material_set_index(part),
+                    )
+                } else {
+                    ([0.0; 3], [0.0; 4], 0)
+                };
                 batches[batch_index].instances.push(InstanceRaw {
                     model: [
                         model.x_axis.truncate().to_array(),
@@ -1139,14 +1266,14 @@ impl Renderer {
                         model.w_axis.truncate().to_array(),
                     ],
                     normal_scales,
-                    base_color,
-                    metallic_roughness,
-                    emissive,
+                    tint,
+                    material_set,
                 });
             }
         }
 
         let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
+        self.upload_material_factors();
         batches.sort_unstable_by_key(|batch| (batch.shape.index(), batch.visibility_mask));
         let mut instance_start = 0;
         for batch in &mut batches {
@@ -1221,6 +1348,9 @@ impl Renderer {
     ) {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera_bind_group, dynamic_offsets);
+        if use_materials {
+            pass.set_bind_group(2, &self.material_factors_bind_group, &[]);
+        }
         let mut bound_shape = None;
         let mut bound_material = None;
         let mut index = 0;
@@ -1886,6 +2016,70 @@ mod tests {
         validator
             .validate(&module)
             .expect("eframe composite shader should validate");
+    }
+
+    #[test]
+    fn material_set_keys_resolve_unset_slots_to_the_base_material() {
+        use crate::{MaterialSlot, Part};
+
+        let mut part = Part::new("part");
+        part.material = Material {
+            base_color: [0.76, 0.30, 0.14, 1.0],
+            metallic: 0.82,
+            roughness: 0.24,
+            emissive: [0.1, 0.2, 0.3],
+            ..Material::default()
+        };
+        let top = Material {
+            base_color: [0.1, 0.4, 0.2, 1.0],
+            metallic: 0.1,
+            roughness: 0.9,
+            emissive: [0.0, 0.0, 0.0],
+            ..Material::default()
+        };
+        part.set_material_slot(MaterialSlot::Top, top);
+
+        let vec4s = MaterialSetKey::from_part(&part).vec4s();
+        // Base slot carries the base factors.
+        assert_eq!(vec4s[0], [0.76, 0.30, 0.14, 1.0]);
+        assert_eq!(vec4s[1], [0.1, 0.2, 0.3, 0.24]);
+        assert_eq!(vec4s[2][0], 0.82);
+        // The Top override carries its own factors.
+        assert_eq!(vec4s[3], [0.1, 0.4, 0.2, 1.0]);
+        assert_eq!(vec4s[4], [0.0, 0.0, 0.0, 0.9]);
+        assert_eq!(vec4s[5][0], 0.1);
+        // Unset slots fall back to the base factors, not the defaults.
+        assert_eq!(vec4s[6], [0.76, 0.30, 0.14, 1.0]);
+        assert_eq!(vec4s[7], [0.1, 0.2, 0.3, 0.24]);
+        assert_eq!(vec4s[8][0], 0.82);
+    }
+
+    #[test]
+    fn material_set_keys_distinguish_per_face_factors() {
+        use crate::{MaterialSlot, Part};
+
+        let mut copper = Part::new("copper");
+        copper.material.metallic = 0.82;
+        let mut copper_top_metal = Part::new("copper-top-metal");
+        copper_top_metal.material.metallic = 0.82;
+        copper_top_metal.set_material_slot(
+            MaterialSlot::Top,
+            Material {
+                metallic: 0.1,
+                ..Material::default()
+            },
+        );
+        let mut copper_clone = Part::new("copper-clone");
+        copper_clone.material.metallic = 0.82;
+
+        assert_eq!(
+            MaterialSetKey::from_part(&copper),
+            MaterialSetKey::from_part(&copper_clone)
+        );
+        assert_ne!(
+            MaterialSetKey::from_part(&copper),
+            MaterialSetKey::from_part(&copper_top_metal)
+        );
     }
 
     #[test]
