@@ -1,6 +1,6 @@
 use std::{
     any::Any,
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::HashMap,
     fmt::Debug,
     ptr::NonNull,
@@ -33,6 +33,7 @@ fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
 #[derive(Debug, Default)]
 pub struct InstanceLookup {
     instances: RefCell<HashMap<InstanceId, NonNull<dyn Instance>>>,
+    root: Cell<Option<(InstanceId, NonNull<InstanceData>)>>,
 }
 
 impl InstanceLookup {
@@ -50,6 +51,27 @@ impl InstanceLookup {
 
     pub(crate) fn get(&self, id: InstanceId) -> Option<NonNull<dyn Instance>> {
         self.instances.borrow().get(&id).copied()
+    }
+
+    pub(crate) fn set_root(&self, root: &mut InstanceData) {
+        self.root.set(Some((root.id(), NonNull::from(root))));
+    }
+
+    fn remove_child(&self, parent_id: InstanceId, child_id: InstanceId) -> bool {
+        if let Some(mut parent) = self.get(parent_id) {
+            // Boxed instances have stable addresses while they are owned by the workspace.
+            return unsafe { parent.as_mut().remove_child(child_id) };
+        }
+
+        let Some((root_id, mut root)) = self.root.get() else {
+            return false;
+        };
+        if root_id != parent_id {
+            return false;
+        }
+
+        // The workspace root is boxed so this pointer remains valid when Workspace moves.
+        unsafe { root.as_mut().remove_child(child_id) }
     }
 }
 
@@ -112,6 +134,10 @@ macro_rules! impl_instance {
 
             fn children_mut(&mut self) -> &mut [Box<dyn $crate::Instance>] {
                 self.$data $(.$data_tail)*.children_mut()
+            }
+
+            fn remove_child(&mut self, id: $crate::InstanceId) -> bool {
+                self.$data $(.$data_tail)*.remove_child(id)
             }
 
             fn add_child_box(
@@ -219,6 +245,16 @@ impl InstanceData {
         }
         child_id
     }
+
+    pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
+        let Some(index) = self.children.iter().position(|child| child.id() == id) else {
+            return false;
+        };
+        let mut child = self.children.swap_remove(index);
+        child.set_instance_parent(None);
+        child.set_instance_lookup(None);
+        true
+    }
 }
 
 impl Drop for InstanceData {
@@ -269,6 +305,33 @@ pub trait Instance: Any + Debug + InstanceClone {
 
     /// Returns mutable access to this instance's children.
     fn children_mut(&mut self) -> &mut [Box<dyn Instance>];
+
+    /// Removes a direct child by its stable identifier.
+    #[doc(hidden)]
+    fn remove_child(&mut self, id: InstanceId) -> bool {
+        let _ = id;
+        false
+    }
+
+    /// Removes this instance from its parent and destroys its descendants.
+    ///
+    /// Returns `true` when the instance was parented in a workspace. An
+    /// isolated instance is already owned by its caller and is destroyed by
+    /// dropping that value instead.
+    ///
+    /// This must be the last operation performed through this instance
+    /// reference when it returns `true`.
+    fn destroy(&mut self) -> bool {
+        let Some(parent_id) = self.parent() else {
+            return false;
+        };
+        let id = self.id();
+        let Some(lookup) = instance_lookup(parent_id) else {
+            return false;
+        };
+
+        lookup.remove_child(parent_id, id)
+    }
 
     /// Adds an owned child to this instance.
     fn add_child_box(&mut self, child: Box<dyn Instance>) -> InstanceId;

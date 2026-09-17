@@ -8,7 +8,7 @@ use crate::{
 /// The 3D root that owns its child [`Instance`] values, CPU textures, and active camera.
 #[derive(Debug)]
 pub struct Workspace {
-    instance: InstanceData,
+    instance: Box<InstanceData>,
     /// The camera used when this workspace is rendered.
     pub current_camera: Camera,
     camera_controller: CameraController,
@@ -20,9 +20,11 @@ pub struct Workspace {
 impl Workspace {
     /// Creates an empty workspace with the default camera and controller.
     pub fn new() -> Self {
+        let mut instance = Box::new(InstanceData::new("Workspace"));
         let lookup = Rc::new(InstanceLookup::default());
+        lookup.set_root(&mut instance);
         let workspace = Self {
-            instance: InstanceData::new("Workspace"),
+            instance,
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
@@ -60,6 +62,11 @@ impl Workspace {
     pub fn get_all<T: Instance>(&self) -> impl Iterator<Item = &T> {
         self.descendants()
             .filter_map(|instance| instance.downcast_ref::<T>())
+    }
+
+    /// Removes a direct child by its stable identifier.
+    pub fn remove_child(&mut self, id: InstanceId) -> bool {
+        self.instance.remove_child(id)
     }
 
     /// Returns every child, preserving its concrete type behind [`Instance`].
@@ -145,8 +152,10 @@ impl Workspace {
 impl Clone for Workspace {
     fn clone(&self) -> Self {
         let lookup = Rc::new(InstanceLookup::default());
+        let mut instance = Box::new((*self.instance).clone());
+        lookup.set_root(&mut instance);
         let mut workspace = Self {
-            instance: self.instance.clone(),
+            instance,
             current_camera: self.current_camera.clone(),
             camera_controller: self.camera_controller.clone(),
             tween_manager: self.tween_manager.clone(),
@@ -247,6 +256,53 @@ mod tests {
         );
         let cloned_part_id = cloned_workspace.children()[0].id();
         assert!(cloned_workspace.get::<Part>(cloned_part_id).is_some());
+    }
+
+    #[test]
+    fn removing_a_direct_child_removes_it_from_the_workspace_lookup() {
+        let mut workspace = Workspace::new();
+        let part_id = Part::new("part").set_parent(&mut workspace);
+
+        assert!(workspace.remove_child(part_id));
+        assert!(workspace.instance(part_id).is_none());
+        assert!(workspace.get_all::<Part>().next().is_none());
+        assert!(!workspace.remove_child(part_id));
+    }
+
+    #[test]
+    fn destroying_an_instance_removes_the_instance_and_its_descendants() {
+        let mut workspace = Workspace::new();
+        let parent_id = workspace.add_child(Part::new("parent"));
+        let child_id = workspace
+            .get_mut::<Part>(parent_id)
+            .unwrap()
+            .add_child(Part::new("child"));
+
+        assert!(workspace.instance_mut(parent_id).unwrap().destroy());
+        assert!(workspace.instance(parent_id).is_none());
+        assert!(workspace.instance(child_id).is_none());
+        assert!(workspace.children().is_empty());
+    }
+
+    #[test]
+    fn destroying_a_nested_instance_keeps_its_parent() {
+        let mut workspace = Workspace::new();
+        let parent_id = workspace.add_child(Part::new("parent"));
+        let child_id = workspace
+            .get_mut::<Part>(parent_id)
+            .unwrap()
+            .add_child(Part::new("child"));
+
+        assert!(workspace.instance_mut(child_id).unwrap().destroy());
+        assert!(workspace.instance(parent_id).is_some());
+        assert!(workspace.instance(child_id).is_none());
+        assert!(
+            workspace
+                .get::<Part>(parent_id)
+                .unwrap()
+                .children()
+                .is_empty()
+        );
     }
 
     #[test]
