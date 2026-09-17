@@ -1,23 +1,37 @@
 struct Camera {
     view_projection: mat4x4<f32>,
-    light_view_projection: mat4x4<f32>,
+    light_view_projections: array<mat4x4<f32>, 7>,
     camera_position: vec4<f32>,
+    camera_forward: vec4<f32>,
     light_direction: vec4<f32>,
     light_color: vec4<f32>,
     ambient_color: vec4<f32>,
+    shadow_cascade_splits: array<vec4<f32>, 2>,
+    shadow_texel_sizes: array<vec4<f32>, 2>,
+};
+
+struct ShadowCamera {
+    light_view_projection: mat4x4<f32>,
 };
 
 override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
-override SHADOW_MAP_SIZE: f32 = 2048.0;
+override SHADOW_MAP_SIZE: f32 = 3072.0;
+
+const SHADOW_CASCADE_COUNT: u32 = 7u;
+const SHADOW_FILTER_OFFSETS = array<f32, 3>(-1.0, 0.0, 1.0);
+const SHADOW_FILTER_WEIGHTS = array<f32, 3>(1.0, 2.0, 1.0);
 
 @group(0) @binding(0)
 var<uniform> camera: Camera;
 
 @group(0) @binding(1)
-var shadow_map: texture_depth_2d;
+var shadow_map: texture_depth_2d_array;
 
 @group(0) @binding(2)
 var shadow_sampler: sampler_comparison;
+
+@group(0) @binding(3)
+var<uniform> shadow_camera: ShadowCamera;
 
 @group(1) @binding(0)
 var material_texture_0: texture_2d_array<f32>;
@@ -119,7 +133,7 @@ fn vs_shadow(vertex: ShadowVertexInput) -> @builtin(position) vec4<f32> {
         vertex.model_2,
         vertex.model_3,
     );
-    return camera.light_view_projection * model * vec4<f32>(vertex.position, 1.0);
+    return shadow_camera.light_view_projection * model * vec4<f32>(vertex.position, 1.0);
 }
 
 fn distribution_ggx(normal_dot_half: f32, roughness: f32) -> f32 {
@@ -193,38 +207,49 @@ fn sample_surface(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) 
     return textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy);
 }
 
-fn sample_shadow(shadow_position: vec4<f32>, normal_dot_light: f32) -> f32 {
-    let projected = shadow_position.xyz / max(shadow_position.w, 0.0001);
+fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
+    let inverse_w = 1.0 / max(shadow_position.w, 0.0001);
+    let projected = shadow_position.xyz * inverse_w;
+    let shadow_uv = projected.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
     if projected.z <= 0.0 || projected.z >= 1.0 {
         return 1.0;
     }
 
-    let shadow_uv = projected.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
     if any(shadow_uv <= vec2<f32>(0.0)) || any(shadow_uv >= vec2<f32>(1.0)) {
         return 1.0;
     }
 
     let texel_size = 1.0 / SHADOW_MAP_SIZE;
-    // Base bias covers ~1.5 texels of depth quantization: slope term grows
-    // toward grazing angles where depth changes fastest across a texel.
-    let depth_bias = 0.0003 + 0.0006 * (1.0 - normal_dot_light);
-    let depth = projected.z - depth_bias;
     var visibility = 0.0;
-    for (var x: i32 = -2; x <= 2; x = x + 1) {
-        let weight_x = select(1.0, 4.0, abs(x) == 1) * select(1.0, 6.0, x == 0);
-        for (var y: i32 = -2; y <= 2; y = y + 1) {
-            let weight_y = select(1.0, 4.0, abs(y) == 1) * select(1.0, 6.0, y == 0);
-            let weight = weight_x * weight_y;
-            let offset = vec2<f32>(f32(x), f32(y)) * texel_size;
+    for (var x = 0u; x < 3u; x = x + 1u) {
+        for (var y = 0u; y < 3u; y = y + 1u) {
+            let weight = SHADOW_FILTER_WEIGHTS[x] * SHADOW_FILTER_WEIGHTS[y];
+            let offset = vec2<f32>(SHADOW_FILTER_OFFSETS[x], SHADOW_FILTER_OFFSETS[y])
+                * texel_size;
             visibility += textureSampleCompareLevel(
                 shadow_map,
                 shadow_sampler,
                 shadow_uv + offset,
-                depth,
+                i32(cascade),
+                projected.z - 1e-6,
             ) * weight;
         }
     }
-    return visibility / 256.0;
+    return visibility / 16.0;
+}
+
+fn shadow_cascade_split(cascade: u32) -> f32 {
+    if cascade < 4u {
+        return camera.shadow_cascade_splits[0][cascade];
+    }
+    return camera.shadow_cascade_splits[1][cascade - 4u];
+}
+
+fn shadow_texel_size(cascade: u32) -> f32 {
+    if cascade < 4u {
+        return camera.shadow_texel_sizes[0][cascade];
+    }
+    return camera.shadow_texel_sizes[1][cascade - 4u];
 }
 
 @fragment
@@ -270,14 +295,47 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let fresnel = fresnel_schlick(view_dot_half, base_reflectance);
     let normal_distribution = distribution_ggx(normal_dot_half, roughness);
     let geometry = geometry_smith(normal_dot_view, normal_dot_light, roughness);
-    // Normal-offset bias: move the receiver off its own surface along the
-    // geometric normal before the shadow lookup. Depth-only bias always trades
-    // acne against peter-panning. The normal offset removes self-intersection
-    // at grazing angles without pushing contact shadows away along light dir.
-    let normal_bias = mix(0.06, 0.02, geometric_normal_dot_light);
+    let view_depth = max(
+        dot(vertex.world_position - camera.camera_position.xyz, camera.camera_forward.xyz),
+        0.0,
+    );
+    var cascade = SHADOW_CASCADE_COUNT - 1u;
+    for (var candidate = 0u; candidate < SHADOW_CASCADE_COUNT - 1u; candidate = candidate + 1u) {
+        if view_depth <= shadow_cascade_split(candidate) {
+            cascade = candidate;
+            break;
+        }
+    }
+    // Scale the normal offset to the selected cascade's texel footprint. It is
+    // zero on light-facing planes and capped at two texels at grazing angles.
+    let normal_slope = sqrt(max(1.0 - geometric_normal_dot_light * geometric_normal_dot_light, 0.0))
+        / max(geometric_normal_dot_light, 0.2);
+    let normal_bias = shadow_texel_size(cascade) * min(normal_slope, 2.0);
     let biased_world = vertex.world_position + world_normal * normal_bias;
-    let biased_shadow_position = camera.light_view_projection * vec4<f32>(biased_world, 1.0);
-    let shadow_visibility = sample_shadow(biased_shadow_position, geometric_normal_dot_light);
+    let light_view_projection = camera.light_view_projections[cascade];
+    let biased_shadow_position = light_view_projection * vec4<f32>(biased_world, 1.0);
+    let cascade_visibility = sample_shadow(biased_shadow_position, cascade);
+    var shadow_visibility = cascade_visibility;
+    if view_depth > shadow_cascade_split(SHADOW_CASCADE_COUNT - 1u) {
+        shadow_visibility = 1.0;
+    } else if cascade < SHADOW_CASCADE_COUNT - 1u {
+        // Fade between cascades while their projected texel footprints overlap.
+        // Without this, the different resolutions produce a visible band at
+        // every split even when both cascades are stable and well filtered.
+        let split = shadow_cascade_split(cascade);
+        let blend_width = max(split * 0.1, 0.05);
+        let blend_start = split - blend_width;
+        if view_depth > blend_start {
+            let next_cascade = cascade + 1u;
+            let next_normal_bias = shadow_texel_size(next_cascade) * min(normal_slope, 2.0);
+            let next_light_view_projection = camera.light_view_projections[next_cascade];
+            let next_biased_shadow_position = next_light_view_projection
+                * vec4<f32>(vertex.world_position + world_normal * next_normal_bias, 1.0);
+            let next_visibility = sample_shadow(next_biased_shadow_position, next_cascade);
+            let blend_amount = smoothstep(blend_start, split, view_depth);
+            shadow_visibility = mix(cascade_visibility, next_visibility, blend_amount);
+        }
+    }
     let specular = normal_distribution * geometry * fresnel
         / max(4.0 * normal_dot_view * normal_dot_light, 0.0001);
     let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) / 3.14159265;

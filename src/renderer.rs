@@ -5,17 +5,19 @@ use thiserror::Error;
 use web_time::Instant;
 
 use crate::{
-    DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
-    Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle, Transform, Vertex,
-    Workspace,
+    Camera, DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, Mesh,
+    MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
+    Transform, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
 
-const SHADOW_MAP_SIZE: u32 = 4096;
-const SHADOW_ORTHOGRAPHIC_EXTENT: f32 = 35.0;
-const SHADOW_NEAR: f32 = 20.0;
-const SHADOW_FAR: f32 = 80.0;
+const SHADOW_MAP_SIZE: u32 = 3072;
+const SHADOW_CASCADE_COUNT: usize = 7;
+const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
+const SHADOW_DISTANCE: f32 = 80.0;
+const SHADOW_CASTER_MARGIN: f32 = 20.0;
+const SHADOW_RECEIVER_MARGIN: f32 = 5.0;
 
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
@@ -143,6 +145,12 @@ struct GpuMesh {
     index_count: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShadowCameraUniform {
+    light_view_projection: [[f32; 4]; 4],
+}
+
 struct EframeSceneTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -162,14 +170,16 @@ pub struct Renderer {
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
     _shadow_texture: wgpu::Texture,
-    shadow_view: wgpu::TextureView,
+    shadow_layer_views: [wgpu::TextureView; SHADOW_CASCADE_COUNT],
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     eframe_scene: EframeSceneTarget,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    shadow_camera_buffer: wgpu::Buffer,
     shadow_camera_bind_group: wgpu::BindGroup,
+    shadow_camera_stride: u32,
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_sampler: wgpu::Sampler,
     textures: Vec<GpuTexture>,
@@ -198,16 +208,22 @@ pub struct Renderer {
 pub struct CameraUniform {
     /// Camera view-projection matrix in column-major form.
     pub view_projection: [[f32; 4]; 4],
-    /// World-to-light clip matrix used to render and sample the directional shadow map.
-    pub light_view_projection: [[f32; 4]; 4],
+    /// World-to-light clip matrices used by the directional shadow cascades.
+    pub light_view_projections: [[[f32; 4]; 4]; SHADOW_CASCADE_COUNT],
     /// Camera world position as an XYZ vector with an unused fourth component.
     pub camera_position: [f32; 4],
+    /// Camera world-space forward direction.
+    pub camera_forward: [f32; 4],
     /// World-space direction toward the fixed key light.
     pub light_direction: [f32; 4],
     /// RGB intensity of the fixed key light.
     pub light_color: [f32; 4],
     /// RGB intensity of the fixed ambient light.
     pub ambient_color: [f32; 4],
+    /// View-space far distance of each directional shadow cascade.
+    pub shadow_cascade_splits: [[f32; 4]; 2],
+    /// World-space width of one texel in each directional shadow cascade.
+    pub shadow_texel_sizes: [[f32; 4]; 2],
 }
 
 impl Renderer {
@@ -222,7 +238,7 @@ impl Renderer {
         let device = render_state.device.clone();
         let queue = render_state.queue.clone();
         let (depth_texture, depth_view) = create_depth_texture(&device, width, height);
-        let (shadow_texture, shadow_view) = create_shadow_texture(&device);
+        let (shadow_texture, shadow_view, shadow_layer_views) = create_shadow_texture(&device);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow comparison sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -240,6 +256,17 @@ impl Renderer {
         let camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera uniform buffer"),
             size: std::mem::size_of::<CameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let shadow_camera_size = std::mem::size_of::<ShadowCameraUniform>() as u64;
+        let shadow_camera_stride = align_to(
+            shadow_camera_size,
+            u64::from(device.limits().min_uniform_buffer_offset_alignment),
+        ) as u32;
+        let shadow_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shadow camera uniform buffer"),
+            size: u64::from(shadow_camera_stride) * SHADOW_CASCADE_COUNT as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -269,7 +296,7 @@ impl Renderer {
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Depth,
-                            view_dimension: wgpu::TextureViewDimension::D2,
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
                             multisampled: false,
                         },
                         count: None,
@@ -304,12 +331,12 @@ impl Renderer {
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("shadow camera bind group layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
+                    binding: 3,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(shadow_camera_size),
                     },
                     count: None,
                 }],
@@ -318,8 +345,12 @@ impl Renderer {
             label: Some("shadow camera bind group"),
             layout: &shadow_camera_bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
+                binding: 3,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &shadow_camera_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(shadow_camera_size),
+                }),
             }],
         });
         let mut material_bind_group_entries = Vec::with_capacity(MATERIAL_SLOT_COUNT + 1);
@@ -475,13 +506,13 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: SHADOW_DEPTH_FORMAT,
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState {
-                    constant: 2,
-                    slope_scale: 2.0,
+                    constant: 1,
+                    slope_scale: 1.0,
                     clamp: 0.0,
                 },
             }),
@@ -500,14 +531,16 @@ impl Renderer {
             depth_texture,
             depth_view,
             _shadow_texture: shadow_texture,
-            shadow_view,
+            shadow_layer_views,
             _shadow_sampler: shadow_sampler,
             pipeline,
             shadow_pipeline,
             eframe_scene,
             camera_buffer,
             camera_bind_group,
+            shadow_camera_buffer,
             shadow_camera_bind_group,
+            shadow_camera_stride,
             material_bind_group_layout,
             material_sampler,
             textures,
@@ -900,10 +933,12 @@ impl Renderer {
     fn prepare_scene(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
         self.prepared_batches.clear();
         let camera_vp = workspace.current_camera.view_projection_matrix();
-        let light_vp = light_view_projection(Vec3::new(-0.45, 0.85, 0.35));
+        let light_direction = Vec3::new(-0.45, 0.85, 0.35);
+        let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
+            light_view_projections(&workspace.current_camera, light_direction);
         let camera_uniform = CameraUniform {
             view_projection: camera_vp.to_cols_array_2d(),
-            light_view_projection: light_vp.to_cols_array_2d(),
+            light_view_projections: light_vps.map(|matrix| matrix.to_cols_array_2d()),
             camera_position: workspace
                 .current_camera
                 .pivot()
@@ -911,14 +946,43 @@ impl Renderer {
                 .truncate()
                 .extend(1.0)
                 .to_array(),
+            camera_forward: workspace.current_camera.forward().extend(0.0).to_array(),
             light_direction: [-0.45, 0.85, 0.35, 0.0],
             light_color: [3.0, 2.8, 2.5, 0.0],
             ambient_color: [0.035, 0.045, 0.06, 0.0],
+            shadow_cascade_splits: [
+                shadow_cascade_splits[..4].try_into().unwrap(),
+                [
+                    shadow_cascade_splits[4],
+                    shadow_cascade_splits[5],
+                    shadow_cascade_splits[6],
+                    shadow_cascade_splits[6],
+                ],
+            ],
+            shadow_texel_sizes: [
+                shadow_texel_sizes[..4].try_into().unwrap(),
+                [
+                    shadow_texel_sizes[4],
+                    shadow_texel_sizes[5],
+                    shadow_texel_sizes[6],
+                    shadow_texel_sizes[6],
+                ],
+            ],
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
+        for (cascade, light_vp) in light_vps.iter().enumerate() {
+            let uniform = ShadowCameraUniform {
+                light_view_projection: light_vp.to_cols_array_2d(),
+            };
+            self.queue.write_buffer(
+                &self.shadow_camera_buffer,
+                cascade as u64 * u64::from(self.shadow_camera_stride),
+                bytemuck::bytes_of(&uniform),
+            );
+        }
         let camera_planes = frustum_planes(camera_vp);
-        let light_planes = frustum_planes(light_vp);
+        let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;
 
         // Reuse allocations across frames: clearing retains backing capacity,
@@ -943,7 +1007,9 @@ impl Renderer {
             let radius = part.shape.bounding_radius() * max_scale * 1.01;
             let center = part.position();
             if !sphere_visible(&camera_planes, center, radius)
-                && !sphere_visible(&light_planes, center, radius)
+                && !light_planes
+                    .iter()
+                    .any(|planes| sphere_visible(planes, center, radius))
             {
                 continue;
             }
@@ -1075,10 +1141,11 @@ impl Renderer {
         pass: &mut wgpu::RenderPass<'a>,
         pipeline: &wgpu::RenderPipeline,
         camera_bind_group: &wgpu::BindGroup,
+        dynamic_offsets: &[wgpu::DynamicOffset],
         use_materials: bool,
     ) {
         pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, camera_bind_group, &[]);
+        pass.set_bind_group(0, camera_bind_group, dynamic_offsets);
         for batch in &self.prepared_batches {
             if batch.instance_count == 0 {
                 continue;
@@ -1104,35 +1171,38 @@ impl Renderer {
     }
 
     fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
-        self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, true);
+        self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, &[], true);
     }
 
-    fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
+    fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>, cascade: usize) {
         self.draw_batches(
             pass,
             &self.shadow_pipeline,
             &self.shadow_camera_bind_group,
+            &[cascade as u32 * self.shadow_camera_stride],
             false,
         );
     }
 
     fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("directional shadow pass"),
-            color_attachments: &[],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.shadow_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
+        for (cascade, view) in self.shadow_layer_views.iter().enumerate() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("directional shadow cascade pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
                 }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        self.draw_shadow_scene(&mut pass);
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.draw_shadow_scene(&mut pass, cascade);
+        }
     }
 
     fn encode_scene_pass(
@@ -1433,24 +1503,103 @@ fn linear_to_srgb_byte(value: u8) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-fn light_view_projection(light_direction: Vec3) -> Mat4 {
-    let light_direction = light_direction.normalize_or_zero();
-    let light_position = light_direction * 50.0;
+fn light_view_projections(
+    camera: &Camera,
+    light_direction: Vec3,
+) -> (
+    [Mat4; SHADOW_CASCADE_COUNT],
+    [f32; SHADOW_CASCADE_COUNT],
+    [f32; SHADOW_CASCADE_COUNT],
+) {
+    let light_direction = match light_direction.try_normalize() {
+        Some(direction) => direction,
+        None => Vec3::Y,
+    };
     let up = if light_direction.dot(Vec3::Y).abs() > 0.98 {
         Vec3::Z
     } else {
         Vec3::Y
     };
-    let view = crate::glam::camera::rh::view::look_at_mat4(light_position, Vec3::ZERO, up);
-    let projection = crate::glam::camera::rh::proj::directx::orthographic(
-        -SHADOW_ORTHOGRAPHIC_EXTENT,
-        SHADOW_ORTHOGRAPHIC_EXTENT,
-        -SHADOW_ORTHOGRAPHIC_EXTENT,
-        SHADOW_ORTHOGRAPHIC_EXTENT,
-        SHADOW_NEAR,
-        SHADOW_FAR,
-    );
-    projection * view
+    let light_forward = -light_direction;
+    let light_right = light_forward.cross(up).normalize();
+    let light_up = light_right.cross(light_forward).normalize();
+    let near = camera.znear.max(0.001);
+    let far = camera.zfar.min(SHADOW_DISTANCE).max(near + 0.001);
+    let mut splits = [far; SHADOW_CASCADE_COUNT];
+    let mut matrices = [Mat4::IDENTITY; SHADOW_CASCADE_COUNT];
+    let mut texel_sizes = [0.0; SHADOW_CASCADE_COUNT];
+    let mut cascade_near = near;
+
+    for cascade in 0..SHADOW_CASCADE_COUNT {
+        let fraction = (cascade + 1) as f32 / SHADOW_CASCADE_COUNT as f32;
+        let cascade_far = near * (far / near).powf(fraction);
+        splits[cascade] = cascade_far;
+
+        let corners = camera_frustum_slice_corners(camera, cascade_near, cascade_far);
+        let center = corners.iter().copied().sum::<Vec3>() / corners.len() as f32;
+        let radius = corners
+            .iter()
+            .map(|corner| corner.distance(center))
+            .fold(0.0, f32::max);
+        // A fixed-size bounding sphere prevents projection scale from changing as
+        // the camera rotates. Leave a little room for snapping at the map edge.
+        let extent = ((radius + 1.0 / 16.0) * 16.0).ceil() / 16.0;
+        let texel_size = 2.0 * extent / SHADOW_MAP_SIZE as f32;
+        texel_sizes[cascade] = texel_size;
+
+        // Quantizing the light-space center keeps stationary shadows from
+        // shimmering as the camera moves by sub-texel amounts.
+        let center_x = center.dot(light_right);
+        let center_y = center.dot(light_up);
+        let snapped_center = center
+            + light_right * ((center_x / texel_size).round() * texel_size - center_x)
+            + light_up * ((center_y / texel_size).round() * texel_size - center_y);
+        let light_position = snapped_center + light_direction * (extent + SHADOW_CASTER_MARGIN);
+        let view = crate::glam::camera::rh::view::look_at_mat4(light_position, snapped_center, up);
+        let (mut min_depth, mut max_depth) = (f32::MAX, f32::MIN);
+        for corner in corners {
+            let depth = -view.transform_point3(corner).z;
+            min_depth = min_depth.min(depth);
+            max_depth = max_depth.max(depth);
+        }
+        let shadow_near = (min_depth - SHADOW_CASTER_MARGIN).max(0.001);
+        let shadow_far = (max_depth + SHADOW_RECEIVER_MARGIN).max(shadow_near + 0.001);
+        let projection = crate::glam::camera::rh::proj::directx::orthographic(
+            -extent,
+            extent,
+            -extent,
+            extent,
+            shadow_near,
+            shadow_far,
+        );
+        matrices[cascade] = projection * view;
+        cascade_near = cascade_far;
+    }
+
+    (matrices, splits, texel_sizes)
+}
+
+fn camera_frustum_slice_corners(camera: &Camera, near: f32, far: f32) -> [Vec3; 8] {
+    let tan_half_fovy = (camera.fovy * 0.5).tan();
+    let near_height = near * tan_half_fovy;
+    let near_width = near_height * camera.aspect;
+    let far_height = far * tan_half_fovy;
+    let far_width = far_height * camera.aspect;
+    let corners = [
+        Vec3::new(-near_width, -near_height, -near),
+        Vec3::new(near_width, -near_height, -near),
+        Vec3::new(-near_width, near_height, -near),
+        Vec3::new(near_width, near_height, -near),
+        Vec3::new(-far_width, -far_height, -far),
+        Vec3::new(far_width, -far_height, -far),
+        Vec3::new(-far_width, far_height, -far),
+        Vec3::new(far_width, far_height, -far),
+    ];
+    corners.map(|corner| camera.pivot().transform_point3(corner))
+}
+
+fn align_to(value: u64, alignment: u64) -> u64 {
+    value.div_ceil(alignment) * alignment
 }
 
 /// Factors used to reconstruct normal-matrix columns from a `pivot * scale` model.
@@ -1501,23 +1650,42 @@ fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> bool {
     true
 }
 
-fn create_shadow_texture(device: &wgpu::Device) -> (wgpu::Texture, wgpu::TextureView) {
+fn create_shadow_texture(
+    device: &wgpu::Device,
+) -> (
+    wgpu::Texture,
+    wgpu::TextureView,
+    [wgpu::TextureView; SHADOW_CASCADE_COUNT],
+) {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("directional shadow map"),
         size: wgpu::Extent3d {
             width: SHADOW_MAP_SIZE,
             height: SHADOW_MAP_SIZE,
-            depth_or_array_layers: 1,
+            depth_or_array_layers: SHADOW_CASCADE_COUNT as u32,
         },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: DEPTH_FORMAT,
+        format: SHADOW_DEPTH_FORMAT,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    (texture, view)
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("directional shadow map array"),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    let layer_views = std::array::from_fn(|cascade| {
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("directional shadow map cascade"),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: cascade as u32,
+            array_layer_count: Some(1),
+            ..Default::default()
+        })
+    });
+    (texture, view, layer_views)
 }
 
 fn create_depth_texture(
@@ -1624,5 +1792,30 @@ mod tests {
             camera.pivot().w_axis.truncate() + camera.forward() * 500.0,
             0.5
         ));
+    }
+
+    #[test]
+    fn shadow_cascades_cover_their_camera_frustum_slices() {
+        let camera = Camera::new(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
+        let (matrices, splits, texel_sizes) =
+            light_view_projections(&camera, Vec3::new(-0.45, 0.85, 0.35));
+        let mut near = camera.znear;
+
+        for cascade in 0..SHADOW_CASCADE_COUNT {
+            assert!(splits[cascade] > near);
+            assert!(texel_sizes[cascade] > 0.0);
+            for corner in camera_frustum_slice_corners(&camera, near, splits[cascade]) {
+                let clip = matrices[cascade] * corner.extend(1.0);
+                let projected = clip.truncate() / clip.w;
+                assert!(projected.x.abs() <= 1.0, "cascade {cascade}: {projected:?}");
+                assert!(projected.y.abs() <= 1.0, "cascade {cascade}: {projected:?}");
+                assert!(
+                    (0.0..=1.0).contains(&projected.z),
+                    "cascade {cascade}: {projected:?}"
+                );
+            }
+            near = splits[cascade];
+        }
+        assert!((splits[SHADOW_CASCADE_COUNT - 1] - SHADOW_DISTANCE).abs() < 1e-4);
     }
 }
