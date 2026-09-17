@@ -127,7 +127,7 @@ impl Framework {
     }
 
     /// Runs a new eframe application with the specified configuration and app creator.
-    pub fn run(config: RunConfig<'_>, app_creator: eframe::AppCreator<'_>) -> eframe::Result {
+    pub fn run(config: RunConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
         (config.wgpu_options)(&mut wgpu_options);
         #[cfg(not(target_arch = "wasm32"))]
