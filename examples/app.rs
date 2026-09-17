@@ -1,6 +1,7 @@
 use terrarium::{
     Color3, Easing, Framework, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
-    Repeat, RunConfig, Texture, TextureColorSpace, Tween, Workspace, eframe, egui, glam::Vec3,
+    Repeat, RunConfig, Texture, TextureColorSpace, TextureFilter, Tween, Workspace, eframe, egui,
+    glam::Vec3,
 };
 
 struct App {
@@ -112,11 +113,11 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
         // Each face carries its own full PBR material: the top face is grass,
         // the bottom is dirt, and the sides blend grass over dirt.
-        let mut grass_side = Material::textured(grass_side);
+        let mut grass_side = Material::textured(grass_side).with_filter(TextureFilter::Nearest);
         grass_side.roughness = 0.82;
-        let mut grass_top = Material::textured(grass_top);
+        let mut grass_top = Material::textured(grass_top).with_filter(TextureFilter::Nearest);
         grass_top.roughness = 0.82;
-        let mut dirt = Material::textured(dirt);
+        let mut dirt = Material::textured(dirt).with_filter(TextureFilter::Nearest);
         dirt.roughness = 0.9;
         part.set_material_slot(MaterialSlot::Base, grass_side);
         part.set_material_slot(MaterialSlot::Top, grass_top);

@@ -14,6 +14,8 @@ pub struct Workspace {
     camera_controller: CameraController,
     tween_manager: TweenManager,
     textures: Vec<Texture>,
+    texture_revisions: Vec<u64>,
+    texture_revision: u64,
     lookup: Rc<InstanceLookup>,
 }
 
@@ -29,6 +31,8 @@ impl Workspace {
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
             textures: Vec::new(),
+            texture_revisions: Vec::new(),
+            texture_revision: 0,
             lookup,
         };
         crate::instance::register_instance_lookup(workspace.id(), &workspace.lookup);
@@ -40,12 +44,59 @@ impl Workspace {
         texture.validate()?;
         let handle = TextureHandle(self.textures.len());
         self.textures.push(texture);
+        self.texture_revision = self.texture_revision.wrapping_add(1);
+        self.texture_revisions.push(self.texture_revision);
         Ok(handle)
     }
 
     /// Returns a CPU-side texture by its workspace-local handle.
     pub fn get_texture(&self, handle: TextureHandle) -> Option<&Texture> {
         self.textures.get(handle.0)
+    }
+
+    /// Returns the revision of a workspace texture, bumped by every
+    /// [`add_texture`](Self::add_texture), [`get_texture_mut`](Self::get_texture_mut),
+    /// and [`set_texture`](Self::set_texture) call for its handle.
+    ///
+    /// The renderer uses this to re-upload edited textures before the next
+    /// frame. It is also useful for external caches keyed by texture content.
+    pub fn texture_version(&self, handle: TextureHandle) -> Option<u64> {
+        self.texture_revisions.get(handle.0).copied()
+    }
+
+    /// Returns a mutable CPU-side texture by its workspace-local handle.
+    ///
+    /// The texture is marked dirty even if it is not modified, so the
+    /// renderer re-uploads it before the next frame. The texture must stay
+    /// valid tightly packed RGBA8 data: keep `pixels` at
+    /// `width * height * 4` bytes (the pixel helpers and transforms uphold
+    /// this automatically). Invalid data surfaces as a render error instead
+    /// of reaching the GPU.
+    pub fn get_texture_mut(&mut self, handle: TextureHandle) -> Option<&mut Texture> {
+        let texture = self.textures.get_mut(handle.0)?;
+        self.texture_revision = self.texture_revision.wrapping_add(1);
+        self.texture_revisions[handle.0] = self.texture_revision;
+        Some(texture)
+    }
+
+    /// Replaces the texture stored under `handle` with a validated texture.
+    ///
+    /// The replacement is marked dirty so the renderer re-uploads it before
+    /// the next frame. Dimensions and color space may change.
+    pub fn set_texture(
+        &mut self,
+        handle: TextureHandle,
+        texture: Texture,
+    ) -> Result<(), TextureError> {
+        texture.validate()?;
+        let slot = self
+            .textures
+            .get_mut(handle.0)
+            .ok_or(TextureError::InvalidHandle { index: handle.0 })?;
+        *slot = texture;
+        self.texture_revision = self.texture_revision.wrapping_add(1);
+        self.texture_revisions[handle.0] = self.texture_revision;
+        Ok(())
     }
 
     /// Returns a descendant by ID, downcast to its concrete instance type.
@@ -160,6 +211,8 @@ impl Clone for Workspace {
             camera_controller: self.camera_controller.clone(),
             tween_manager: self.tween_manager.clone(),
             textures: self.textures.clone(),
+            texture_revisions: self.texture_revisions.clone(),
+            texture_revision: self.texture_revision,
             lookup: lookup.clone(),
         };
         crate::instance::register_instance_lookup(workspace.id(), &lookup);
@@ -346,6 +399,49 @@ mod tests {
         assert_eq!(
             workspace.camera_controller().key_bindings.forward,
             vec![winit::keyboard::KeyCode::ArrowUp]
+        );
+    }
+
+    #[test]
+    fn workspace_textures_can_be_replaced_and_edited_in_place() {
+        use crate::TextureError;
+
+        let mut workspace = Workspace::new();
+        let handle = workspace
+            .add_texture(Texture::linear(1, 1, vec![200, 100, 50, 255]).unwrap())
+            .unwrap();
+        let added_version = workspace.texture_version(handle).unwrap();
+
+        workspace
+            .set_texture(
+                handle,
+                Texture::linear(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap(),
+            )
+            .unwrap();
+        assert!(workspace.texture_version(handle).unwrap() != added_version);
+        assert_eq!(workspace.get_texture(handle).unwrap().width, 2);
+
+        workspace
+            .get_texture_mut(handle)
+            .unwrap()
+            .set_pixel(0, 0, [9, 9, 9, 9]);
+        assert_eq!(
+            workspace.get_texture(handle).unwrap().pixel(0, 0),
+            [9, 9, 9, 9]
+        );
+
+        assert!(matches!(
+            workspace.set_texture(
+                TextureHandle(999),
+                Texture::linear(1, 1, vec![0, 0, 0, 0]).unwrap()
+            ),
+            Err(TextureError::InvalidHandle { index: 999 })
+        ));
+        assert!(workspace.get_texture_mut(TextureHandle(999)).is_none());
+        assert!(workspace.texture_version(TextureHandle(999)).is_none());
+        assert_eq!(
+            workspace.clone().get_texture(handle),
+            workspace.get_texture(handle)
         );
     }
 

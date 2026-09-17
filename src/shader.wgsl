@@ -55,7 +55,25 @@ var material_texture_5: texture_2d_array<f32>;
 var material_texture_6: texture_2d_array<f32>;
 
 @group(1) @binding(7)
-var material_sampler: sampler;
+var material_sampler_0: sampler;
+
+@group(1) @binding(8)
+var material_sampler_1: sampler;
+
+@group(1) @binding(9)
+var material_sampler_2: sampler;
+
+@group(1) @binding(10)
+var material_sampler_3: sampler;
+
+@group(1) @binding(11)
+var material_sampler_4: sampler;
+
+@group(1) @binding(12)
+var material_sampler_5: sampler;
+
+@group(1) @binding(13)
+var material_sampler_6: sampler;
 
 // Per-face PBR factors for every deduplicated part material set. Each set
 // packs seven slots (base + six directions, in MaterialSlot order) as three
@@ -187,19 +205,19 @@ fn linear_to_srgb(linear_color: vec3<f32>) -> vec3<f32> {
 
 fn sample_base_color(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
     if slot == 1u {
-        return textureSampleGrad(material_texture_1, material_sampler, uv, 0, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_1, material_sampler_1, uv, 0, uv_dx, uv_dy);
     } else if slot == 2u {
-        return textureSampleGrad(material_texture_2, material_sampler, uv, 0, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_2, material_sampler_2, uv, 0, uv_dx, uv_dy);
     } else if slot == 3u {
-        return textureSampleGrad(material_texture_3, material_sampler, uv, 0, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_3, material_sampler_3, uv, 0, uv_dx, uv_dy);
     } else if slot == 4u {
-        return textureSampleGrad(material_texture_4, material_sampler, uv, 0, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_4, material_sampler_4, uv, 0, uv_dx, uv_dy);
     } else if slot == 5u {
-        return textureSampleGrad(material_texture_5, material_sampler, uv, 0, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_5, material_sampler_5, uv, 0, uv_dx, uv_dy);
     } else if slot == 6u {
-        return textureSampleGrad(material_texture_6, material_sampler, uv, 0, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_6, material_sampler_6, uv, 0, uv_dx, uv_dy);
     }
-    return textureSampleGrad(material_texture_0, material_sampler, uv, 0, uv_dx, uv_dy);
+    return textureSampleGrad(material_texture_0, material_sampler_0, uv, 0, uv_dx, uv_dy);
 }
 
 fn unpack_normal(surface_sample: vec4<f32>) -> vec3<f32> {
@@ -210,19 +228,19 @@ fn unpack_normal(surface_sample: vec4<f32>) -> vec3<f32> {
 
 fn sample_surface(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
     if slot == 1u {
-        return textureSampleGrad(material_texture_1, material_sampler, uv, 1, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_1, material_sampler_1, uv, 1, uv_dx, uv_dy);
     } else if slot == 2u {
-        return textureSampleGrad(material_texture_2, material_sampler, uv, 1, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_2, material_sampler_2, uv, 1, uv_dx, uv_dy);
     } else if slot == 3u {
-        return textureSampleGrad(material_texture_3, material_sampler, uv, 1, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_3, material_sampler_3, uv, 1, uv_dx, uv_dy);
     } else if slot == 4u {
-        return textureSampleGrad(material_texture_4, material_sampler, uv, 1, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_4, material_sampler_4, uv, 1, uv_dx, uv_dy);
     } else if slot == 5u {
-        return textureSampleGrad(material_texture_5, material_sampler, uv, 1, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_5, material_sampler_5, uv, 1, uv_dx, uv_dy);
     } else if slot == 6u {
-        return textureSampleGrad(material_texture_6, material_sampler, uv, 1, uv_dx, uv_dy);
+        return textureSampleGrad(material_texture_6, material_sampler_6, uv, 1, uv_dx, uv_dy);
     }
-    return textureSampleGrad(material_texture_0, material_sampler, uv, 1, uv_dx, uv_dy);
+    return textureSampleGrad(material_texture_0, material_sampler_0, uv, 1, uv_dx, uv_dy);
 }
 
 fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {

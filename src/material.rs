@@ -104,6 +104,10 @@ pub struct TextureSet {
 /// are resolved per face, so each directional [`MaterialSlot`] renders its own
 /// base color, metallic, roughness, and emissive values; the part tint
 /// ([`crate::BasePart::color`]) still multiplies every face.
+///
+/// Texture sampling for each slot uses that slot's [`Material::filter`]; unset
+/// directional slots fall back to the base material's filter, matching the
+/// fallback used for textures and scalar factors.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
     /// RGBA multiplier for the base color. Values are not clamped on assignment.
@@ -116,6 +120,8 @@ pub struct Material {
     pub emissive: [f32; 3],
     /// Optional texture maps multiplied by the scalar factors.
     pub textures: TextureSet,
+    /// Texture sampling filter used for this material's texture maps.
+    pub filter: TextureFilter,
 }
 
 impl Default for Material {
@@ -126,6 +132,7 @@ impl Default for Material {
             roughness: 0.5,
             emissive: [0.0, 0.0, 0.0],
             textures: TextureSet::default(),
+            filter: TextureFilter::default(),
         }
     }
 }
@@ -151,6 +158,16 @@ impl Material {
     /// Returns a copy of this material with a metallic-roughness map assigned.
     pub fn with_metallic_roughness_texture(mut self, texture: TextureHandle) -> Self {
         self.textures.metallic_roughness = Some(texture);
+        self
+    }
+
+    /// Returns a copy of this material with a texture sampling filter assigned.
+    ///
+    /// Each directional slot samples with its own filter, so set the same
+    /// filter on every slot material when they should match. Unset slots fall
+    /// back to the base material's filter.
+    pub fn with_filter(mut self, filter: TextureFilter) -> Self {
+        self.filter = filter;
         self
     }
 
@@ -231,6 +248,43 @@ pub enum TextureColorSpace {
     Linear,
 }
 
+/// Texture sampling filter used by a [`Material`].
+///
+/// All variants repeat the texture on wrap. Mipmaps are always generated; the
+/// `Nearest`/`Bilinear` variants only change whether the closest mip level is
+/// picked (`Nearest`) or two levels are blended (`Linear`).
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum TextureFilter {
+    /// Point sampling for magnification, minification, and mips. Best for
+    /// pixel art where texels should stay crisp.
+    Nearest,
+    /// Bilinear magnification/minification with the nearest mip level. The
+    /// classic "bilinear" look.
+    Bilinear,
+    /// Bilinear magnification/minification blended across mip levels. This is
+    /// the default and matches the previous renderer behavior.
+    #[default]
+    Trilinear,
+    /// Trilinear sampling with `4x` anisotropic filtering for grazing angles.
+    Anisotropic4x,
+    /// Trilinear sampling with `8x` anisotropic filtering for grazing angles.
+    Anisotropic8x,
+    /// Trilinear sampling with `16x` anisotropic filtering for grazing angles.
+    Anisotropic16x,
+}
+
+impl TextureFilter {
+    /// All filter modes in a stable order, useful for pre-creating samplers.
+    pub const ALL: [Self; 6] = [
+        Self::Nearest,
+        Self::Bilinear,
+        Self::Trilinear,
+        Self::Anisotropic4x,
+        Self::Anisotropic8x,
+        Self::Anisotropic16x,
+    ];
+}
+
 /// CPU-side image data independent of GPU texture resources.
 #[derive(Clone, Debug)]
 pub struct Image {
@@ -261,6 +315,104 @@ impl Image {
         Ok(image)
     }
 
+    /// Returns the RGBA8 pixel at (`x`, `y`), with the origin at the top-left.
+    ///
+    /// # Panics
+    ///
+    /// Panics if (`x`, `y`) is outside the image dimensions.
+    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        let start = pixel_index(self.width, self.height, x, y);
+        self.pixels[start..start + 4]
+            .try_into()
+            .expect("pixel index is within validated pixel data")
+    }
+
+    /// Sets the RGBA8 pixel at (`x`, `y`) and returns this image for chaining.
+    ///
+    /// # Panics
+    ///
+    /// Panics if (`x`, `y`) is outside the image dimensions.
+    pub fn set_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
+        let start = pixel_index(self.width, self.height, x, y);
+        self.pixels[start..start + 4].copy_from_slice(&pixel);
+        self
+    }
+
+    /// Returns the packed row-major RGBA8 pixels, four bytes per pixel.
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    /// Returns the packed row-major RGBA8 pixels for manual editing.
+    ///
+    /// The buffer must stay tightly packed RGBA8 (`width * height * 4` bytes);
+    /// changing its length makes the image invalid.
+    pub fn pixels_mut(&mut self) -> &mut [u8] {
+        &mut self.pixels
+    }
+
+    /// Mirrors the image left-to-right and returns it for chaining.
+    pub fn flip_horizontal(&mut self) -> &mut Self {
+        flip_horizontal_in_place(self.width, self.height, &mut self.pixels);
+        self
+    }
+
+    /// Mirrors the image top-to-bottom and returns it for chaining.
+    pub fn flip_vertical(&mut self) -> &mut Self {
+        flip_vertical_in_place(self.width, self.height, &mut self.pixels);
+        self
+    }
+
+    /// Rotates the image 90 degrees clockwise and returns it for chaining.
+    ///
+    /// Width and height are swapped.
+    pub fn rotate90(&mut self) -> &mut Self {
+        rotate90_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        self
+    }
+
+    /// Rotates the image 180 degrees and returns it for chaining.
+    pub fn rotate180(&mut self) -> &mut Self {
+        rotate180_in_place(&mut self.pixels);
+        self
+    }
+
+    /// Rotates the image 270 degrees clockwise (90 degrees
+    /// counter-clockwise) and returns it for chaining.
+    ///
+    /// Width and height are swapped.
+    pub fn rotate270(&mut self) -> &mut Self {
+        rotate270_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        self
+    }
+
+    /// Multiplies every channel by the matching factor and returns the image
+    /// for chaining.
+    ///
+    /// Each result is rounded and clamped to `0..=255`. Pass `1.0` for a
+    /// channel that should stay unchanged, so `[0.8, 1.0, 0.8, 1.0]` darkens
+    /// red and blue while keeping green and alpha intact.
+    pub fn tint(&mut self, multiplier: [f32; 4]) -> &mut Self {
+        tint_in_place(&mut self.pixels, multiplier);
+        self
+    }
+
+    /// Converts the image to grayscale and returns it for chaining.
+    ///
+    /// Each pixel's RGB channels are replaced by their byte-space luma while
+    /// alpha is preserved.
+    pub fn grayscale(&mut self) -> &mut Self {
+        grayscale_in_place(&mut self.pixels);
+        self
+    }
+
+    /// Inverts the RGB channels (`255 - value`) and returns the image for
+    /// chaining. Alpha is preserved.
+    pub fn invert_rgb(&mut self) -> &mut Self {
+        invert_rgb_in_place(&mut self.pixels);
+        self
+    }
+
     fn validate(&self) -> Result<(), TextureError> {
         if self.width == 0 || self.height == 0 {
             return Err(TextureError::ZeroDimensions);
@@ -280,6 +432,13 @@ impl Image {
 }
 
 /// CPU-side RGBA8 texture data ready to be uploaded to a [`Renderer`].
+///
+/// The geometric transforms ([`flip_horizontal`](Self::flip_horizontal),
+/// [`flip_vertical`](Self::flip_vertical), [`rotate90`](Self::rotate90),
+/// [`rotate180`](Self::rotate180), [`rotate270`](Self::rotate270)) move texels
+/// unchanged. That is correct for color and data maps, but tangent-space
+/// normal maps encode direction: after mirroring or rotating a normal map,
+/// adjust its red/green channels to match the new orientation.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Texture {
     /// Texture width in pixels.
@@ -311,6 +470,12 @@ pub enum TextureError {
         actual: usize,
         /// Number of bytes required by the dimensions.
         expected: usize,
+    },
+    /// A workspace texture handle did not identify a stored texture.
+    #[error("workspace texture handle {index} is not valid")]
+    InvalidHandle {
+        /// The invalid workspace-local texture index.
+        index: usize,
     },
 }
 
@@ -350,6 +515,105 @@ impl Texture {
     /// Decodes an image from memory with an explicit texture color space.
     pub fn from_bytes(bytes: &[u8], color_space: TextureColorSpace) -> Result<Self, TextureError> {
         Self::from_image(Image::from_bytes(bytes)?, color_space)
+    }
+
+    /// Returns the RGBA8 pixel at (`x`, `y`), with the origin at the top-left.
+    ///
+    /// # Panics
+    ///
+    /// Panics if (`x`, `y`) is outside the texture dimensions.
+    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        let start = pixel_index(self.width, self.height, x, y);
+        self.pixels[start..start + 4]
+            .try_into()
+            .expect("pixel index is within validated pixel data")
+    }
+
+    /// Sets the RGBA8 pixel at (`x`, `y`) and returns this texture for
+    /// chaining.
+    ///
+    /// # Panics
+    ///
+    /// Panics if (`x`, `y`) is outside the texture dimensions.
+    pub fn set_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
+        let start = pixel_index(self.width, self.height, x, y);
+        self.pixels[start..start + 4].copy_from_slice(&pixel);
+        self
+    }
+
+    /// Returns the packed row-major RGBA8 pixels, four bytes per pixel.
+    pub fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    /// Returns the packed row-major RGBA8 pixels for manual editing.
+    ///
+    /// The buffer must stay tightly packed RGBA8 (`width * height * 4` bytes);
+    /// changing its length makes the texture invalid.
+    pub fn pixels_mut(&mut self) -> &mut [u8] {
+        &mut self.pixels
+    }
+
+    /// Mirrors the texture left-to-right and returns it for chaining.
+    pub fn flip_horizontal(&mut self) -> &mut Self {
+        flip_horizontal_in_place(self.width, self.height, &mut self.pixels);
+        self
+    }
+
+    /// Mirrors the texture top-to-bottom and returns it for chaining.
+    pub fn flip_vertical(&mut self) -> &mut Self {
+        flip_vertical_in_place(self.width, self.height, &mut self.pixels);
+        self
+    }
+
+    /// Rotates the texture 90 degrees clockwise and returns it for chaining.
+    ///
+    /// Width and height are swapped.
+    pub fn rotate90(&mut self) -> &mut Self {
+        rotate90_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        self
+    }
+
+    /// Rotates the texture 180 degrees and returns it for chaining.
+    pub fn rotate180(&mut self) -> &mut Self {
+        rotate180_in_place(&mut self.pixels);
+        self
+    }
+
+    /// Rotates the texture 270 degrees clockwise (90 degrees
+    /// counter-clockwise) and returns it for chaining.
+    ///
+    /// Width and height are swapped.
+    pub fn rotate270(&mut self) -> &mut Self {
+        rotate270_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        self
+    }
+
+    /// Multiplies every channel by the matching factor and returns the
+    /// texture for chaining.
+    ///
+    /// Each result is rounded and clamped to `0..=255`. Pass `1.0` for a
+    /// channel that should stay unchanged, so `[0.8, 1.0, 0.8, 1.0]` darkens
+    /// red and blue while keeping green and alpha intact.
+    pub fn tint(&mut self, multiplier: [f32; 4]) -> &mut Self {
+        tint_in_place(&mut self.pixels, multiplier);
+        self
+    }
+
+    /// Converts the texture to grayscale and returns it for chaining.
+    ///
+    /// Each pixel's RGB channels are replaced by their byte-space luma while
+    /// alpha is preserved.
+    pub fn grayscale(&mut self) -> &mut Self {
+        grayscale_in_place(&mut self.pixels);
+        self
+    }
+
+    /// Inverts the RGB channels (`255 - value`) and returns the texture for
+    /// chaining. Alpha is preserved.
+    pub fn invert_rgb(&mut self) -> &mut Self {
+        invert_rgb_in_place(&mut self.pixels);
+        self
     }
 
     /// Returns the number of mip levels in the automatically generated chain.
@@ -420,6 +684,109 @@ impl Texture {
             });
         }
         Ok(())
+    }
+}
+
+fn pixel_index(width: u32, height: u32, x: u32, y: u32) -> usize {
+    assert!(
+        x < width && y < height,
+        "pixel ({x}, {y}) is outside a {width}x{height} image"
+    );
+    (y as usize * width as usize + x as usize) * 4
+}
+
+fn flip_horizontal_in_place(width: u32, height: u32, pixels: &mut [u8]) {
+    debug_assert_eq!(pixels.len(), width as usize * height as usize * 4);
+    let row_pixels = width as usize;
+    for row in pixels.chunks_exact_mut(row_pixels * 4) {
+        for x in 0..row_pixels / 2 {
+            let left = x * 4;
+            let right = (row_pixels - 1 - x) * 4;
+            for channel in 0..4 {
+                row.swap(left + channel, right + channel);
+            }
+        }
+    }
+}
+
+fn flip_vertical_in_place(width: u32, height: u32, pixels: &mut [u8]) {
+    debug_assert_eq!(pixels.len(), width as usize * height as usize * 4);
+    let row_bytes = width as usize * 4;
+    let rows = height as usize;
+    for y in 0..rows / 2 {
+        let (upper, lower) = pixels.split_at_mut((rows - 1 - y) * row_bytes);
+        upper[y * row_bytes..(y + 1) * row_bytes].swap_with_slice(&mut lower[..row_bytes]);
+    }
+}
+
+fn rotate180_in_place(pixels: &mut [u8]) {
+    let texels = pixels.len() / 4;
+    for index in 0..texels / 2 {
+        let other = texels - 1 - index;
+        for channel in 0..4 {
+            pixels.swap(index * 4 + channel, other * 4 + channel);
+        }
+    }
+}
+
+/// 90 degrees clockwise: destination (`x`, `y`) samples source
+/// (`y`, `source_height - 1 - x`) and the dimensions swap.
+fn rotate90_cw_in_place(width: &mut u32, height: &mut u32, pixels: &mut Vec<u8>) {
+    let (source_width, source_height) = (*width as usize, *height as usize);
+    let mut rotated = vec![0u8; pixels.len()];
+    for y in 0..source_width {
+        for x in 0..source_height {
+            let source = ((source_height - 1 - x) * source_width + y) * 4;
+            let destination = (y * source_height + x) * 4;
+            rotated[destination..destination + 4].copy_from_slice(&pixels[source..source + 4]);
+        }
+    }
+    *pixels = rotated;
+    std::mem::swap(width, height);
+}
+
+/// 270 degrees clockwise: destination (`x`, `y`) samples source
+/// (`source_width - 1 - y`, `x`) and the dimensions swap.
+fn rotate270_cw_in_place(width: &mut u32, height: &mut u32, pixels: &mut Vec<u8>) {
+    let (source_width, source_height) = (*width as usize, *height as usize);
+    let mut rotated = vec![0u8; pixels.len()];
+    for y in 0..source_width {
+        for x in 0..source_height {
+            let source = (x * source_width + (source_width - 1 - y)) * 4;
+            let destination = (y * source_height + x) * 4;
+            rotated[destination..destination + 4].copy_from_slice(&pixels[source..source + 4]);
+        }
+    }
+    *pixels = rotated;
+    std::mem::swap(width, height);
+}
+
+fn tint_in_place(pixels: &mut [u8], multiplier: [f32; 4]) {
+    for texel in pixels.chunks_exact_mut(4) {
+        for (channel, factor) in texel.iter_mut().zip(multiplier) {
+            *channel = (*channel as f32 * factor).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+fn grayscale_in_place(pixels: &mut [u8]) {
+    for texel in pixels.chunks_exact_mut(4) {
+        let luma = (0.2126 * f32::from(texel[0])
+            + 0.7152 * f32::from(texel[1])
+            + 0.0722 * f32::from(texel[2]))
+        .round()
+        .clamp(0.0, 255.0) as u8;
+        texel[0] = luma;
+        texel[1] = luma;
+        texel[2] = luma;
+    }
+}
+
+fn invert_rgb_in_place(pixels: &mut [u8]) {
+    for texel in pixels.chunks_exact_mut(4) {
+        texel[0] = 255 - texel[0];
+        texel[1] = 255 - texel[1];
+        texel[2] = 255 - texel[2];
     }
 }
 
@@ -627,5 +994,127 @@ mod tests {
         slots.set(MaterialSlot::Right, material);
         assert!(slots.get(MaterialSlot::Top).is_none());
         assert_eq!(slots.get(MaterialSlot::Right), Some(&material));
+    }
+
+    #[test]
+    fn texture_pixel_access_reads_and_writes_texels() {
+        let mut texture = Texture::linear(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        assert_eq!(texture.pixel(0, 0), [1, 2, 3, 4]);
+        assert_eq!(texture.pixel(1, 0), [5, 6, 7, 8]);
+
+        texture.set_pixel(1, 0, [9, 9, 9, 9]);
+        assert_eq!(texture.pixel(1, 0), [9, 9, 9, 9]);
+
+        texture.pixels_mut()[0] = 42;
+        assert_eq!(texture.pixels()[0], 42);
+        assert_eq!(texture.pixel(0, 0), [42, 2, 3, 4]);
+    }
+
+    #[test]
+    fn texture_flips_mirror_texel_positions() {
+        // Row-major 2x2: A B / C D.
+        let pixels: Vec<u8> = [
+            [10, 0, 0, 255],
+            [20, 0, 0, 255],
+            [30, 0, 0, 255],
+            [40, 0, 0, 255],
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        let mut texture = Texture::linear(2, 2, pixels.clone()).unwrap();
+        texture.flip_horizontal();
+        assert_eq!(texture.pixel(0, 0)[0], 20);
+        assert_eq!(texture.pixel(1, 0)[0], 10);
+        assert_eq!(texture.pixel(0, 1)[0], 40);
+        assert_eq!(texture.pixel(1, 1)[0], 30);
+        texture.flip_horizontal();
+        assert_eq!(texture.pixels(), &pixels);
+
+        let mut texture = Texture::linear(2, 2, pixels.clone()).unwrap();
+        texture.flip_vertical();
+        assert_eq!(texture.pixel(0, 0)[0], 30);
+        assert_eq!(texture.pixel(0, 1)[0], 10);
+        texture.flip_vertical();
+        assert_eq!(texture.pixels(), &pixels);
+    }
+
+    #[test]
+    fn texture_rotations_move_texels_and_swap_dimensions() {
+        // Row-major 2x1: A B.
+        let pixels: Vec<u8> = [[10, 0, 0, 255], [20, 0, 0, 255]]
+            .into_iter()
+            .flatten()
+            .collect();
+
+        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
+        texture.rotate90();
+        assert_eq!((texture.width, texture.height), (1, 2));
+        // Clockwise: the left texel swings to the top.
+        assert_eq!(texture.pixel(0, 0)[0], 10);
+        assert_eq!(texture.pixel(0, 1)[0], 20);
+        texture.rotate270();
+        assert_eq!((texture.width, texture.height), (2, 1));
+        assert_eq!(texture.pixels(), &pixels);
+
+        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
+        texture.rotate270();
+        assert_eq!((texture.width, texture.height), (1, 2));
+        // Counter-clockwise: the right texel swings to the top.
+        assert_eq!(texture.pixel(0, 0)[0], 20);
+        assert_eq!(texture.pixel(0, 1)[0], 10);
+
+        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
+        texture.rotate180();
+        assert_eq!((texture.width, texture.height), (2, 1));
+        assert_eq!(texture.pixel(0, 0)[0], 20);
+        assert_eq!(texture.pixel(1, 0)[0], 10);
+        texture.rotate180();
+        assert_eq!(texture.pixels(), &pixels);
+
+        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
+        for _ in 0..4 {
+            texture.rotate90();
+        }
+        assert_eq!((texture.width, texture.height), (2, 1));
+        assert_eq!(texture.pixels(), &pixels);
+    }
+
+    #[test]
+    fn texture_color_adjustments_scale_and_replace_channels() {
+        let mut texture = Texture::linear(1, 1, vec![200, 100, 50, 255]).unwrap();
+        texture.tint([0.5, 1.0, 2.0, 1.0]);
+        assert_eq!(texture.pixel(0, 0), [100, 100, 100, 255]);
+
+        let mut texture = Texture::linear(1, 1, vec![255, 0, 0, 128]).unwrap();
+        texture.grayscale();
+        let gray = texture.pixel(0, 0);
+        assert_eq!(gray, [54, 54, 54, 128]);
+
+        let mut texture = Texture::linear(1, 1, vec![10, 20, 30, 40]).unwrap();
+        texture.invert_rgb();
+        assert_eq!(texture.pixel(0, 0), [245, 235, 225, 40]);
+    }
+
+    #[test]
+    fn image_transforms_mirror_the_texture_api() {
+        let mut image = Image::from_rgba8(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        assert_eq!(image.pixel(1, 0), [5, 6, 7, 8]);
+        image.set_pixel(0, 0, [9, 9, 9, 9]);
+        assert_eq!(image.pixel(0, 0), [9, 9, 9, 9]);
+
+        image.flip_horizontal().flip_vertical();
+        assert_eq!(image.pixel(0, 0), [5, 6, 7, 8]);
+        assert_eq!(image.pixel(1, 0), [9, 9, 9, 9]);
+
+        image.rotate90();
+        assert_eq!((image.width, image.height), (1, 2));
+        image.rotate270();
+        assert_eq!((image.width, image.height), (2, 1));
+
+        image.rotate180().rotate180();
+        image.tint([1.0, 1.0, 1.0, 1.0]).grayscale().invert_rgb();
+        assert_eq!(image.pixels().len(), 8);
     }
 }

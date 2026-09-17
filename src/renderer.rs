@@ -5,9 +5,9 @@ use thiserror::Error;
 use web_time::Instant;
 
 use crate::{
-    Camera, DEPTH_FORMAT, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, MaterialSlot, Mesh,
-    MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError, TextureHandle,
-    Vertex, Workspace,
+    Camera, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, MaterialSlot,
+    Mesh, MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError,
+    TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
@@ -100,6 +100,7 @@ pub struct MeshHandle(usize);
 struct RenderBatch {
     shape: PartShape,
     textures: MaterialTextures,
+    filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u8,
     instances: Vec<InstanceRaw>,
     instance_start: usize,
@@ -108,6 +109,7 @@ struct RenderBatch {
 struct PreparedRenderBatch {
     shape: PartShape,
     packed_textures: PackedMaterialTextures,
+    filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u8,
     instance_start: usize,
     instance_count: u32,
@@ -262,7 +264,7 @@ pub struct Renderer {
     shadow_camera_bind_group: wgpu::BindGroup,
     shadow_camera_stride: u32,
     material_bind_group_layout: wgpu::BindGroupLayout,
-    material_sampler: wgpu::Sampler,
+    material_samplers: HashMap<TextureFilter, wgpu::Sampler>,
     material_factor_bind_group_layout: wgpu::BindGroupLayout,
     material_factors_buffer: wgpu::Buffer,
     material_factors_bind_group: wgpu::BindGroup,
@@ -274,9 +276,10 @@ pub struct Renderer {
     /// base-material words instead of the full 63-word key.
     material_factor_last_uniform: Option<([u32; 9], u32)>,
     textures: Vec<GpuTexture>,
-    workspace_texture_handles: HashMap<(InstanceId, TextureHandle), GpuTextureHandle>,
+    workspace_texture_handles: HashMap<(InstanceId, TextureHandle), (GpuTextureHandle, u64)>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,
     default_material_textures: MaterialTextures,
+    default_material_filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     packed_material_textures: HashMap<MaterialTextures, PackedMaterialTextures>,
     gpu_material_textures: Vec<GpuMaterialTexture>,
     instance_buffer: wgpu::Buffer,
@@ -289,8 +292,17 @@ pub struct Renderer {
     fps: f32,
     prepared_batches: Vec<PreparedRenderBatch>,
     batch_scratch: Vec<RenderBatch>,
-    batch_indices_scratch: HashMap<(PartShape, MaterialTextures, u8), usize>,
-    material_bind_groups: HashMap<PackedMaterialTextures, wgpu::BindGroup>,
+    batch_indices_scratch: HashMap<
+        (
+            PartShape,
+            MaterialTextures,
+            [TextureFilter; MATERIAL_SLOT_COUNT],
+            u8,
+        ),
+        usize,
+    >,
+    material_bind_groups:
+        HashMap<(PackedMaterialTextures, [TextureFilter; MATERIAL_SLOT_COUNT]), wgpu::BindGroup>,
 }
 
 #[repr(C)]
@@ -444,7 +456,7 @@ impl Renderer {
                 }),
             }],
         });
-        let mut material_bind_group_entries = Vec::with_capacity(MATERIAL_SLOT_COUNT + 1);
+        let mut material_bind_group_entries = Vec::with_capacity(MATERIAL_SLOT_COUNT * 2);
         for binding in 0..MATERIAL_SLOT_COUNT {
             material_bind_group_entries.push(wgpu::BindGroupLayoutEntry {
                 binding: binding as u32,
@@ -457,31 +469,26 @@ impl Renderer {
                 count: None,
             });
         }
-        material_bind_group_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: MATERIAL_SLOT_COUNT as u32,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-            count: None,
-        });
+        // One filtering sampler per material slot so each directional slot can
+        // use its own `TextureFilter` (e.g. pixel-art `Nearest` on top, smooth
+        // `Trilinear` elsewhere).
+        for binding in 0..MATERIAL_SLOT_COUNT {
+            material_bind_group_entries.push(wgpu::BindGroupLayoutEntry {
+                binding: (MATERIAL_SLOT_COUNT + binding) as u32,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            });
+        }
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("material bind group layout"),
                 entries: &material_bind_group_entries,
             });
-        let material_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("material sampler"),
-            address_mode_u: wgpu::AddressMode::Repeat,
-            address_mode_v: wgpu::AddressMode::Repeat,
-            address_mode_w: wgpu::AddressMode::Repeat,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 32.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
-        });
+        let mut material_samplers = HashMap::new();
+        for filter in TextureFilter::ALL {
+            material_samplers.insert(filter, create_material_sampler(&device, filter));
+        }
         let material_factor_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("material factor bind group layout"),
@@ -662,7 +669,7 @@ impl Renderer {
             shadow_camera_bind_group,
             shadow_camera_stride,
             material_bind_group_layout,
-            material_sampler,
+            material_samplers,
             material_factor_bind_group_layout,
             material_factors_buffer,
             material_factors_bind_group,
@@ -674,6 +681,7 @@ impl Renderer {
             workspace_texture_handles: HashMap::new(),
             texture_dedup,
             default_material_textures,
+            default_material_filters: [TextureFilter::default(); MATERIAL_SLOT_COUNT],
             packed_material_textures: HashMap::new(),
             gpu_material_textures: Vec::new(),
             instance_buffer,
@@ -862,6 +870,25 @@ impl Renderer {
         Ok(textures)
     }
 
+    fn material_filters(part: &Part) -> [TextureFilter; MATERIAL_SLOT_COUNT] {
+        let base_filter = part.material.filter;
+        let mut filters = [base_filter; MATERIAL_SLOT_COUNT];
+        for (index, material) in part
+            .material_slots
+            .slots
+            .iter()
+            .take(MATERIAL_SLOT_COUNT - 1)
+            .enumerate()
+        {
+            if let Some(material) = material {
+                filters[index + 1] = material.filter;
+            } else {
+                filters[index + 1] = base_filter;
+            }
+        }
+        filters
+    }
+
     fn material_set_index(&mut self, part: &Part) -> u32 {
         // Fast path: no overrides means every face uses the base material, so
         // only the 9 base words need comparing.
@@ -935,17 +962,204 @@ impl Renderer {
         handle: TextureHandle,
     ) -> Result<GpuTextureHandle, RendererError> {
         let workspace_handle = (workspace.id(), handle);
-        if let Some(&gpu_handle) = self.workspace_texture_handles.get(&workspace_handle) {
-            return Ok(gpu_handle);
-        }
-
         let texture = workspace
             .get_texture(handle)
             .ok_or(RendererError::InvalidTextureHandle { index: handle.0 })?;
+        let version = workspace.texture_version(handle).unwrap_or(0);
+        if let Some(&(gpu_handle, cached_version)) =
+            self.workspace_texture_handles.get(&workspace_handle)
+        {
+            if cached_version == version {
+                return Ok(gpu_handle);
+            }
+            // The workspace texture was edited after upload.
+            if self.gpu_texture_is_shared(gpu_handle, texture) {
+                // This GPU copy is shared with another logical texture (a
+                // dedup hit or a built-in default): allocate a fresh copy
+                // instead of overwriting storage other owners still sample.
+                let new_handle = GpuTextureHandle(self.textures.len());
+                self.textures
+                    .push(upload_texture(&self.device, &self.queue, texture)?);
+                self.texture_dedup.insert(texture.clone(), new_handle);
+                self.workspace_texture_handles
+                    .insert(workspace_handle, (new_handle, version));
+                return Ok(new_handle);
+            }
+            self.refresh_workspace_texture(gpu_handle, texture)?;
+            self.workspace_texture_handles
+                .insert(workspace_handle, (gpu_handle, version));
+            return Ok(gpu_handle);
+        }
+
         let gpu_handle = self.upload_dedup_texture(texture)?;
         self.workspace_texture_handles
-            .insert(workspace_handle, gpu_handle);
+            .insert(workspace_handle, (gpu_handle, version));
         Ok(gpu_handle)
+    }
+
+    /// Reports whether `gpu_handle` is sampled by another logical texture.
+    ///
+    /// That happens when distinct workspace textures deduplicated to the same
+    /// GPU copy, or when a workspace texture matched a built-in default.
+    /// Such copies must not be overwritten in place on edit.
+    fn gpu_texture_is_shared(&self, gpu_handle: GpuTextureHandle, texture: &Texture) -> bool {
+        if self
+            .default_material_textures
+            .base_color
+            .contains(&gpu_handle)
+            || self.default_material_textures.normal.contains(&gpu_handle)
+            || self
+                .default_material_textures
+                .metallic_roughness
+                .contains(&gpu_handle)
+        {
+            return true;
+        }
+        self.texture_dedup
+            .iter()
+            .any(|(known, &known_handle)| known_handle == gpu_handle && known != texture)
+    }
+
+    /// Re-uploads an edited workspace texture and refreshes every packed
+    /// material texture built from it.
+    ///
+    /// The caller guarantees `gpu_handle` is exclusively owned by this
+    /// texture (see [`gpu_texture_is_shared`](Self::gpu_texture_is_shared)).
+    /// Textures validate on the way in, so edits made through
+    /// [`Workspace::get_texture_mut`] that break the RGBA8 invariant surface
+    /// here as an error instead of panicking inside surface packing.
+    fn refresh_workspace_texture(
+        &mut self,
+        gpu_handle: GpuTextureHandle,
+        texture: &Texture,
+    ) -> Result<(), RendererError> {
+        texture.validate()?;
+        let mips = texture.mip_levels()?;
+        let format = texture_gpu_format(texture.color_space);
+        let gpu_texture = &self.textures[gpu_handle.0]._texture;
+        if gpu_texture.size().width != texture.width
+            || gpu_texture.size().height != texture.height
+            || gpu_texture.format() != format
+            || gpu_texture.mip_level_count() != mips.len() as u32
+        {
+            let replacement = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("material texture"),
+                size: wgpu::Extent3d {
+                    width: texture.width,
+                    height: texture.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: mips.len() as u32,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.textures[gpu_handle.0]._texture = replacement;
+        }
+        write_texture_mips(&self.queue, &self.textures[gpu_handle.0]._texture, &mips);
+        let old_source =
+            std::mem::replace(&mut self.textures[gpu_handle.0].source, texture.clone());
+        if self.texture_dedup.get(&old_source) == Some(&gpu_handle) {
+            self.texture_dedup.remove(&old_source);
+        }
+        self.texture_dedup.insert(texture.clone(), gpu_handle);
+        self.refresh_packed_textures(gpu_handle)
+    }
+
+    /// Rewrites every packed material texture that samples `changed`.
+    ///
+    /// Packed textures keep their GPU objects (and the views/bind groups over
+    /// them) whenever the base dimensions and format still match; entries
+    /// that outgrew their storage are recreated and their bind groups
+    /// dropped so they rebuild with fresh views.
+    fn refresh_packed_textures(&mut self, changed: GpuTextureHandle) -> Result<(), RendererError> {
+        let affected: Vec<MaterialTextures> = self
+            .packed_material_textures
+            .keys()
+            .filter(|textures| {
+                textures.base_color.contains(&changed)
+                    || textures.normal.contains(&changed)
+                    || textures.metallic_roughness.contains(&changed)
+            })
+            .copied()
+            .collect();
+        let mut recreated = Vec::new();
+        for textures in affected {
+            let packed = self.packed_material_textures[&textures];
+            for (slot, packed_handle) in packed.textures.into_iter().enumerate() {
+                let base_texture = self.textures[textures.base_color[slot].0].source.clone();
+                let normal_texture = self.textures[textures.normal[slot].0].source.clone();
+                let metallic_roughness_texture = self.textures[textures.metallic_roughness[slot].0]
+                    .source
+                    .clone();
+                let surface_texture = Texture::linear(
+                    base_texture.width,
+                    base_texture.height,
+                    pack_surface_pixels(
+                        &normal_texture,
+                        &metallic_roughness_texture,
+                        base_texture.width,
+                        base_texture.height,
+                    ),
+                )?;
+                let base_mips = base_texture.mip_levels()?;
+                let surface_mips = surface_texture.mip_levels()?;
+                let format = texture_gpu_format(base_texture.color_space);
+                let entry = &self.gpu_material_textures[packed_handle.0];
+                if entry._texture.size().width != base_texture.width
+                    || entry._texture.size().height != base_texture.height
+                    || entry._texture.format() != format
+                    || entry._texture.mip_level_count() != base_mips.len() as u32
+                {
+                    let replacement = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("packed material texture"),
+                        size: wgpu::Extent3d {
+                            width: base_texture.width,
+                            height: base_texture.height,
+                            depth_or_array_layers: 2,
+                        },
+                        mip_level_count: base_mips.len() as u32,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    write_packed_mips(
+                        &self.queue,
+                        &replacement,
+                        &base_mips,
+                        &surface_mips,
+                        base_texture.color_space,
+                    );
+                    let view = replacement.create_view(&wgpu::TextureViewDescriptor {
+                        dimension: Some(wgpu::TextureViewDimension::D2Array),
+                        array_layer_count: Some(2),
+                        ..Default::default()
+                    });
+                    self.gpu_material_textures[packed_handle.0] = GpuMaterialTexture {
+                        _texture: replacement,
+                        view,
+                    };
+                    recreated.push(packed_handle);
+                } else {
+                    write_packed_mips(
+                        &self.queue,
+                        &entry._texture,
+                        &base_mips,
+                        &surface_mips,
+                        base_texture.color_space,
+                    );
+                }
+            }
+        }
+        if !recreated.is_empty() {
+            self.material_bind_groups
+                .retain(|(packed, _), _| !packed.textures.iter().any(|t| recreated.contains(t)));
+        }
+        Ok(())
     }
 
     fn upload_dedup_texture(
@@ -969,10 +1183,7 @@ impl Renderer {
     ) -> Result<PackedTextureHandle, RendererError> {
         let base_mips = base_color.mip_levels()?;
         let surface_mips = surface.mip_levels()?;
-        let format = match base_color.color_space {
-            TextureColorSpace::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
-            TextureColorSpace::Linear => wgpu::TextureFormat::Rgba8Unorm,
-        };
+        let format = texture_gpu_format(base_color.color_space);
         let gpu_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("packed material texture"),
             size: wgpu::Extent3d {
@@ -987,53 +1198,13 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        for (mip_level, (base_image, surface_image)) in
-            base_mips.iter().zip(surface_mips).enumerate()
-        {
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &gpu_texture,
-                    mip_level: mip_level as u32,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &base_image.pixels,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(base_image.width * 4),
-                    rows_per_image: Some(base_image.height),
-                },
-                wgpu::Extent3d {
-                    width: base_image.width,
-                    height: base_image.height,
-                    depth_or_array_layers: 1,
-                },
-            );
-            let surface_pixels = if base_color.color_space == TextureColorSpace::Srgb {
-                encode_srgb_rgb(&surface_image.pixels)
-            } else {
-                surface_image.pixels
-            };
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &gpu_texture,
-                    mip_level: mip_level as u32,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: 1 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &surface_pixels,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(surface_image.width * 4),
-                    rows_per_image: Some(surface_image.height),
-                },
-                wgpu::Extent3d {
-                    width: surface_image.width,
-                    height: surface_image.height,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
+        write_packed_mips(
+            &self.queue,
+            &gpu_texture,
+            &base_mips,
+            &surface_mips,
+            base_color.color_space,
+        );
         let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             array_layer_count: Some(2),
@@ -1081,16 +1252,25 @@ impl Renderer {
         Ok(packed)
     }
 
-    fn material_bind_group(&mut self, textures: PackedMaterialTextures) -> &wgpu::BindGroup {
-        if !self.material_bind_groups.contains_key(&textures) {
-            let bind_group = self.create_material_bind_group(textures);
-            self.material_bind_groups.insert(textures, bind_group);
+    fn material_bind_group(
+        &mut self,
+        textures: PackedMaterialTextures,
+        filters: [TextureFilter; MATERIAL_SLOT_COUNT],
+    ) -> &wgpu::BindGroup {
+        let key = (textures, filters);
+        if !self.material_bind_groups.contains_key(&key) {
+            let bind_group = self.create_material_bind_group(textures, filters);
+            self.material_bind_groups.insert(key, bind_group);
         }
-        &self.material_bind_groups[&textures]
+        &self.material_bind_groups[&key]
     }
 
-    fn create_material_bind_group(&self, textures: PackedMaterialTextures) -> wgpu::BindGroup {
-        let mut entries = Vec::with_capacity(MATERIAL_SLOT_COUNT + 1);
+    fn create_material_bind_group(
+        &self,
+        textures: PackedMaterialTextures,
+        filters: [TextureFilter; MATERIAL_SLOT_COUNT],
+    ) -> wgpu::BindGroup {
+        let mut entries = Vec::with_capacity(MATERIAL_SLOT_COUNT * 2);
         for (slot, texture) in textures.textures.into_iter().enumerate() {
             entries.push(wgpu::BindGroupEntry {
                 binding: slot as u32,
@@ -1099,10 +1279,16 @@ impl Renderer {
                 ),
             });
         }
-        entries.push(wgpu::BindGroupEntry {
-            binding: MATERIAL_SLOT_COUNT as u32,
-            resource: wgpu::BindingResource::Sampler(&self.material_sampler),
-        });
+        for (slot, filter) in filters.into_iter().enumerate() {
+            let sampler = self
+                .material_samplers
+                .get(&filter)
+                .expect("material sampler exists for every TextureFilter");
+            entries.push(wgpu::BindGroupEntry {
+                binding: (MATERIAL_SLOT_COUNT + slot) as u32,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            });
+        }
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("material bind group"),
             layout: &self.material_bind_group_layout,
@@ -1163,6 +1349,7 @@ impl Renderer {
         let camera_planes = frustum_planes(camera_vp);
         let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;
+        let default_filters = self.default_material_filters;
 
         // Keep the finite set of default-material batches and their allocations
         // alive across frames. Custom material combinations can be unbounded,
@@ -1254,8 +1441,18 @@ impl Renderer {
                 } else {
                     None
                 };
+                // Filters only matter when textures are bound: 1x1 default
+                // textures sample identically under any filter, so untextured
+                // parts keep sharing the fast-path default batch.
+                let custom_filters = if custom_textures.is_some() {
+                    let filters = Self::material_filters(part);
+                    (filters != default_filters).then_some(filters)
+                } else {
+                    None
+                };
                 let batch_index = if let Some(textures) = custom_textures {
-                    let key = (part.shape, textures, visibility_mask);
+                    let filters = custom_filters.unwrap_or(default_filters);
+                    let key = (part.shape, textures, filters, visibility_mask);
                     if let Some(&batch_index) = batch_indices.get(&key) {
                         batch_index
                     } else {
@@ -1264,6 +1461,7 @@ impl Renderer {
                         batches.push(RenderBatch {
                             shape: part.shape,
                             textures,
+                            filters,
                             visibility_mask,
                             instances: Vec::new(),
                             instance_start: 0,
@@ -1280,6 +1478,7 @@ impl Renderer {
                         batches.push(RenderBatch {
                             shape: part.shape,
                             textures: default_textures,
+                            filters: default_filters,
                             visibility_mask,
                             instances: Vec::new(),
                             instance_start: 0,
@@ -1352,7 +1551,7 @@ impl Renderer {
         self.prepared_batches.clear();
         self.prepared_batches.reserve(batches.len());
         let default_packed = self.pack_material_textures(default_textures)?;
-        self.material_bind_group(default_packed);
+        self.material_bind_group(default_packed, default_filters);
         for batch in &batches {
             if batch.instances.is_empty() {
                 continue;
@@ -1363,12 +1562,13 @@ impl Renderer {
                 let packed = self.pack_material_textures(batch.textures)?;
                 // Populate the bind-group cache once per material; steady-state
                 // frames create zero bind groups.
-                self.material_bind_group(packed);
+                self.material_bind_group(packed, batch.filters);
                 packed
             };
             self.prepared_batches.push(PreparedRenderBatch {
                 shape: batch.shape,
                 packed_textures: packed,
+                filters: batch.filters,
                 visibility_mask: batch.visibility_mask,
                 instance_start: batch.instance_start,
                 instance_count: batch.instances.len() as u32,
@@ -1409,7 +1609,9 @@ impl Renderer {
             while let Some(candidate) = self.prepared_batches.get(next) {
                 if candidate.visibility_mask & visibility_bit == 0
                     || candidate.shape != batch.shape
-                    || (use_materials && candidate.packed_textures != batch.packed_textures)
+                    || (use_materials
+                        && (candidate.packed_textures != batch.packed_textures
+                            || candidate.filters != batch.filters))
                     || candidate.instance_start != batch.instance_start + instance_count as usize
                 {
                     break;
@@ -1432,12 +1634,13 @@ impl Renderer {
             let instance_end =
                 instance_start + instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
             pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
+            let batch_material = (batch.packed_textures, batch.filters);
             if use_materials
-                && bound_material != Some(batch.packed_textures)
-                && let Some(bind_group) = self.material_bind_groups.get(&batch.packed_textures)
+                && bound_material != Some(batch_material)
+                && let Some(bind_group) = self.material_bind_groups.get(&batch_material)
             {
                 pass.set_bind_group(1, bind_group, &[]);
-                bound_material = Some(batch.packed_textures);
+                bound_material = Some(batch_material);
             }
             pass.draw_indexed(0..mesh.index_count, 0, 0..instance_count);
             index = next;
@@ -1677,34 +1880,80 @@ fn create_eframe_scene_texture(
     })
 }
 
-fn upload_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    texture: &Texture,
-) -> Result<GpuTexture, TextureError> {
-    let format = match texture.color_space {
+fn create_material_sampler(device: &wgpu::Device, filter: TextureFilter) -> wgpu::Sampler {
+    let (mag_filter, min_filter, mipmap_filter, anisotropy, label) = match filter {
+        TextureFilter::Nearest => (
+            wgpu::FilterMode::Nearest,
+            wgpu::FilterMode::Nearest,
+            wgpu::MipmapFilterMode::Nearest,
+            1,
+            "material sampler (nearest)",
+        ),
+        TextureFilter::Bilinear => (
+            wgpu::FilterMode::Linear,
+            wgpu::FilterMode::Linear,
+            wgpu::MipmapFilterMode::Nearest,
+            1,
+            "material sampler (bilinear)",
+        ),
+        TextureFilter::Trilinear => (
+            wgpu::FilterMode::Linear,
+            wgpu::FilterMode::Linear,
+            wgpu::MipmapFilterMode::Linear,
+            1,
+            "material sampler (trilinear)",
+        ),
+        TextureFilter::Anisotropic4x => (
+            wgpu::FilterMode::Linear,
+            wgpu::FilterMode::Linear,
+            wgpu::MipmapFilterMode::Linear,
+            4,
+            "material sampler (anisotropic 4x)",
+        ),
+        TextureFilter::Anisotropic8x => (
+            wgpu::FilterMode::Linear,
+            wgpu::FilterMode::Linear,
+            wgpu::MipmapFilterMode::Linear,
+            8,
+            "material sampler (anisotropic 8x)",
+        ),
+        TextureFilter::Anisotropic16x => (
+            wgpu::FilterMode::Linear,
+            wgpu::FilterMode::Linear,
+            wgpu::MipmapFilterMode::Linear,
+            16,
+            "material sampler (anisotropic 16x)",
+        ),
+    };
+    let anisotropy_clamp = anisotropy;
+    device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some(label),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter,
+        min_filter,
+        mipmap_filter,
+        lod_min_clamp: 0.0,
+        lod_max_clamp: 32.0,
+        compare: None,
+        anisotropy_clamp,
+        border_color: None,
+    })
+}
+
+fn texture_gpu_format(color_space: TextureColorSpace) -> wgpu::TextureFormat {
+    match color_space {
         TextureColorSpace::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
         TextureColorSpace::Linear => wgpu::TextureFormat::Rgba8Unorm,
-    };
-    let mip_levels = texture.mip_levels()?;
-    let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("material texture"),
-        size: wgpu::Extent3d {
-            width: texture.width,
-            height: texture.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: mip_levels.len() as u32,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    for (mip_level, image) in mip_levels.iter().enumerate() {
+    }
+}
+
+fn write_texture_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, mips: &[Image]) {
+    for (mip_level, image) in mips.iter().enumerate() {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &gpu_texture,
+                texture,
                 mip_level: mip_level as u32,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -1722,6 +1971,84 @@ fn upload_texture(
             },
         );
     }
+}
+
+fn write_packed_mips(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    base_mips: &[Image],
+    surface_mips: &[Image],
+    base_color_space: TextureColorSpace,
+) {
+    for (mip_level, (base_image, surface_image)) in base_mips.iter().zip(surface_mips).enumerate() {
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: mip_level as u32,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &base_image.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(base_image.width * 4),
+                rows_per_image: Some(base_image.height),
+            },
+            wgpu::Extent3d {
+                width: base_image.width,
+                height: base_image.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        let surface_pixels = if base_color_space == TextureColorSpace::Srgb {
+            encode_srgb_rgb(&surface_image.pixels)
+        } else {
+            surface_image.pixels.clone()
+        };
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: mip_level as u32,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: 1 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &surface_pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(surface_image.width * 4),
+                rows_per_image: Some(surface_image.height),
+            },
+            wgpu::Extent3d {
+                width: surface_image.width,
+                height: surface_image.height,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+}
+
+fn upload_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &Texture,
+) -> Result<GpuTexture, TextureError> {
+    let format = texture_gpu_format(texture.color_space);
+    let mip_levels = texture.mip_levels()?;
+    let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("material texture"),
+        size: wgpu::Extent3d {
+            width: texture.width,
+            height: texture.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: mip_levels.len() as u32,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    write_texture_mips(queue, &gpu_texture, &mip_levels);
     Ok(GpuTexture {
         _texture: gpu_texture,
         source: texture.clone(),
