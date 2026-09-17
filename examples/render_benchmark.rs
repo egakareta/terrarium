@@ -32,7 +32,7 @@ impl Default for Config {
         Self {
             parts: 20_000,
             warmup_frames: 60,
-            measured_frames: 2400,
+            measured_frames: 360,
             width: 1280,
             height: 720,
         }
