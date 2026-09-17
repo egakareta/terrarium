@@ -78,22 +78,31 @@ var material_sampler_6: sampler;
 // Per-face PBR factors for every deduplicated part material set. Each set
 // packs seven slots (base + six directions, in MaterialSlot order) as three
 // vec4s per slot: base color, then emissive RGB + roughness, then metallic.
+//
+// Stored in a 2D float texture (width = MATERIAL_VEC4S_PER_SET, height =
+// set count) instead of a storage buffer: OpenGL ES / WebGL backends expose
+// zero storage buffers in the fragment stage, while textureLoad works
+// everywhere.
 @group(2) @binding(0)
-var<storage, read> material_factor_data: array<vec4<f32>>;
+var material_factor_texture: texture_2d<f32>;
 
 const MATERIAL_VEC4S_PER_SLOT: u32 = 3u;
 const MATERIAL_VEC4S_PER_SET: u32 = 21u;
 
+fn load_material_vec4(set_index: u32, vec4_index: u32) -> vec4<f32> {
+    return textureLoad(material_factor_texture, vec2<u32>(vec4_index, set_index), 0);
+}
+
 fn slot_base_color(set_index: u32, slot: u32) -> vec4<f32> {
-    return material_factor_data[set_index * MATERIAL_VEC4S_PER_SET + slot * MATERIAL_VEC4S_PER_SLOT];
+    return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT);
 }
 
 fn slot_emissive_roughness(set_index: u32, slot: u32) -> vec4<f32> {
-    return material_factor_data[set_index * MATERIAL_VEC4S_PER_SET + slot * MATERIAL_VEC4S_PER_SLOT + 1u];
+    return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 1u);
 }
 
 fn slot_metallic(set_index: u32, slot: u32) -> f32 {
-    return material_factor_data[set_index * MATERIAL_VEC4S_PER_SET + slot * MATERIAL_VEC4S_PER_SLOT + 2u].x;
+    return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 2u).x;
 }
 
 struct VertexInput {

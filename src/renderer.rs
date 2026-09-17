@@ -146,6 +146,15 @@ struct PackedTextureHandle(usize);
 /// emissive RGB + roughness, metallic).
 const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 3;
 
+/// Width of the material-factor data texture: one texel per packed `vec4`,
+/// so each deduplicated set occupies exactly one row.
+const MATERIAL_FACTOR_TEXTURE_WIDTH: u32 = MATERIAL_VEC4S_PER_SET as u32;
+
+/// GPU format of the material-factor data texture: exact `f32` storage
+/// sampled with `textureLoad` (no filtering, so no float-filterable feature
+/// is required).
+const MATERIAL_FACTOR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
 /// Hashable per-face PBR factors for one part: bit patterns of base color
 /// RGBA, metallic, roughness, and emissive RGB for each of the seven slots in
 /// [`MaterialSlot`] order, with unset directional slots resolved to the base
@@ -266,7 +275,8 @@ pub struct Renderer {
     material_bind_group_layout: wgpu::BindGroupLayout,
     material_samplers: HashMap<TextureFilter, wgpu::Sampler>,
     material_factor_bind_group_layout: wgpu::BindGroupLayout,
-    material_factors_buffer: wgpu::Buffer,
+    material_factors_texture: wgpu::Texture,
+    material_factors_view: wgpu::TextureView,
     material_factors_bind_group: wgpu::BindGroup,
     material_factor_vec4s: Vec<[f32; 4]>,
     material_factor_indices: HashMap<MaterialSetKey, u32>,
@@ -495,28 +505,21 @@ impl Renderer {
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 }],
             });
-        let material_factors_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("material factor buffer"),
-            size: (MATERIAL_VEC4S_PER_SET * 16) as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let material_factors_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("material factor bind group"),
-            layout: &material_factor_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: material_factors_buffer.as_entire_binding(),
-            }],
-        });
+        let (material_factors_texture, material_factors_view) =
+            create_material_factor_texture(&device, 1);
+        let material_factors_bind_group = create_material_factor_bind_group(
+            &device,
+            &material_factor_bind_group_layout,
+            &material_factors_view,
+        );
         let default_base_color = Texture::new(1, 1, vec![255, 255, 255, 255])?;
         let default_normal = Texture::linear(1, 1, vec![128, 128, 255, 255])?;
         let default_metallic_roughness = Texture::linear(1, 1, vec![0, 255, 0, 255])?;
@@ -671,7 +674,8 @@ impl Renderer {
             material_bind_group_layout,
             material_samplers,
             material_factor_bind_group_layout,
-            material_factors_buffer,
+            material_factors_texture,
+            material_factors_view,
             material_factors_bind_group,
             material_factor_vec4s: Vec::new(),
             material_factor_indices: HashMap::new(),
@@ -929,30 +933,39 @@ impl Renderer {
         if self.material_factor_vec4s.is_empty() {
             return;
         }
-        let required_size =
-            self.material_factor_vec4s.len() as u64 * std::mem::size_of::<[f32; 4]>() as u64;
-        if self.material_factors_buffer.size() < required_size {
-            let capacity = required_size.max(self.material_factors_buffer.size() * 2);
-            self.material_factors_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("material factor buffer"),
-                size: capacity,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            self.material_factors_bind_group =
-                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("material factor bind group"),
-                    layout: &self.material_factor_bind_group_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.material_factors_buffer.as_entire_binding(),
-                    }],
-                });
+        let required_height =
+            (self.material_factor_vec4s.len() / MATERIAL_VEC4S_PER_SET).max(1) as u32;
+        if self.material_factors_texture.height() < required_height {
+            let capacity = required_height.max(self.material_factors_texture.height().max(1) * 2);
+            let (texture, view) = create_material_factor_texture(&self.device, capacity);
+            self.material_factors_texture = texture;
+            self.material_factors_view = view;
+            self.material_factors_bind_group = create_material_factor_bind_group(
+                &self.device,
+                &self.material_factor_bind_group_layout,
+                &self.material_factors_view,
+            );
         }
-        self.queue.write_buffer(
-            &self.material_factors_buffer,
-            0,
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.material_factors_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
             bytemuck::cast_slice(&self.material_factor_vec4s),
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(
+                    MATERIAL_FACTOR_TEXTURE_WIDTH * std::mem::size_of::<[f32; 4]>() as u32,
+                ),
+                rows_per_image: Some(required_height),
+            },
+            wgpu::Extent3d {
+                width: MATERIAL_FACTOR_TEXTURE_WIDTH,
+                height: required_height,
+                depth_or_array_layers: 1,
+            },
         );
     }
 
@@ -1947,6 +1960,43 @@ fn texture_gpu_format(color_space: TextureColorSpace) -> wgpu::TextureFormat {
         TextureColorSpace::Srgb => wgpu::TextureFormat::Rgba8UnormSrgb,
         TextureColorSpace::Linear => wgpu::TextureFormat::Rgba8Unorm,
     }
+}
+
+fn create_material_factor_texture(
+    device: &wgpu::Device,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("material factor texture"),
+        size: wgpu::Extent3d {
+            width: MATERIAL_FACTOR_TEXTURE_WIDTH,
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: MATERIAL_FACTOR_TEXTURE_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+fn create_material_factor_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("material factor bind group"),
+        layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::TextureView(view),
+        }],
+    })
 }
 
 fn write_texture_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, mips: &[Image]) {
