@@ -270,6 +270,20 @@ mod tests {
     }
 
     #[test]
+    fn removing_a_child_keeps_the_swapped_child_removable() {
+        let mut workspace = Workspace::new();
+        let first_id = Part::new("first").set_parent(&mut workspace);
+        let removed_id = Part::new("removed").set_parent(&mut workspace);
+        let last_id = Part::new("last").set_parent(&mut workspace);
+
+        assert!(workspace.remove_child(removed_id));
+        assert!(workspace.instance(first_id).is_some());
+        assert!(workspace.instance(last_id).is_some());
+        assert!(workspace.remove_child(last_id));
+        assert!(workspace.instance(first_id).is_some());
+    }
+
+    #[test]
     fn destroying_an_instance_removes_the_instance_and_its_descendants() {
         let mut workspace = Workspace::new();
         let parent_id = workspace.add_child(Part::new("parent"));

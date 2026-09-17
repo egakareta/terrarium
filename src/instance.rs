@@ -188,11 +188,53 @@ impl InstanceId {
 }
 
 #[derive(Debug)]
+struct IndexedVec<T> {
+    values: Vec<T>,
+    indices: HashMap<InstanceId, usize>,
+}
+
+impl<T> Default for IndexedVec<T> {
+    fn default() -> Self {
+        Self {
+            values: Vec::new(),
+            indices: HashMap::new(),
+        }
+    }
+}
+
+impl IndexedVec<Box<dyn Instance>> {
+    fn as_slice(&self) -> &[Box<dyn Instance>] {
+        &self.values
+    }
+
+    fn as_mut_slice(&mut self) -> &mut [Box<dyn Instance>] {
+        &mut self.values
+    }
+
+    fn push(&mut self, value: Box<dyn Instance>) -> InstanceId {
+        let id = value.id();
+        let index = self.values.len();
+        self.values.push(value);
+        self.indices.insert(id, index);
+        id
+    }
+
+    fn remove(&mut self, id: InstanceId) -> Option<Box<dyn Instance>> {
+        let index = self.indices.remove(&id)?;
+        let value = self.values.swap_remove(index);
+        if let Some(moved_value) = self.values.get(index) {
+            self.indices.insert(moved_value.id(), index);
+        }
+        Some(value)
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct InstanceData {
     name: String,
     id: InstanceId,
     parent: Option<InstanceId>,
-    children: Vec<Box<dyn Instance>>,
+    children: IndexedVec<Box<dyn Instance>>,
 }
 
 impl InstanceData {
@@ -201,7 +243,7 @@ impl InstanceData {
             name: name.into(),
             id: InstanceId::new(),
             parent: None,
-            children: Vec::new(),
+            children: IndexedVec::default(),
         }
     }
 
@@ -226,19 +268,19 @@ impl InstanceData {
     }
 
     pub(crate) fn children(&self) -> &[Box<dyn Instance>] {
-        &self.children
+        self.children.as_slice()
     }
 
     pub(crate) fn children_mut(&mut self) -> &mut [Box<dyn Instance>] {
-        &mut self.children
+        self.children.as_mut_slice()
     }
 
     pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
-        let child_id = child.id();
         child.set_instance_parent(Some(self.id));
-        self.children.push(child);
+        let child_id = self.children.push(child);
         if let Some(lookup) = instance_lookup(self.id) {
             self.children
+                .as_mut_slice()
                 .last_mut()
                 .expect("just pushed child")
                 .set_instance_lookup(Some(lookup));
@@ -247,10 +289,9 @@ impl InstanceData {
     }
 
     pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
-        let Some(index) = self.children.iter().position(|child| child.id() == id) else {
+        let Some(mut child) = self.children.remove(id) else {
             return false;
         };
-        let mut child = self.children.swap_remove(index);
         child.set_instance_parent(None);
         child.set_instance_lookup(None);
         true
@@ -270,7 +311,7 @@ impl Drop for InstanceData {
 impl Clone for InstanceData {
     fn clone(&self) -> Self {
         let mut cloned = Self::new(self.name.clone());
-        for child in &self.children {
+        for child in self.children() {
             let mut child = child.clone();
             child.set_instance_parent(Some(cloned.id));
             cloned.children.push(child);
