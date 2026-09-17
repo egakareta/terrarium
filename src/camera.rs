@@ -288,17 +288,46 @@ impl CameraController {
     /// Movement is frame-rate independent. The delta is capped at 100 ms,
     /// sprinting multiplies movement speed by `2.5`, and pitch is clamped to
     /// 89 degrees from the horizon.
+    ///
+    /// `forward`/`backward` fly along the camera's look direction, so looking
+    /// down and pressing forward descends. Strafing stays horizontal and the
+    /// orientation is rebuilt from yaw/pitch every update so no roll can
+    /// accumulate.
     pub fn update_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
         let delta_seconds = delta_seconds.min(0.1);
-        let forward = camera.forward();
-        let right = forward.cross(Vec3::Y).normalize_or_zero();
-        let horizontal_forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+
+        // Rebuild a roll-free orientation from yaw/pitch every frame.
+        // Incremental matrix multiplies (`pivot * rotation`) accumulate
+        // floating-point error as roll/scale drift over many frames.
+        let pivot = camera.pivot();
+        let position = pivot.w_axis.truncate();
+        let forward0 = camera.forward();
+        let right0 = pivot.transform_vector3(Vec3::X);
+        // Yaw from the camera's right axis stays well-defined when looking
+        // straight up/down, where the forward vector's horizontal projection
+        // degenerates to zero.
+        let horizontal_right_sq = right0.x * right0.x + right0.z * right0.z;
+        let yaw = if horizontal_right_sq > 1e-10 {
+            (-right0.z).atan2(right0.x)
+        } else {
+            (-forward0.x).atan2(-forward0.z)
+        };
+        let current_pitch = forward0.y.clamp(-1.0, 1.0).asin();
+
+        let yaw_delta = -self.mouse_delta.0 * self.sensitivity;
+        let new_yaw = yaw + yaw_delta;
+        let new_pitch = (current_pitch - self.mouse_delta.1 * self.sensitivity)
+            .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
+        let new_rotation = Quat::from_rotation_y(new_yaw) * Quat::from_rotation_x(new_pitch);
+
+        let forward = new_rotation * Vec3::NEG_Z;
+        let right = Quat::from_rotation_y(new_yaw) * Vec3::X;
         let mut movement = Vec3::ZERO;
         if self.forward {
-            movement += horizontal_forward;
+            movement += forward;
         }
         if self.backward {
-            movement -= horizontal_forward;
+            movement -= forward;
         }
         if self.right {
             movement += right;
@@ -313,30 +342,13 @@ impl CameraController {
             movement -= Vec3::Y;
         }
 
+        let mut new_position = position;
         if movement.length_squared() > 0.0 {
             let speed = self.speed * if self.sprint { 2.5 } else { 1.0 };
-            let pivot = camera.pivot();
-            camera.pivot_to(
-                Mat4::from_translation(movement.normalize() * speed * delta_seconds) * pivot,
-            );
+            new_position += movement.normalize() * speed * delta_seconds;
         }
 
-        let yaw_delta = -self.mouse_delta.0 * self.sensitivity;
-        let current_pitch = camera.forward().y.asin();
-        let target_pitch = (current_pitch - self.mouse_delta.1 * self.sensitivity)
-            .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
-        let mut pivot = camera.pivot();
-        if yaw_delta != 0.0 {
-            let (_, rotation, position) = pivot.to_scale_rotation_translation();
-            pivot = Mat4::from_rotation_translation(
-                Quat::from_rotation_y(yaw_delta) * rotation,
-                position,
-            );
-        }
-        if target_pitch != current_pitch {
-            pivot *= Mat4::from_rotation_x(target_pitch - current_pitch);
-        }
-        camera.pivot_to(pivot);
+        camera.pivot_to(Mat4::from_rotation_translation(new_rotation, new_position));
         self.mouse_delta = (0.0, 0.0);
     }
 
