@@ -132,7 +132,7 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.children()
             }
 
-            fn children_mut(&mut self) -> &mut [Box<dyn $crate::Instance>] {
+            fn children_mut(&mut self) -> $crate::ChildrenMut<'_> {
                 self.$data $(.$data_tail)*.children_mut()
             }
 
@@ -207,8 +207,8 @@ impl IndexedVec<Box<dyn Instance>> {
         &self.values
     }
 
-    fn as_mut_slice(&mut self) -> &mut [Box<dyn Instance>] {
-        &mut self.values
+    fn iter_mut(&mut self) -> std::slice::IterMut<'_, Box<dyn Instance>> {
+        self.values.iter_mut()
     }
 
     fn push(&mut self, value: Box<dyn Instance>) -> InstanceId {
@@ -271,8 +271,8 @@ impl InstanceData {
         self.children.as_slice()
     }
 
-    pub(crate) fn children_mut(&mut self) -> &mut [Box<dyn Instance>] {
-        self.children.as_mut_slice()
+    pub(crate) fn children_mut(&mut self) -> ChildrenMut<'_> {
+        ChildrenMut::new(self.children.iter_mut())
     }
 
     pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
@@ -280,8 +280,8 @@ impl InstanceData {
         let child_id = self.children.push(child);
         if let Some(lookup) = instance_lookup(self.id) {
             self.children
-                .as_mut_slice()
-                .last_mut()
+                .iter_mut()
+                .next_back()
                 .expect("just pushed child")
                 .set_instance_lookup(Some(lookup));
         }
@@ -344,8 +344,8 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Returns this instance's children in insertion order.
     fn children(&self) -> &[Box<dyn Instance>];
 
-    /// Returns mutable access to this instance's children.
-    fn children_mut(&mut self) -> &mut [Box<dyn Instance>];
+    /// Iterates over mutable access to this instance's children.
+    fn children_mut(&mut self) -> ChildrenMut<'_>;
 
     /// Removes a direct child by its stable identifier.
     #[doc(hidden)]
@@ -383,10 +383,7 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// [`Instance::id`] if the handle must outlive the borrow.
     fn add_child_box_ref(&mut self, child: Box<dyn Instance>) -> &mut dyn Instance {
         self.add_child_box(child);
-        self.children_mut()
-            .last_mut()
-            .expect("just pushed child")
-            .as_mut()
+        self.children_mut().next_back().expect("just pushed child")
     }
 
     /// Adds an owned child and returns the child's stable identifier.
@@ -489,7 +486,7 @@ pub trait Instance: Any + Debug + InstanceClone {
     fn find_descendant_mut(&mut self, id: InstanceId) -> Option<&mut dyn Instance> {
         for child in self.children_mut() {
             if child.id() == id {
-                return Some(child.as_mut());
+                return Some(child);
             }
             if let Some(found) = child.find_descendant_mut(id) {
                 return Some(found);
@@ -519,11 +516,36 @@ fn find_child_mut<'a, T: Instance>(
             let id = child.id();
             return Some((id, child.downcast_mut::<T>()?));
         }
-        if let Some(found) = find_child_mut::<T>(child.as_mut(), name) {
+        if let Some(found) = find_child_mut::<T>(child, name) {
             return Some(found);
         }
     }
     None
+}
+
+/// Mutable iterator over an instance's direct children.
+pub struct ChildrenMut<'a> {
+    inner: std::slice::IterMut<'a, Box<dyn Instance>>,
+}
+
+impl<'a> ChildrenMut<'a> {
+    fn new(inner: std::slice::IterMut<'a, Box<dyn Instance>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<'a> Iterator for ChildrenMut<'a> {
+    type Item = &'a mut dyn Instance;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(Box::as_mut)
+    }
+}
+
+impl DoubleEndedIterator for ChildrenMut<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(Box::as_mut)
+    }
 }
 
 /// Depth-first iterator over an instance's descendants.
@@ -761,6 +783,23 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["model", "part", "Camera"]
         );
+    }
+
+    #[test]
+    fn mutable_children_are_iterated_without_exposing_the_backing_slice() {
+        let mut workspace = Workspace::new();
+        let first_id = Part::new("first").set_parent(&mut workspace);
+        let second_id = Part::new("second").set_parent(&mut workspace);
+
+        {
+            let mut children = workspace.children_mut();
+            assert_eq!(children.next().expect("first child").id(), first_id);
+            assert_eq!(children.next_back().expect("second child").id(), second_id);
+            assert!(children.next().is_none());
+        }
+
+        assert!(workspace.remove_child(first_id));
+        assert!(workspace.instance(second_id).is_some());
     }
 
     #[test]
