@@ -152,24 +152,36 @@ const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 3;
 struct MaterialSetKey([[u32; 9]; MATERIAL_SLOT_COUNT]);
 
 impl MaterialSetKey {
+    fn base_bits(material: &Material) -> [u32; 9] {
+        [
+            material.base_color[0].to_bits(),
+            material.base_color[1].to_bits(),
+            material.base_color[2].to_bits(),
+            material.base_color[3].to_bits(),
+            material.metallic.to_bits(),
+            material.roughness.to_bits(),
+            material.emissive[0].to_bits(),
+            material.emissive[1].to_bits(),
+            material.emissive[2].to_bits(),
+        ]
+    }
+
+    /// A uniform set where every face uses the base material: the common case
+    /// for parts without slot overrides.
+    fn uniform(base: [u32; 9]) -> Self {
+        Self([base; MATERIAL_SLOT_COUNT])
+    }
+
     fn from_part(part: &Part) -> Self {
+        if part.material_slots.slots.is_empty() {
+            return Self::uniform(Self::base_bits(&part.material));
+        }
         let mut slots = [[0u32; 9]; MATERIAL_SLOT_COUNT];
         for (index, slot) in std::iter::once(MaterialSlot::Base)
             .chain(MaterialSlot::ALL_DIRECTIONS)
             .enumerate()
         {
-            let material = part.material_slot(slot);
-            slots[index] = [
-                material.base_color[0].to_bits(),
-                material.base_color[1].to_bits(),
-                material.base_color[2].to_bits(),
-                material.base_color[3].to_bits(),
-                material.metallic.to_bits(),
-                material.roughness.to_bits(),
-                material.emissive[0].to_bits(),
-                material.emissive[1].to_bits(),
-                material.emissive[2].to_bits(),
-            ];
+            slots[index] = Self::base_bits(part.material_slot(slot));
         }
         Self(slots)
     }
@@ -256,6 +268,11 @@ pub struct Renderer {
     material_factors_bind_group: wgpu::BindGroup,
     material_factor_vec4s: Vec<[f32; 4]>,
     material_factor_indices: HashMap<MaterialSetKey, u32>,
+    /// Hot cache for consecutive parts sharing one material set.
+    material_factor_last: Option<(MaterialSetKey, u32)>,
+    /// Hot cache for the override-free case, comparing only the 9
+    /// base-material words instead of the full 63-word key.
+    material_factor_last_uniform: Option<([u32; 9], u32)>,
     textures: Vec<GpuTexture>,
     workspace_texture_handles: HashMap<(InstanceId, TextureHandle), GpuTextureHandle>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,
@@ -651,6 +668,8 @@ impl Renderer {
             material_factors_bind_group,
             material_factor_vec4s: Vec::new(),
             material_factor_indices: HashMap::new(),
+            material_factor_last: None,
+            material_factor_last_uniform: None,
             textures,
             workspace_texture_handles: HashMap::new(),
             texture_dedup,
@@ -844,7 +863,32 @@ impl Renderer {
     }
 
     fn material_set_index(&mut self, part: &Part) -> u32 {
+        // Fast path: no overrides means every face uses the base material, so
+        // only the 9 base words need comparing.
+        if part.material_slots.slots.is_empty() {
+            let base = MaterialSetKey::base_bits(&part.material);
+            if let Some((last_base, index)) = self.material_factor_last_uniform
+                && last_base == base
+            {
+                return index;
+            }
+            let key = MaterialSetKey::uniform(base);
+            let index = self.material_set_index_uncached(key);
+            self.material_factor_last_uniform = Some((base, index));
+            return index;
+        }
         let key = MaterialSetKey::from_part(part);
+        if let Some((last_key, index)) = self.material_factor_last
+            && last_key == key
+        {
+            return index;
+        }
+        let index = self.material_set_index_uncached(key);
+        self.material_factor_last = Some((key, index));
+        index
+    }
+
+    fn material_set_index_uncached(&mut self, key: MaterialSetKey) -> u32 {
         if let Some(&index) = self.material_factor_indices.get(&key) {
             return index;
         }
