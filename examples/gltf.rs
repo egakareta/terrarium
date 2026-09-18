@@ -44,3 +44,12 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
     assert!(max_channel_difference > 32);
     Ok(())
 }
+
+#[test]
+fn baseline() -> Result<(), terrarium::AppCreationError> {
+    AppBuilder::new()
+        .with_size([128, 128])
+        .with_headless(Some(1))
+        .run(|_, _| Ok::<(), terrarium::AppCreationError>(()))?;
+    Ok(())
+}
