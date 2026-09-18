@@ -111,7 +111,7 @@ pub struct Skybox {
 }
 
 /// Embedded default skybox: a 4x3 cross layout with 512-pixel faces.
-const DEFAULT_SKYBOX_CROSS_PNG: &[u8] = include_bytes!("bin/Cubemap_Sky_01-512x512.png");
+const DEFAULT_SKYBOX_CROSS_BYTES: &[u8] = include_bytes!("bin/Cubemap_Sky_01-512x512.webp");
 
 impl Skybox {
     /// Builds a skybox from six square face images of equal size.
@@ -250,7 +250,7 @@ impl Skybox {
 impl Default for Skybox {
     /// Returns an embedded default skybox.
     fn default() -> Self {
-        Self::from_cross(Image::from_bytes(DEFAULT_SKYBOX_CROSS_PNG).unwrap()).unwrap()
+        Self::from_cross(Image::from_bytes(DEFAULT_SKYBOX_CROSS_BYTES).unwrap()).unwrap()
     }
 }
 
