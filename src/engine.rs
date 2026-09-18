@@ -221,6 +221,35 @@ impl Engine {
         (config.wgpu_options)(&mut wgpu_options);
         #[cfg(not(target_arch = "wasm32"))]
         {
+            if config.headless {
+                let instance = pollster::block_on(wgpu_options.wgpu_setup.new_instance());
+                let render_state = pollster::block_on(egui_wgpu::RenderState::create(
+                    &wgpu_options,
+                    &instance,
+                    None,
+                    egui_wgpu::RendererOptions::default(),
+                ))?;
+                let context = egui::Context::default();
+                let mut creation_context = eframe::CreationContext::_new_kittest(context.clone());
+                creation_context.wgpu_render_state = Some(render_state);
+                let mut app = app_creator(&creation_context).map_err(eframe::Error::AppCreation)?;
+                let mut frame = eframe::Frame::_new_kittest();
+                let mut raw_input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(config.size[0] as f32, config.size[1] as f32),
+                    )),
+                    ..Default::default()
+                };
+                app.raw_input_hook(&context, &mut raw_input);
+                let mut output = context.run_ui(raw_input, |ui| {
+                    app.logic(ui.ctx(), &mut frame);
+                    app.ui(ui, &mut frame);
+                });
+                output.textures_delta.clear();
+                return Ok(());
+            }
+
             let native_options = eframe::NativeOptions {
                 renderer: eframe::Renderer::Wgpu,
                 viewport: egui::ViewportBuilder::default()
@@ -228,20 +257,6 @@ impl Engine {
                     .with_inner_size([config.size[0] as f32, config.size[1] as f32]),
                 wgpu_options,
                 ..Default::default()
-            };
-
-            #[cfg(target_os = "linux")]
-            let native_options = {
-                let mut native_options = native_options;
-                native_options.event_loop_builder = Some(Box::new(|builder| {
-                    use winit::platform::{
-                        wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11,
-                    };
-
-                    EventLoopBuilderExtWayland::with_any_thread(builder, true);
-                    EventLoopBuilderExtX11::with_any_thread(builder, true);
-                }));
-                native_options
             };
 
             eframe::run_native(config.title, native_options, app_creator)
@@ -360,7 +375,6 @@ impl App for () {}
 struct AppAdapter<A> {
     engine: EngineSlot,
     app: A,
-    close_after_first_frame: bool,
 }
 
 fn with_engine<R>(slot: &EngineSlot, f: impl FnOnce(&mut Engine) -> R) -> R {
@@ -389,10 +403,6 @@ impl<A: App> eframe::App for AppAdapter<A> {
         with_engine(&self.engine, |engine| {
             self.app.render(engine, ui, frame);
         });
-        if self.close_after_first_frame {
-            self.close_after_first_frame = false;
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-        }
     }
 
     fn raw_input_hook(&mut self, context: &egui::Context, raw_input: &mut egui::RawInput) {
@@ -434,7 +444,8 @@ pub struct AppConfig<'a> {
     canvas_id: &'a str,
     wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
     env_logger: bool,
-    close_after_first_frame: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    headless: bool,
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook: bool,
 }
@@ -448,7 +459,8 @@ impl<'a> Default for AppConfig<'a> {
             canvas_id: "app",
             wgpu_options: Box::new(|_| {}),
             env_logger: true,
-            close_after_first_frame: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            headless: false,
             #[cfg(target_arch = "wasm32")]
             console_error_panic_hook: true,
         }
@@ -476,7 +488,6 @@ impl<'a> AppConfig<'a> {
         E: Into<AppCreationError>,
     {
         let size = self.size;
-        let close_after_first_frame = self.close_after_first_frame;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
 
         let app_engine_slot = engine_slot.clone();
@@ -492,7 +503,6 @@ impl<'a> AppConfig<'a> {
                 Ok(Box::new(AppAdapter {
                     engine: app_engine_slot.clone(),
                     app,
-                    close_after_first_frame,
                 }))
             }),
         )?;
@@ -500,13 +510,23 @@ impl<'a> AppConfig<'a> {
         Ok(take_engine(engine_slot))
     }
 
-    /// Closes the native window after the first rendered frame.
+    /// Runs one headless frame instead of opening a native window.
     ///
-    /// This is useful for short-lived rendering checks that need to inspect the initialized
-    /// engine after [`Self::run`] returns. It has no useful effect on web applications.
-    pub fn with_close_after_first_frame(mut self) -> Self {
-        self.close_after_first_frame = true;
-        self
+    /// This is useful for short-lived rendering checks that run on test worker threads and need to
+    /// inspect the initialized engine after [`Self::run`] returns. It has no useful effect on web
+    /// applications.
+    pub fn with_headless(self) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut this = self;
+            this.headless = true;
+            this
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            self
+        }
     }
 
     /// The application title on native platforms.

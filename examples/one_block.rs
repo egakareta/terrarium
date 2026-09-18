@@ -6,7 +6,7 @@ use terrarium::{
 fn create_app() -> Result<Option<Engine>, AppCreationError> {
     let config = AppConfig::new().with_canvas_id("the_canvas_id");
     #[cfg(test)]
-    let config = config.with_size([128, 128]).with_close_after_first_frame();
+    let config = config.with_size([128, 128]).with_headless();
 
     config.run(|_creation_context, engine| -> Result<(), TextureError> {
         engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
