@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::OnceLock;
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
@@ -14,6 +16,9 @@ use crate::{
 
 const SHADOW_MAP_SIZE: u32 = 3072;
 const SHADOW_CASCADE_COUNT: usize = 7;
+// Keep native backend code loaded until thread-local driver state is gone.
+#[cfg(not(target_arch = "wasm32"))]
+static WGPU_INSTANCE_KEEPALIVE: OnceLock<wgpu::Instance> = OnceLock::new();
 const VISIBILITY_MASK_COUNT: usize = 1 << (SHADOW_CASCADE_COUNT + 1);
 const CULL_GROUP_SIZE: usize = 64;
 const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
@@ -361,6 +366,8 @@ impl Renderer {
         size: [u32; 2],
     ) -> Result<Self, RendererError> {
         let format = render_state.target_format;
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = WGPU_INSTANCE_KEEPALIVE.set(render_state.instance.clone());
         let width = size[0].max(1);
         let height = size[1].max(1);
         let device = render_state.device.clone();
