@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Skybox, Texture,
-    TextureError, TextureHandle, TweenManager,
+    Camera, CameraController, GltfError, Instance, InstanceData, InstanceId, InstanceLookup,
+    MeshHandle, MeshPart, MeshSource, Skybox, Texture, TextureError, TextureHandle, TweenManager,
 };
 
-/// The 3D root that owns its child [`Instance`] values, CPU textures, and active camera.
+/// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
 #[derive(Debug)]
 pub struct Workspace {
     instance: Box<InstanceData>,
@@ -13,6 +13,7 @@ pub struct Workspace {
     pub current_camera: Camera,
     camera_controller: CameraController,
     tween_manager: TweenManager,
+    meshes: Vec<MeshHandle>,
     textures: Vec<Texture>,
     texture_revisions: Vec<u64>,
     texture_revision: u64,
@@ -33,6 +34,7 @@ impl Workspace {
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
+            meshes: Vec::new(),
             textures: Vec::new(),
             texture_revisions: Vec::new(),
             texture_revision: 0,
@@ -40,6 +42,32 @@ impl Workspace {
             skybox_revision: 1,
             lookup,
         }
+    }
+
+    /// Takes ownership of mesh data or imports a glTF document and returns its mesh handle.
+    ///
+    /// A handle can be cloned and passed to multiple [`MeshPart`] values. Each
+    /// part gets independent transforms and material overrides while sharing
+    /// the registered geometry. Imported glTF materials are copied into each
+    /// part when it is constructed.
+    pub fn add_mesh<'a>(
+        &mut self,
+        source: impl Into<MeshSource<'a>>,
+    ) -> Result<MeshHandle, GltfError> {
+        let handle = match source.into() {
+            MeshSource::Data(mesh) => MeshHandle::from(mesh),
+            MeshSource::Gltf(bytes) => MeshPart::import_gltf(bytes, self)?,
+        };
+        self.meshes.push(handle.clone());
+        Ok(handle)
+    }
+
+    /// Returns the geometry referenced by a mesh handle owned by this workspace.
+    pub fn get_mesh(&self, handle: &MeshHandle) -> Option<&crate::Mesh> {
+        self.meshes
+            .iter()
+            .find(|registered| registered.same_asset(handle))
+            .map(MeshHandle::mesh)
     }
 
     /// Takes ownership of a validated CPU-side texture and returns its workspace handle.
@@ -249,6 +277,7 @@ impl Clone for Workspace {
             current_camera: self.current_camera.clone(),
             camera_controller: self.camera_controller.clone(),
             tween_manager: self.tween_manager.clone(),
+            meshes: self.meshes.clone(),
             textures: self.textures.clone(),
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
@@ -274,7 +303,23 @@ crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, Part, PartShape, TextureColorSpace};
+    use crate::{BasePart, Camera, Mesh, MeshPart, Part, PartShape, TextureColorSpace};
+
+    #[test]
+    fn workspace_mesh_handles_can_create_multiple_part_variants() {
+        let mut workspace = Workspace::new();
+        let handle = workspace.add_mesh(Mesh::block(1.0, [1.0; 4])).unwrap();
+
+        let first_id = workspace.add_child(MeshPart::new("first", handle.clone()));
+        let second_id = workspace.add_child(MeshPart::new("second", handle.clone()));
+
+        assert_eq!(workspace.get::<MeshPart>(first_id).unwrap().name(), "first");
+        assert_eq!(
+            workspace.get::<MeshPart>(second_id).unwrap().name(),
+            "second"
+        );
+        assert!(workspace.get_mesh(&handle).is_some());
+    }
 
     #[test]
     fn find_first_child_matches_the_requested_concrete_type() {

@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 use thiserror::Error;
@@ -81,7 +82,7 @@ pub enum GltfError {
 #[derive(Clone, Debug)]
 pub struct MeshPart {
     basepart: BasePart,
-    mesh: Mesh,
+    mesh: MeshHandle,
     mesh_revision: u64,
     bounding_radius: f32,
     /// Material assigned to mesh material slot zero.
@@ -89,32 +90,99 @@ pub struct MeshPart {
     pub(crate) material_slots: MeshMaterialSlots,
 }
 
+/// A mesh source accepted by [`crate::Workspace::add_mesh`].
+pub enum MeshSource<'a> {
+    /// Caller-provided CPU-side geometry.
+    Data(Mesh),
+    /// A glTF 2.0 document, including embedded images and buffers.
+    Gltf(&'a [u8]),
+}
+
+impl<'a> From<Mesh> for MeshSource<'a> {
+    fn from(mesh: Mesh) -> Self {
+        Self::Data(mesh)
+    }
+}
+
+impl<'a> From<&'a [u8]> for MeshSource<'a> {
+    fn from(bytes: &'a [u8]) -> Self {
+        Self::Gltf(bytes)
+    }
+}
+
+impl<'a, const N: usize> From<&'a [u8; N]> for MeshSource<'a> {
+    fn from(bytes: &'a [u8; N]) -> Self {
+        Self::Gltf(bytes)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MeshAsset {
+    mesh: Mesh,
+    material: Material,
+    material_slots: MeshMaterialSlots,
+}
+
+/// A handle to a mesh asset stored in a [`crate::Workspace`].
+///
+/// Cloning the handle is cheap and creates another independent [`MeshPart`]
+/// variant when passed to [`MeshPart::new`].
+#[derive(Clone, Debug)]
+pub struct MeshHandle(Arc<MeshAsset>);
+
+impl MeshHandle {
+    fn from_parts(mesh: Mesh, material: Material, material_slots: MeshMaterialSlots) -> Self {
+        Self(Arc::new(MeshAsset {
+            mesh,
+            material,
+            material_slots,
+        }))
+    }
+
+    /// Returns the CPU-side geometry in this mesh asset.
+    pub fn mesh(&self) -> &Mesh {
+        &self.0.mesh
+    }
+
+    pub(crate) fn same_asset(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl From<Mesh> for MeshHandle {
+    fn from(mesh: Mesh) -> Self {
+        Self::from_parts(mesh, Material::default(), MeshMaterialSlots::default())
+    }
+}
+
 impl MeshPart {
-    /// Creates a visible mesh part from CPU-side geometry.
-    pub fn new(name: impl Into<String>, mesh: Mesh) -> Self {
-        let bounding_radius = mesh_bounding_radius(&mesh);
+    /// Creates a visible mesh part from a registered mesh asset or raw geometry.
+    ///
+    /// Passing a cloned [`MeshHandle`] creates an independent part variant that
+    /// shares the underlying mesh data while retaining its own transform and
+    /// material overrides.
+    pub fn new<M>(name: impl Into<String>, mesh: M) -> Self
+    where
+        M: Into<MeshHandle>,
+    {
+        let mesh = mesh.into();
+        let bounding_radius = mesh_bounding_radius(mesh.mesh());
+        let material = mesh.0.material;
+        let material_slots = mesh.0.material_slots.clone();
         Self {
             basepart: BasePart::new(name),
             mesh,
             mesh_revision: 0,
             bounding_radius,
-            material: Material::default(),
-            material_slots: MeshMaterialSlots::default(),
+            material,
+            material_slots,
         }
     }
 
-    /// Imports a glTF 2.0 document from memory and flattens its selected scene
-    /// into one mesh part.
-    ///
-    /// Binary GLB files and glTF files with embedded data are supported on all
-    /// targets. Relative external resource paths are resolved by the `gltf`
-    /// importer against the process working directory. Imported PBR textures
-    /// are added to `workspace` and referenced by the returned materials.
-    pub fn from_gltf(
-        name: impl Into<String>,
+    pub(crate) fn import_gltf(
         bytes: &[u8],
         workspace: &mut Workspace,
-    ) -> Result<Self, GltfError> {
+    ) -> Result<MeshHandle, GltfError> {
         let (document, buffers, images) = gltf::import_slice(bytes)?;
         let scene = document
             .default_scene()
@@ -150,28 +218,38 @@ impl MeshPart {
             )?);
         }
 
-        let mut meshpart = Self::new(name, Mesh::new(vertices, indices));
-        if let Some(material) = materials.first().copied() {
-            meshpart.material = material;
+        let mut material = Material::default();
+        let mut material_slots = MeshMaterialSlots::default();
+        if let Some(imported_material) = materials.first().copied() {
+            material = imported_material;
         }
         for (slot, material) in MaterialSlot::ALL_DIRECTIONS
             .into_iter()
             .zip(materials.into_iter().skip(1))
         {
-            meshpart.set_material_slot(slot, material);
+            material_slots.set(slot, material);
         }
-        Ok(meshpart)
+        Ok(MeshHandle::from_parts(
+            Mesh::new(vertices, indices),
+            material,
+            material_slots,
+        ))
     }
 
     /// Returns the CPU-side geometry rendered by this mesh part.
     pub fn mesh(&self) -> &Mesh {
+        self.mesh.mesh()
+    }
+
+    /// Returns the shared mesh asset used by this part.
+    pub fn mesh_handle(&self) -> &MeshHandle {
         &self.mesh
     }
 
     /// Replaces the geometry and schedules it for upload before the next frame.
     pub fn set_mesh(&mut self, mesh: Mesh) {
         self.bounding_radius = mesh_bounding_radius(&mesh);
-        self.mesh = mesh;
+        self.mesh = MeshHandle::from_parts(mesh, self.material, self.material_slots.clone());
         self.mesh_revision = self.mesh_revision.wrapping_add(1);
     }
 
@@ -695,8 +773,10 @@ mod tests {
 
         for (name, bytes) in assets {
             let mut workspace = Workspace::new();
-            let meshpart = MeshPart::from_gltf(name, bytes, &mut workspace)
+            let mesh_handle = workspace
+                .add_mesh(bytes)
                 .unwrap_or_else(|error| panic!("failed to import {name}: {error}"));
+            let meshpart = MeshPart::new(name, mesh_handle.clone());
             let mesh = meshpart.mesh();
 
             assert!(!mesh.vertices.is_empty(), "{name} has no vertices");
@@ -746,6 +826,11 @@ mod tests {
             let loaded = workspace.get::<MeshPart>(id).unwrap();
             assert_eq!(loaded.class_name(), "MeshPart");
             assert_eq!(loaded.name(), name);
+            let vertex_count = loaded.mesh().vertices.len();
+            let variant_id = workspace.add_child(MeshPart::new(name, mesh_handle.clone()));
+            let variant = workspace.get::<MeshPart>(variant_id).unwrap();
+            assert_eq!(variant.mesh().vertices.len(), vertex_count);
+            assert!(workspace.get_mesh(&mesh_handle).is_some());
         }
     }
 }

@@ -5,11 +5,8 @@ fn initialize(
     engine: &mut Engine,
 ) -> Result<(), GltfError> {
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-    let mut helmet = MeshPart::from_gltf(
-        "DamagedHelmet",
-        include_bytes!("../assets/DamagedHelmet.glb"),
-        &mut engine.workspace,
-    )?;
+    let helmet_mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
+    let mut helmet = MeshPart::new("DamagedHelmet", helmet_mesh);
     helmet.set_position(Vec3::new(0.0, 0.75, 0.0));
     engine.add_child(helmet);
     Ok(())

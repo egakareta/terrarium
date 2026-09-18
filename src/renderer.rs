@@ -125,9 +125,9 @@ impl InstanceRaw {
 
 /// A handle to mesh data stored on the GPU.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct MeshHandle(usize);
+pub struct GpuMeshHandle(usize);
 struct RenderBatch {
-    mesh: MeshHandle,
+    mesh: GpuMeshHandle,
     textures: MaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u8,
@@ -136,7 +136,7 @@ struct RenderBatch {
 }
 
 struct PreparedRenderBatch {
-    mesh: MeshHandle,
+    mesh: GpuMeshHandle,
     packed_textures: PackedMaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u8,
@@ -274,7 +274,7 @@ struct GpuMesh {
 #[derive(Clone, Copy)]
 struct CachedMeshPart {
     revision: u64,
-    handle: MeshHandle,
+    handle: GpuMeshHandle,
 }
 
 #[repr(C)]
@@ -378,9 +378,9 @@ pub struct Renderer {
     gpu_material_textures: Vec<GpuMaterialTexture>,
     instance_buffer: wgpu::Buffer,
     meshes: Vec<GpuMesh>,
-    primitive_meshes: [MeshHandle; PartShape::COUNT],
+    primitive_meshes: [GpuMeshHandle; PartShape::COUNT],
     meshpart_meshes: HashMap<InstanceId, CachedMeshPart>,
-    free_meshpart_meshes: Vec<MeshHandle>,
+    free_meshpart_meshes: Vec<GpuMeshHandle>,
     clear_color: wgpu::Color,
     last_frame: Instant,
     fps_timer: Instant,
@@ -390,7 +390,7 @@ pub struct Renderer {
     batch_scratch: Vec<RenderBatch>,
     batch_indices_scratch: HashMap<
         (
-            MeshHandle,
+            GpuMeshHandle,
             MaterialTextures,
             [TextureFilter; MATERIAL_SLOT_COUNT],
             u8,
@@ -1006,7 +1006,7 @@ impl Renderer {
             gpu_material_textures: Vec::new(),
             instance_buffer,
             meshes: Vec::new(),
-            primitive_meshes: [MeshHandle(usize::MAX); PartShape::COUNT],
+            primitive_meshes: [GpuMeshHandle(usize::MAX); PartShape::COUNT],
             meshpart_meshes: HashMap::new(),
             free_meshpart_meshes: Vec::new(),
             clear_color: wgpu::Color {
@@ -1194,9 +1194,9 @@ impl Renderer {
     }
 
     /// Uploads a custom mesh and returns its GPU handle.
-    pub fn add_mesh(&mut self, mesh: &Mesh) -> Result<MeshHandle, RendererError> {
+    pub fn add_mesh(&mut self, mesh: &Mesh) -> Result<GpuMeshHandle, RendererError> {
         let gpu_mesh = self.create_gpu_mesh(mesh)?;
-        let handle = MeshHandle(self.meshes.len());
+        let handle = GpuMeshHandle(self.meshes.len());
         self.meshes.push(gpu_mesh);
         Ok(handle)
     }
@@ -1232,7 +1232,7 @@ impl Renderer {
         })
     }
 
-    fn meshpart_mesh(&mut self, meshpart: &MeshPart) -> Result<MeshHandle, RendererError> {
+    fn meshpart_mesh(&mut self, meshpart: &MeshPart) -> Result<GpuMeshHandle, RendererError> {
         if let Some(cached) = self.meshpart_meshes.get(&meshpart.id())
             && cached.revision == meshpart.mesh_revision()
         {
@@ -1247,7 +1247,7 @@ impl Renderer {
             self.meshes[handle.0] = gpu_mesh;
             handle
         } else {
-            let handle = MeshHandle(self.meshes.len());
+            let handle = GpuMeshHandle(self.meshes.len());
             self.meshes.push(gpu_mesh);
             handle
         };
