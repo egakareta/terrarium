@@ -1,7 +1,7 @@
 use terrarium::{
     App, AppConfig, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape,
-    RendererError, Repeat, Texture, TextureColorSpace, TextureFilter, Tween, Workspace, eframe,
-    egui, glam::Vec3,
+    RendererError, Repeat, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui,
+    glam::Vec3,
 };
 
 struct FpsOverlay;
@@ -24,32 +24,36 @@ impl App for FpsOverlay {
     }
 }
 
-fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
-    let dirt = workspace.add_texture(Texture::from_bytes(
+fn initialize(
+    _creation_context: &eframe::CreationContext<'_>,
+    engine: &mut Engine,
+) -> Result<FpsOverlay, RendererError> {
+    engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
+    let dirt = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let cobblestone = workspace.add_texture(Texture::from_bytes(
+    let cobblestone = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/cobblestone.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let grass_top = workspace.add_texture(Texture::from_bytes(
+    let grass_top = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/grass_top.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let grass_side = workspace.add_texture(
+    let grass_side = engine.add_texture(
         Texture::from_bytes(
             include_bytes!("../assets/grass_side.png"),
             TextureColorSpace::Srgb,
         )?
         .rotate180(),
     )?;
-    let festival_lantern = workspace.add_texture(Texture::from_bytes(
+    let festival_lantern = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
 
-    let ground = workspace.add_child_with_ref(Part::new("Ground"), |part| {
+    let ground = engine.add_child_with_ref(Part::new("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
@@ -68,7 +72,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         });
     }
 
-    let tower = workspace.add_child_with(Part::unnamed(), |part| {
+    let tower = engine.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Cylinder;
         part.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
@@ -84,7 +88,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
     });
 
-    workspace.add_child_with(Part::new("GrassBlock"), |part| {
+    engine.add_child_with(Part::new("GrassBlock"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
@@ -106,7 +110,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         part.set_material_slot(MaterialSlot::Right, grass_side);
     });
 
-    let platform = workspace.add_child_with(Part::unnamed(), |part| {
+    let platform = engine.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
@@ -115,7 +119,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         part.material.roughness = 0.82;
     });
 
-    let orb = workspace.add_child_with(Part::unnamed(), |part| {
+    let orb = engine.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Ball;
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
@@ -124,7 +128,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         part.can_collide = false;
     });
 
-    workspace.add_child_with(Part::unnamed(), |part| {
+    engine.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Wedge;
         part.set_position(Vec3::new(2.7, 1.5, 2.2));
         part.size = Vec3::new(1.1, 3.0, 1.1);
@@ -132,7 +136,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
-    workspace.add_child_with(Part::unnamed(), |part| {
+    engine.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::CornerWedge;
         part.set_position(Vec3::new(-4.7, 0.6, 3.1));
         part.size = Vec3::new(1.8, 1.2, 1.8);
@@ -152,15 +156,15 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
     )
     .easing(Easing::EaseInOut)
     .repeat(Repeat::Forever);
-    workspace
+    engine
         .tweens_mut()
         .add_position(platform, platform_position);
-    workspace.tweens_mut().add_orientation(
+    engine.tweens_mut().add_orientation(
         platform,
         Tween::new(Vec3::ZERO, Vec3::new(0.0, 6480.0, 0.0), 6.0).repeat_forever(),
     );
 
-    workspace.tweens_mut().add_position(
+    engine.tweens_mut().add_position(
         tower,
         Tween::path(
             [
@@ -173,7 +177,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         .easing(Easing::EaseInOut)
         .repeat_forever(),
     );
-    workspace.tweens_mut().add_orientation(
+    engine.tweens_mut().add_orientation(
         tower,
         Tween::new(Vec3::new(0.0, -33.0, 0.0), Vec3::new(0.0, 273.0, 0.0), 8.4)
             .easing(Easing::Linear)
@@ -189,13 +193,13 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
             angle.sin() * 3.3,
         )
     });
-    workspace.tweens_mut().add_position(
+    engine.tweens_mut().add_position(
         orb,
         Tween::path(orbit_points, std::f32::consts::TAU / 0.8)
             .easing(Easing::EaseInOut)
             .repeat_forever(),
     );
-    workspace.tweens_mut().add_orientation(
+    engine.tweens_mut().add_orientation(
         orb,
         Tween::new(
             Vec3::ZERO,
@@ -204,15 +208,18 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
         )
         .repeat_forever(),
     );
-
-    Ok(())
+    Ok(FpsOverlay)
 }
 
 fn main() {
+    AppConfig::new().run(initialize).unwrap();
+}
+
+#[test]
+fn app_loads() -> Result<(), terrarium::AppCreationError> {
     AppConfig::new()
-        .run(|_creation_context, engine| {
-            engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
-            create_workspace(&mut engine.workspace).map(|()| FpsOverlay)
-        })
-        .unwrap();
+        .with_size([32, 32])
+        .with_headless(Some(1))
+        .run(initialize)?;
+    Ok(())
 }
