@@ -15,6 +15,37 @@ use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
 
 const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
 
+/// Name of the proportional font bundled in Terrarium.
+pub const PROPORTIONAL_FONT_NAME: &str = "Outfit";
+/// Name of the monospace font bundled in Terrarium.
+pub const MONOSPACE_FONT_NAME: &str = "SUSEMono";
+
+/// Returns [`egui`] font definitions using fonts bundled in Terrarium.
+pub fn font_definitions() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        PROPORTIONAL_FONT_NAME.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "fonts/Outfit-VariableFont_wght.ttf"
+        ))),
+    );
+    fonts.font_data.insert(
+        MONOSPACE_FONT_NAME.to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+            "fonts/SUSEMono-VariableFont_wght.ttf"
+        ))),
+    );
+    fonts.families.insert(
+        egui::FontFamily::Proportional,
+        vec![PROPORTIONAL_FONT_NAME.to_owned()],
+    );
+    fonts.families.insert(
+        egui::FontFamily::Monospace,
+        vec![MONOSPACE_FONT_NAME.to_owned()],
+    );
+    fonts
+}
+
 /// Error returned while creating an application.
 pub type AppCreationError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -448,6 +479,7 @@ pub struct AppConfig<'a> {
     headless: bool,
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook: bool,
+    bundle_fonts: bool,
 }
 
 impl<'a> Default for AppConfig<'a> {
@@ -463,6 +495,7 @@ impl<'a> Default for AppConfig<'a> {
             headless: false,
             #[cfg(target_arch = "wasm32")]
             console_error_panic_hook: true,
+            bundle_fonts: true,
         }
     }
 }
@@ -488,12 +521,16 @@ impl<'a> AppConfig<'a> {
         E: Into<AppCreationError>,
     {
         let size = self.size;
+        let is_bundled_fonts = self.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
 
         let app_engine_slot = engine_slot.clone();
         Engine::start(
             self,
             Box::new(move |creation_context| {
+                if is_bundled_fonts {
+                    creation_context.egui_ctx.set_fonts(font_definitions());
+                }
                 let engine = Engine::new(creation_context, size)?;
                 store_engine(&app_engine_slot, engine);
                 let app = with_engine(&app_engine_slot, |engine| {
@@ -590,5 +627,13 @@ impl<'a> AppConfig<'a> {
             let _ = enabled;
             self
         }
+    }
+
+    /// Whether to install Terrarium's bundled fonts.
+    ///
+    /// By default, this is enabled.
+    pub fn with_bundled_fonts(mut self, enabled: bool) -> Self {
+        self.bundle_fonts = enabled;
+        self
     }
 }
