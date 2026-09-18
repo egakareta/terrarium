@@ -1,10 +1,10 @@
 use terrarium::{
-    AppCreationError, Instance, Material, MaterialSlot, Part, PartShape, RunConfig, RunResult,
+    AppConfig, AppCreationError, Engine, Instance, Material, MaterialSlot, Part, PartShape,
     Texture, TextureColorSpace, TextureError, glam::Vec3,
 };
 
-fn create_app() -> Result<RunResult, AppCreationError> {
-    let config = RunConfig::new().with_canvas_id("the_canvas_id");
+fn create_app() -> Result<Option<Engine>, AppCreationError> {
+    let config = AppConfig::new().with_canvas_id("the_canvas_id");
     #[cfg(test)]
     let config = config.with_size([128, 128]).with_close_after_first_frame();
 

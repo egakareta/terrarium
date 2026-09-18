@@ -212,7 +212,7 @@ impl Engine {
         Ok(())
     }
 
-    fn start(config: RunConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+    fn start(config: AppConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         if config.env_logger {
             env_logger::init();
         }
@@ -427,7 +427,7 @@ impl DerefMut for Engine {
 }
 
 /// Options controlling the behavior of the window.
-pub struct RunConfig<'a> {
+pub struct AppConfig<'a> {
     title: &'a str,
     size: [u32; 2],
     #[cfg(target_arch = "wasm32")]
@@ -439,7 +439,7 @@ pub struct RunConfig<'a> {
     console_error_panic_hook: bool,
 }
 
-impl<'a> Default for RunConfig<'a> {
+impl<'a> Default for AppConfig<'a> {
     fn default() -> Self {
         Self {
             title: "app",
@@ -455,16 +455,7 @@ impl<'a> Default for RunConfig<'a> {
     }
 }
 
-/// The result of running an application through [`RunConfig`].
-pub struct RunResult {
-    /// The engine created for the application, when it was initialized before `run` returned.
-    ///
-    /// This is `Some` for native runs that reached application creation. Web runs return before
-    /// their asynchronous application creation completes, so this is `None` there.
-    pub engine: Option<Engine>,
-}
-
-impl<'a> RunConfig<'a> {
+impl<'a> AppConfig<'a> {
     /// Equivalent to [`RunConfig::default`].
     pub fn new() -> Self {
         Self::default()
@@ -474,10 +465,12 @@ impl<'a> RunConfig<'a> {
     ///
     /// The configured window size is used as the renderer's fallback size. Return `()` from the
     /// initializer when no additional application behavior is needed.
+    ///
+    /// Returns the created engine on native platforms, [`None`] on web platforms.
     pub fn run<A, E>(
         self,
         initialize: impl FnOnce(&eframe::CreationContext<'_>, &mut Engine) -> Result<A, E> + 'static,
-    ) -> Result<RunResult, AppCreationError>
+    ) -> Result<Option<Engine>, AppCreationError>
     where
         A: App,
         E: Into<AppCreationError>,
@@ -504,9 +497,7 @@ impl<'a> RunConfig<'a> {
             }),
         )?;
 
-        Ok(RunResult {
-            engine: take_engine(engine_slot),
-        })
+        Ok(take_engine(engine_slot))
     }
 
     /// Closes the native window after the first rendered frame.

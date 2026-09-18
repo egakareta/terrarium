@@ -1,7 +1,7 @@
 use terrarium::{
-    App, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
-    Repeat, RunConfig, Texture, TextureColorSpace, TextureFilter, Tween, Workspace, eframe, egui,
-    glam::Vec3,
+    App, AppConfig, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape,
+    RendererError, Repeat, Texture, TextureColorSpace, TextureFilter, Tween, Workspace, eframe,
+    egui, glam::Vec3,
 };
 
 struct FpsOverlay;
@@ -209,7 +209,7 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
 }
 
 fn main() {
-    RunConfig::new()
+    AppConfig::new()
         .with_title("App")
         .with_canvas_id("the_canvas_id")
         .run(|_creation_context, engine| {
