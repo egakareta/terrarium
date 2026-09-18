@@ -8,9 +8,9 @@ use thiserror::Error;
 use web_time::Instant;
 
 use crate::{
-    Camera, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, MaterialSlot,
-    Mesh, MeshMaterialSlots, MeshPart, Part, PartShape, Texture, TextureColorSpace, TextureError,
-    TextureFilter, TextureHandle, Vertex, Workspace,
+    Camera, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material,
+    MaterialSlot, Mesh, MeshMaterialSlots, MeshPart, Part, PartShape, Skybox, SkyboxError, Texture,
+    TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
@@ -45,6 +45,9 @@ pub enum RendererError {
     /// A texture failed validation.
     #[error("invalid texture: {0}")]
     InvalidTexture(#[from] TextureError),
+    /// A skybox failed validation.
+    #[error("invalid skybox: {0}")]
+    InvalidSkybox(#[from] SkyboxError),
     /// A material referenced a texture that is not owned by its workspace.
     #[error("workspace texture handle {index} is not valid")]
     InvalidTextureHandle {
@@ -275,6 +278,35 @@ struct ShadowCameraUniform {
     light_view_projection: [[f32; 4]; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SkyboxCameraUniform {
+    view_projection: [[f32; 4]; 4],
+}
+
+/// Unit-cube corners shared by the skybox vertex buffer.
+const SKYBOX_VERTICES: [[f32; 3]; 8] = [
+    [-1.0, -1.0, -1.0],
+    [1.0, -1.0, -1.0],
+    [1.0, 1.0, -1.0],
+    [-1.0, 1.0, -1.0],
+    [-1.0, -1.0, 1.0],
+    [1.0, -1.0, 1.0],
+    [1.0, 1.0, 1.0],
+    [-1.0, 1.0, 1.0],
+];
+
+/// Cube triangles covering all six skybox faces (winding is irrelevant: the
+/// skybox pipeline disables face culling).
+const SKYBOX_INDICES: [u16; 36] = [
+    0, 1, 2, 0, 2, 3, // back (-Z)
+    4, 6, 5, 4, 7, 6, // front (+Z)
+    0, 3, 7, 0, 7, 4, // left (-X)
+    1, 5, 6, 1, 6, 2, // right (+X)
+    3, 2, 6, 3, 6, 7, // top (+Y)
+    0, 4, 5, 0, 5, 1, // bottom (-Y)
+];
+
 struct EframeSceneTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -299,6 +331,16 @@ pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     eframe_scene: EframeSceneTarget,
+    skybox_pipeline: wgpu::RenderPipeline,
+    skybox_bind_group_layout: wgpu::BindGroupLayout,
+    skybox_uniform_buffer: wgpu::Buffer,
+    skybox_sampler: wgpu::Sampler,
+    skybox_vertex_buffer: wgpu::Buffer,
+    skybox_index_buffer: wgpu::Buffer,
+    skybox_texture: Option<wgpu::Texture>,
+    skybox_view: Option<wgpu::TextureView>,
+    skybox_bind_group: Option<wgpu::BindGroup>,
+    skybox_revision: Option<u64>,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     shadow_camera_buffer: wgpu::Buffer,
@@ -699,6 +741,132 @@ impl Renderer {
             multiview_mask: None,
             cache: None,
         });
+        let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("skybox shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
+        });
+        let skybox_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("skybox bind group layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let skybox_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("skybox camera uniform buffer"),
+            size: std::mem::size_of::<SkyboxCameraUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let skybox_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("skybox sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 32.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+        let skybox_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("skybox cube vertex buffer"),
+            contents: bytemuck::cast_slice(&SKYBOX_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let skybox_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("skybox cube index buffer"),
+            contents: bytemuck::cast_slice(&SKYBOX_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+        let skybox_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("skybox pipeline layout"),
+                bind_group_layouts: &[Some(&skybox_bind_group_layout)],
+                immediate_size: 0,
+            });
+        // The skybox shader only declares FRAMEBUFFER_IS_SRGB: passing the
+        // mesh shader's SHADOW_MAP_SIZE override would fail pipeline creation.
+        let skybox_shader_constants = [("FRAMEBUFFER_IS_SRGB", shader_constants[0].1)];
+        let skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("skybox pipeline"),
+            layout: Some(&skybox_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &skybox_shader,
+                entry_point: Some("vs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &skybox_shader_constants,
+                    ..Default::default()
+                },
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x3],
+                })],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                // The camera sits inside the cube, so either winding can face
+                // the camera depending on the triangle.
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &skybox_shader,
+                entry_point: Some("fs_main"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &skybox_shader_constants,
+                    ..Default::default()
+                },
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
         let eframe_scene = EframeSceneTarget::new(&device, format, width, height);
 
         let mut renderer = Self {
@@ -714,6 +882,16 @@ impl Renderer {
             pipeline,
             shadow_pipeline,
             eframe_scene,
+            skybox_pipeline,
+            skybox_bind_group_layout,
+            skybox_uniform_buffer,
+            skybox_sampler,
+            skybox_vertex_buffer,
+            skybox_index_buffer,
+            skybox_texture: None,
+            skybox_view: None,
+            skybox_bind_group: None,
+            skybox_revision: None,
             camera_buffer,
             camera_bind_group,
             shadow_camera_buffer,
@@ -1562,6 +1740,20 @@ impl Renderer {
                 bytemuck::bytes_of(&uniform),
             );
         }
+        let mut sky_view = workspace.current_camera.pivot().inverse();
+        sky_view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
+        let sky_view_projection = workspace.current_camera.projection_matrix() * sky_view;
+        self.queue.write_buffer(
+            &self.skybox_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&SkyboxCameraUniform {
+                view_projection: sky_view_projection.to_cols_array_2d(),
+            }),
+        );
+        if self.skybox_revision != Some(workspace.skybox_revision()) {
+            self.sync_skybox(workspace.skybox())?;
+            self.skybox_revision = Some(workspace.skybox_revision());
+        }
         let camera_planes = frustum_planes(camera_vp);
         let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;
@@ -1971,7 +2163,116 @@ impl Renderer {
     }
 
     fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
+        self.draw_skybox(pass);
         self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, &[], true, 1);
+    }
+
+    fn draw_skybox<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
+        let Some(bind_group) = &self.skybox_bind_group else {
+            return;
+        };
+        pass.set_pipeline(&self.skybox_pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.set_vertex_buffer(0, self.skybox_vertex_buffer.slice(..));
+        pass.set_index_buffer(
+            self.skybox_index_buffer.slice(..),
+            wgpu::IndexFormat::Uint16,
+        );
+        pass.draw_indexed(0..SKYBOX_INDICES.len() as u32, 0, 0..1);
+    }
+
+    /// Rebuilds the GPU cubemap from the workspace skybox.
+    ///
+    /// A `None` skybox clears the GPU copy so the scene falls back to the
+    /// clear color. Faces are uploaded with a full mip chain generated on the
+    /// CPU, matching material texture filtering.
+    fn sync_skybox(&mut self, skybox: Option<&Skybox>) -> Result<(), RendererError> {
+        let Some(skybox) = skybox else {
+            self.skybox_texture = None;
+            self.skybox_view = None;
+            self.skybox_bind_group = None;
+            return Ok(());
+        };
+        let face_size = skybox.face_size();
+        let first = Texture::from_image(
+            skybox.face(CubemapFace::ALL[0]).clone(),
+            TextureColorSpace::Srgb,
+        )?;
+        let mip_levels = first.mip_levels()?;
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("skybox cubemap"),
+            size: wgpu::Extent3d {
+                width: face_size,
+                height: face_size,
+                depth_or_array_layers: CubemapFace::ALL.len() as u32,
+            },
+            mip_level_count: mip_levels.len() as u32,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for (layer, face) in CubemapFace::ALL.into_iter().enumerate() {
+            let face_texture = if layer == 0 {
+                first.clone()
+            } else {
+                Texture::from_image(skybox.face(face).clone(), TextureColorSpace::Srgb)?
+            };
+            for (level, mip) in face_texture.mip_levels()?.iter().enumerate() {
+                self.queue.write_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &texture,
+                        mip_level: level as u32,
+                        origin: wgpu::Origin3d {
+                            x: 0,
+                            y: 0,
+                            z: layer as u32,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    &mip.pixels,
+                    wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(mip.width * 4),
+                        rows_per_image: Some(mip.height),
+                    },
+                    wgpu::Extent3d {
+                        width: mip.width,
+                        height: mip.height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("skybox cubemap view"),
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            array_layer_count: Some(CubemapFace::ALL.len() as u32),
+            ..Default::default()
+        });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("skybox bind group"),
+            layout: &self.skybox_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.skybox_uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.skybox_sampler),
+                },
+            ],
+        });
+        self.skybox_texture = Some(texture);
+        self.skybox_view = Some(view);
+        self.skybox_bind_group = Some(bind_group);
+        Ok(())
     }
 
     fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>, cascade: usize) {
@@ -2733,6 +3034,19 @@ mod tests {
         validator
             .validate(&module)
             .expect("material shader should validate");
+    }
+
+    #[test]
+    fn skybox_shader_validates() {
+        let module = wgpu::naga::front::wgsl::parse_str(include_str!("skybox.wgsl"))
+            .expect("skybox shader should parse");
+        let mut validator = wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        );
+        validator
+            .validate(&module)
+            .expect("skybox shader should validate");
     }
 
     #[test]

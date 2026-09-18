@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Texture,
+    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Skybox, Texture,
     TextureError, TextureHandle, TweenManager,
 };
 
@@ -16,6 +16,8 @@ pub struct Workspace {
     textures: Vec<Texture>,
     texture_revisions: Vec<u64>,
     texture_revision: u64,
+    skybox: Option<Skybox>,
+    skybox_revision: u64,
     lookup: Rc<InstanceLookup>,
 }
 
@@ -34,6 +36,8 @@ impl Workspace {
             textures: Vec::new(),
             texture_revisions: Vec::new(),
             texture_revision: 0,
+            skybox: Some(Skybox::default()),
+            skybox_revision: 1,
             lookup,
         }
     }
@@ -96,6 +100,41 @@ impl Workspace {
         self.texture_revision = self.texture_revision.wrapping_add(1);
         self.texture_revisions[handle.0] = self.texture_revision;
         Ok(())
+    }
+
+    /// Returns the workspace skybox, if one is set.
+    ///
+    /// New workspaces default to an embedded cross-layout skybox.
+    /// When no skybox is set, the renderer clears to its clear color
+    /// instead.
+    pub fn skybox(&self) -> Option<&Skybox> {
+        self.skybox.as_ref()
+    }
+
+    /// Replaces the workspace skybox.
+    ///
+    /// The renderer re-uploads the six faces before the next frame.
+    pub fn set_skybox(&mut self, skybox: Skybox) {
+        self.skybox = Some(skybox);
+        self.skybox_revision = self.skybox_revision.wrapping_add(1);
+    }
+
+    /// Removes the workspace skybox.
+    ///
+    /// The renderer clears to its clear color until a new skybox is set.
+    pub fn clear_skybox(&mut self) {
+        self.skybox = None;
+        self.skybox_revision = self.skybox_revision.wrapping_add(1);
+    }
+
+    /// Returns the revision of the workspace skybox, bumped by every
+    /// [`set_skybox`](Self::set_skybox) and [`clear_skybox`](Self::clear_skybox)
+    /// call.
+    ///
+    /// The renderer uses this to re-upload the skybox faces before the next
+    /// frame. It is also useful for external caches keyed by skybox content.
+    pub fn skybox_revision(&self) -> u64 {
+        self.skybox_revision
     }
 
     /// Returns a descendant by ID, downcast to its concrete instance type.
@@ -213,6 +252,8 @@ impl Clone for Workspace {
             textures: self.textures.clone(),
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
+            skybox: self.skybox.clone(),
+            skybox_revision: self.skybox_revision,
             lookup: lookup.clone(),
         };
         for child in workspace.instance.children_mut() {
@@ -441,6 +482,33 @@ mod tests {
         assert_eq!(
             workspace.clone().get_texture(handle),
             workspace.get_texture(handle)
+        );
+    }
+
+    #[test]
+    fn workspace_defaults_to_the_embedded_skybox() {
+        use crate::{CubemapFace, Image, Skybox};
+
+        let workspace = Workspace::new();
+        let skybox = workspace.skybox().expect("default skybox is set");
+        assert_eq!(skybox.face_size(), 512);
+        assert!(skybox.face(CubemapFace::Front).pixels().len() == 512 * 512 * 4);
+
+        let mut workspace = workspace;
+        let revision = workspace.skybox_revision();
+        workspace.clear_skybox();
+        assert!(workspace.skybox().is_none());
+        assert_ne!(workspace.skybox_revision(), revision);
+
+        let pixels = vec![1, 2, 3, 255];
+        let faces = CubemapFace::ALL
+            .map(|_| Image::from_rgba8(1, 1, pixels.clone()).expect("1x1 test face is valid"));
+        workspace.set_skybox(Skybox::from_faces(faces).unwrap());
+        assert_eq!(workspace.skybox().unwrap().face_size(), 1);
+        assert_eq!(
+            workspace.clone().skybox().unwrap().face_size(),
+            1,
+            "cloned workspaces keep their skybox"
         );
     }
 
