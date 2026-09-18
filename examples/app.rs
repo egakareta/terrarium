@@ -5,19 +5,15 @@ use terrarium::{
 };
 
 struct App {
-    workspace: Workspace,
     framework: Framework,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, RendererError> {
-        let workspace = create_workspace()?;
         let mut framework = Framework::new(cc, [1280, 720])?;
         framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
-        Ok(Self {
-            workspace,
-            framework,
-        })
+        create_workspace(&mut framework.workspace)?;
+        Ok(Self { framework })
     }
 }
 
@@ -27,11 +23,11 @@ impl eframe::App for App {
     }
 
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.framework.update(ctx, &mut self.workspace);
+        self.framework.update(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if let Err(error) = self.framework.render(ui, &mut self.workspace) {
+        if let Err(error) = self.framework.render(ui) {
             log::error!("scene preparation failed: {error}");
         }
 
@@ -51,8 +47,7 @@ impl eframe::App for App {
     }
 }
 
-fn create_workspace() -> Result<Workspace, RendererError> {
-    let mut workspace = Workspace::new();
+fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
     let dirt = workspace.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
         TextureColorSpace::Srgb,
@@ -233,7 +228,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         .repeat_forever(),
     );
 
-    Ok(workspace)
+    Ok(())
 }
 
 fn main() {

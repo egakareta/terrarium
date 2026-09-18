@@ -1,5 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 use std::cell::{RefCell, RefMut};
+use std::ops::{Deref, DerefMut};
 #[cfg(target_arch = "wasm32")]
 use std::rc::{Rc, Weak};
 #[cfg(not(target_arch = "wasm32"))]
@@ -85,6 +86,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 /// Handles integration with [`eframe`].
 pub struct Framework {
     renderer: RendererHandle,
+    /// The [`Workspace`] rendered by this framework.
+    pub workspace: Workspace,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
     clear_color: [f32; 4],
@@ -122,6 +125,7 @@ impl Framework {
 
         Ok(Self {
             renderer,
+            workspace: Workspace::new(),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
             clear_color: DEFAULT_CLEAR_COLOR,
@@ -159,30 +163,26 @@ impl Framework {
     }
 
     /// Processes camera input, advances the workspace, and requests the next frame.
-    pub fn update(&self, context: &egui::Context, workspace: &mut Workspace) {
+    pub fn update(&mut self, context: &egui::Context) {
         let delta = context.input(|input| input.stable_dt.min(0.1));
-        context.input(|input| workspace.process_eframe_input(input));
-        workspace.update(delta);
+        context.input(|input| self.workspace.process_eframe_input(input));
+        self.workspace.update(delta);
         context.request_repaint();
     }
 
-    /// Prepares a workspace for the available eframe UI region.
-    pub fn prepare(
-        &self,
-        ui: &mut egui::Ui,
-        workspace: &mut Workspace,
-    ) -> Result<(), RendererError> {
+    /// Prepares the workspace for the available eframe UI region.
+    pub fn prepare(&mut self, ui: &mut egui::Ui) -> Result<(), RendererError> {
         let rect = ui.max_rect();
         let pixels_per_point = ui.pixels_per_point();
         let size = [
             (rect.width() * pixels_per_point).round().max(1.0) as u32,
             (rect.height() * pixels_per_point).round().max(1.0) as u32,
         ];
-        workspace.current_camera.resize(size[0], size[1]);
-        self.renderer().prepare_eframe_scene(workspace, size)
+        self.workspace.current_camera.resize(size[0], size[1]);
+        self.renderer().prepare_eframe_scene(&self.workspace, size)
     }
 
-    /// Registers the paint callback for a workspace prepared with [`Self::prepare`].
+    /// Registers the paint callback for the workspace prepared with [`Self::prepare`].
     pub fn paint(&self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
         #[cfg(not(target_arch = "wasm32"))]
@@ -197,13 +197,9 @@ impl Framework {
         ui.painter().add(egui::Shape::Callback(callback));
     }
 
-    /// Prepares and paints a workspace into the available eframe UI region.
-    pub fn render(
-        &self,
-        ui: &mut egui::Ui,
-        workspace: &mut Workspace,
-    ) -> Result<(), RendererError> {
-        self.prepare(ui, workspace)?;
+    /// Prepares and paints the workspace into the available eframe UI region.
+    pub fn render(&mut self, ui: &mut egui::Ui) -> Result<(), RendererError> {
+        self.prepare(ui)?;
         self.paint(ui);
         Ok(())
     }
@@ -268,6 +264,19 @@ impl Framework {
 impl Drop for Framework {
     fn drop(&mut self) {
         unregister_renderer(self.renderer_id);
+    }
+}
+
+impl Deref for Framework {
+    type Target = Workspace;
+    fn deref(&self) -> &Self::Target {
+        &self.workspace
+    }
+}
+
+impl DerefMut for Framework {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.workspace
     }
 }
 

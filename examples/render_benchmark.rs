@@ -53,7 +53,6 @@ struct Sample {
 struct App {
     config: Config,
     framework: Framework,
-    workspace: Workspace,
     base_camera_pivot: Mat4,
     part_ids: Vec<InstanceId>,
     base_parts: Vec<Part>,
@@ -73,12 +72,16 @@ struct App {
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Result<Self, RendererError> {
-        let (workspace, part_ids, upper_layer_extent, benchmark_materials) =
-            create_benchmark_workspace(config.parts, config.width, config.height)?;
-        let base_camera_pivot = workspace.current_camera.pivot();
-        let base_parts = workspace.get_all::<Part>().cloned().collect();
         let mut framework = Framework::new(cc, [config.width, config.height])?;
         framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
+        let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
+            &mut framework.workspace,
+            config.parts,
+            config.width,
+            config.height,
+        )?;
+        let base_camera_pivot = framework.current_camera.pivot();
+        let base_parts = framework.get_all::<Part>().cloned().collect();
         let random_state = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(1, |duration| duration.as_nanos() as u64)
@@ -86,7 +89,6 @@ impl App {
         let mut app = Self {
             config,
             framework,
-            workspace,
             base_camera_pivot,
             part_ids,
             base_parts,
@@ -168,7 +170,7 @@ impl App {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        self.workspace
+        self.framework
             .current_camera
             .pivot_to(Mat4::from_rotation_translation(
                 camera_rotation,
@@ -183,7 +185,7 @@ impl App {
             let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
-            if let Some(part) = self.workspace.get_mut::<Part>(id) {
+            if let Some(part) = self.framework.get_mut::<Part>(id) {
                 let (_, base_rotation, base_position) =
                     base.pivot().to_scale_rotation_translation();
                 let position = base_position
@@ -215,7 +217,7 @@ impl App {
     fn replace_upper_layer(&mut self) {
         let previous_layer = std::mem::take(&mut self.upper_layer_ids);
         for id in previous_layer {
-            if let Some(instance) = self.workspace.instance_mut(id) {
+            if let Some(instance) = self.framework.instance_mut(id) {
                 instance.destroy();
             }
         }
@@ -252,7 +254,7 @@ impl App {
                 block.set_material_slot(slot, material);
             }
             self.upper_layer_ids
-                .push(block.set_parent(&mut self.workspace));
+                .push(block.set_parent(&mut self.framework.workspace));
         }
     }
 
@@ -270,7 +272,7 @@ impl App {
     fn reset_part(&mut self, index: usize) {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
-        if let Some(part) = self.workspace.get_mut::<Part>(id) {
+        if let Some(part) = self.framework.get_mut::<Part>(id) {
             part.pivot_to(base.pivot());
             part.size = base.size;
             part.color = base.color;
@@ -301,7 +303,7 @@ impl eframe::App for App {
             return;
         }
         let started = self.logic_started.take().unwrap_or_else(Instant::now);
-        if let Err(error) = self.framework.prepare(ui, &mut self.workspace) {
+        if let Err(error) = self.framework.prepare(ui) {
             report_renderer_error(error);
             self.finished = true;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -314,16 +316,16 @@ impl eframe::App for App {
 }
 
 fn create_benchmark_workspace(
+    workspace: &mut Workspace,
     part_count: usize,
     width: u32,
     height: u32,
-) -> Result<(Workspace, Vec<InstanceId>, f32, Vec<Material>), RendererError> {
+) -> Result<(Vec<InstanceId>, f32, Vec<Material>), RendererError> {
     let side = (part_count as f64).sqrt().ceil() as usize;
     let spacing = 1.2;
     let extent = side as f32 * spacing;
     let camera_distance = extent * 1.25 + 5.0;
-    let mut workspace = Workspace::new();
-    let benchmark_materials = load_benchmark_materials(&mut workspace)?;
+    let benchmark_materials = load_benchmark_materials(workspace)?;
     workspace.current_camera = Camera::new(
         Vec3::new(0.0, camera_distance * 0.72, camera_distance),
         Vec3::ZERO,
@@ -363,16 +365,16 @@ fn create_benchmark_workspace(
                 benchmark_materials[(index / TEXTURED_PART_DIVISOR) % benchmark_materials.len()];
             part.set_material_slot(slot, material);
         }
-        part_ids.push(part.set_parent(&mut workspace));
+        part_ids.push(part.set_parent(workspace));
     }
 
     let mut floor = Part::unnamed();
     floor.pivot_to(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)));
     floor.size = Vec3::new(extent + spacing * 2.0, 0.1, extent + spacing * 2.0);
     floor.color = Color3::new(0.08, 0.10, 0.14);
-    floor.set_parent(&mut workspace);
+    floor.set_parent(workspace);
 
-    Ok((workspace, part_ids, extent, benchmark_materials))
+    Ok((part_ids, extent, benchmark_materials))
 }
 
 /// Loads one workspace texture per benchmark material so textured parts cycle
