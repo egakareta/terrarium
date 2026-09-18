@@ -30,14 +30,14 @@ pub fn font_definitions() -> egui::FontDefinitions {
     fonts.font_data.insert(
         PROPORTIONAL_FONT_NAME.to_owned(),
         Arc::new(
-            egui::FontData::from_static(include_bytes!("fonts/Outfit-VariableFont_wght.ttf"))
+            egui::FontData::from_static(include_bytes!("bin/Outfit-VariableFont_wght.ttf"))
                 .tweak(tweak.clone()),
         ),
     );
     fonts.font_data.insert(
         MONOSPACE_FONT_NAME.to_owned(),
         Arc::new(
-            egui::FontData::from_static(include_bytes!("fonts/SUSEMono-VariableFont_wght.ttf"))
+            egui::FontData::from_static(include_bytes!("bin/SUSEMono-VariableFont_wght.ttf"))
                 .tweak(tweak.clone()),
         ),
     );
