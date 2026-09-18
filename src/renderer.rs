@@ -48,6 +48,21 @@ pub enum RendererError {
     /// Waiting for GPU work failed.
     #[error("could not wait for submitted GPU work: {0}")]
     DevicePoll(#[from] wgpu::PollError),
+    /// A requested render-target pixel was outside the target dimensions.
+    #[error("pixel ({x}, {y}) is outside the render target {width}x{height}")]
+    InvalidPixel {
+        /// Horizontal pixel coordinate.
+        x: u32,
+        /// Vertical pixel coordinate.
+        y: u32,
+        /// Render-target width.
+        width: u32,
+        /// Render-target height.
+        height: u32,
+    },
+    /// Reading a render-target pixel failed.
+    #[error("could not read render-target pixel: {0}")]
+    PixelReadback(String),
 }
 
 #[repr(C)]
@@ -744,6 +759,95 @@ impl Renderer {
             })
             .map(|_| ())
             .map_err(RendererError::DevicePoll)
+    }
+
+    /// Reads an RGBA8 pixel from the most recently prepared eframe scene.
+    ///
+    /// Coordinates use a top-left origin.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read_pixel(&self, x: u32, y: u32) -> Result<[u8; 4], RendererError> {
+        if x >= self.width || y >= self.height {
+            return Err(RendererError::InvalidPixel {
+                x,
+                y,
+                width: self.width,
+                height: self.height,
+            });
+        }
+
+        let pixels = self.read_pixels()?;
+        Ok(pixels[y as usize * self.width as usize + x as usize])
+    }
+
+    /// Reads all RGBA8 pixels from the most recently prepared eframe scene.
+    ///
+    /// Pixels are returned in row-major order with a top-left origin.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn read_pixels(&self) -> Result<Vec<[u8; 4]>, RendererError> {
+        let unpadded_bytes_per_row = u64::from(self.width) * 4;
+        let bytes_per_row = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = unpadded_bytes_per_row
+            .div_ceil(u64::from(bytes_per_row))
+            .checked_mul(u64::from(bytes_per_row))
+            .ok_or_else(|| RendererError::PixelReadback("row size overflow".to_owned()))?;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("eframe scene pixel readback"),
+            size: padded_bytes_per_row * u64::from(self.height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("eframe scene pixel readback encoder"),
+            });
+        encoder.copy_texture_to_buffer(
+            self.eframe_scene._texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row as u32),
+                    rows_per_image: Some(self.height),
+                },
+            },
+            wgpu::Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        self.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })?;
+        receiver
+            .recv()
+            .map_err(|error| RendererError::PixelReadback(error.to_string()))?
+            .map_err(|error| RendererError::PixelReadback(error.to_string()))?;
+
+        let mapped = buffer
+            .slice(..)
+            .get_mapped_range()
+            .map_err(|error| RendererError::PixelReadback(error.to_string()))?;
+        let row_bytes = unpadded_bytes_per_row as usize;
+        let mut pixels = Vec::with_capacity(self.width as usize * self.height as usize);
+        for row in mapped.chunks_exact(padded_bytes_per_row as usize) {
+            for pixel in row[..row_bytes].chunks_exact(4) {
+                pixels.push(pixel.try_into().expect("one RGBA8 pixel is four bytes"));
+            }
+        }
+        drop(mapped);
+        buffer.unmap();
+        Ok(pixels)
     }
 
     /// Resizes the eframe scene and depth buffer for a new non-zero size.
@@ -1888,7 +1992,9 @@ fn create_eframe_scene_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     })
 }
