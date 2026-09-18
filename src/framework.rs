@@ -210,7 +210,7 @@ impl Framework {
             env_logger::init();
         }
 
-        let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
+        let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
         (config.wgpu_options)(&mut wgpu_options);
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -286,7 +286,7 @@ pub struct RunConfig<'a> {
     size: [u32; 2],
     #[cfg(target_arch = "wasm32")]
     canvas_id: &'a str,
-    wgpu_options: Box<dyn FnOnce(&mut eframe::egui_wgpu::WgpuConfiguration) + 'a>,
+    wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
     env_logger: bool,
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook: bool,
@@ -344,7 +344,7 @@ impl<'a> RunConfig<'a> {
     /// Configures wgpu instance/device/adapter/surface creation and renderloop.
     pub fn with_wgpu_options(
         mut self,
-        f: impl FnOnce(&mut eframe::egui_wgpu::WgpuConfiguration) + 'a,
+        f: impl FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a,
     ) -> Self {
         self.wgpu_options = Box::new(f);
         self
