@@ -1,10 +1,15 @@
 #[cfg(target_arch = "wasm32")]
-use std::cell::{RefCell, RefMut};
-use std::ops::{Deref, DerefMut};
+use std::cell::RefMut;
+#[cfg(not(target_arch = "wasm32"))]
+use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use std::rc::{Rc, Weak};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    cell::RefCell,
+    ops::{Deref, DerefMut},
+};
 
 use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
 
@@ -18,6 +23,8 @@ type RendererHandle = Rc<RefCell<Renderer>>;
 
 #[cfg(not(target_arch = "wasm32"))]
 type RendererHandle = Arc<Mutex<Renderer>>;
+
+type EngineSlot = Rc<RefCell<Option<Engine>>>;
 
 // WebGPU objects are not transferable between browser threads. Keep the renderer on its owning
 // thread and let the Send + Sync callback carry only an index into this thread-local registry.
@@ -223,6 +230,20 @@ impl Engine {
                 ..Default::default()
             };
 
+            #[cfg(target_os = "linux")]
+            let native_options = {
+                let mut native_options = native_options;
+                native_options.event_loop_builder = Some(Box::new(|builder| {
+                    use winit::platform::{
+                        wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11,
+                    };
+
+                    EventLoopBuilderExtWayland::with_any_thread(builder, true);
+                    EventLoopBuilderExtX11::with_any_thread(builder, true);
+                }));
+                native_options
+            };
+
             eframe::run_native(config.title, native_options, app_creator)
         }
 
@@ -337,27 +358,52 @@ pub trait App: 'static {
 impl App for () {}
 
 struct AppAdapter<A> {
-    engine: Engine,
+    engine: EngineSlot,
     app: A,
+    close_after_first_frame: bool,
+}
+
+fn with_engine<R>(slot: &EngineSlot, f: impl FnOnce(&mut Engine) -> R) -> R {
+    let mut engine = slot.borrow_mut();
+    f(engine
+        .as_mut()
+        .expect("engine was not initialized before the app ran"))
+}
+
+fn store_engine(slot: &EngineSlot, engine: Engine) {
+    *slot.borrow_mut() = Some(engine);
 }
 
 impl<A: App> eframe::App for AppAdapter<A> {
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
-        self.app.clear_color(&self.engine, visuals)
+        with_engine(&self.engine, |engine| self.app.clear_color(engine, visuals))
     }
 
     fn logic(&mut self, context: &egui::Context, frame: &mut eframe::Frame) {
-        self.app.logic(&mut self.engine, context, frame);
+        with_engine(&self.engine, |engine| {
+            self.app.logic(engine, context, frame);
+        });
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        self.app.render(&mut self.engine, ui, frame);
+        with_engine(&self.engine, |engine| {
+            self.app.render(engine, ui, frame);
+        });
+        if self.close_after_first_frame {
+            self.close_after_first_frame = false;
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 
     fn raw_input_hook(&mut self, context: &egui::Context, raw_input: &mut egui::RawInput) {
-        self.app
-            .raw_input_hook(&mut self.engine, context, raw_input);
+        with_engine(&self.engine, |engine| {
+            self.app.raw_input_hook(engine, context, raw_input);
+        });
     }
+}
+
+fn take_engine(slot: EngineSlot) -> Option<Engine> {
+    Rc::try_unwrap(slot).ok()?.into_inner()
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -388,6 +434,7 @@ pub struct RunConfig<'a> {
     canvas_id: &'a str,
     wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
     env_logger: bool,
+    close_after_first_frame: bool,
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook: bool,
 }
@@ -401,10 +448,20 @@ impl<'a> Default for RunConfig<'a> {
             canvas_id: "app",
             wgpu_options: Box::new(|_| {}),
             env_logger: true,
+            close_after_first_frame: false,
             #[cfg(target_arch = "wasm32")]
             console_error_panic_hook: true,
         }
     }
+}
+
+/// The result of running an application through [`RunConfig`].
+pub struct RunResult {
+    /// The engine created for the application, when it was initialized before `run` returned.
+    ///
+    /// This is `Some` for native runs that reached application creation. Web runs return before
+    /// their asynchronous application creation completes, so this is `None` there.
+    pub engine: Option<Engine>,
 }
 
 impl<'a> RunConfig<'a> {
@@ -420,21 +477,45 @@ impl<'a> RunConfig<'a> {
     pub fn run<A, E>(
         self,
         initialize: impl FnOnce(&eframe::CreationContext<'_>, &mut Engine) -> Result<A, E> + 'static,
-    ) -> eframe::Result
+    ) -> Result<RunResult, AppCreationError>
     where
         A: App,
         E: Into<AppCreationError>,
     {
         let size = self.size;
+        let close_after_first_frame = self.close_after_first_frame;
+        let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
+
+        let app_engine_slot = engine_slot.clone();
         Engine::start(
             self,
             Box::new(move |creation_context| {
-                let mut engine = Engine::new(creation_context, size)?;
-                let app = initialize(creation_context, &mut engine)
-                    .map_err(|error| -> AppCreationError { error.into() })?;
-                Ok(Box::new(AppAdapter { engine, app }))
+                let engine = Engine::new(creation_context, size)?;
+                store_engine(&app_engine_slot, engine);
+                let app = with_engine(&app_engine_slot, |engine| {
+                    initialize(creation_context, engine)
+                })
+                .map_err(|error| -> AppCreationError { error.into() })?;
+                Ok(Box::new(AppAdapter {
+                    engine: app_engine_slot.clone(),
+                    app,
+                    close_after_first_frame,
+                }))
             }),
-        )
+        )?;
+
+        Ok(RunResult {
+            engine: take_engine(engine_slot),
+        })
+    }
+
+    /// Closes the native window after the first rendered frame.
+    ///
+    /// This is useful for short-lived rendering checks that need to inspect the initialized
+    /// engine after [`Self::run`] returns. It has no useful effect on web applications.
+    pub fn with_close_after_first_frame(mut self) -> Self {
+        self.close_after_first_frame = true;
+        self
     }
 
     /// The application title on native platforms.
