@@ -1,9 +1,6 @@
-use terrarium::{AppBuilder, Engine, GltfError, Instance, MeshPart, eframe, glam::Vec3};
+use terrarium::{AppBuilder, Engine, GltfError, Instance, MeshPart, glam::Vec3};
 
-fn initialize(
-    _creation_context: &eframe::CreationContext<'_>,
-    engine: &mut Engine,
-) -> Result<(), GltfError> {
+fn initialize(engine: &mut Engine) -> Result<(), GltfError> {
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     let helmet_mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
     let mut helmet = MeshPart::new("DamagedHelmet", helmet_mesh);
@@ -47,6 +44,6 @@ fn baseline() -> Result<(), terrarium::AppCreationError> {
     AppBuilder::new()
         .with_size([128, 128])
         .with_headless(Some(1))
-        .run(|_, _| Ok::<(), terrarium::AppCreationError>(()))?;
+        .run(|_| Ok::<(), terrarium::AppCreationError>(()))?;
     Ok(())
 }

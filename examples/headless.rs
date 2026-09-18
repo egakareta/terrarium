@@ -30,14 +30,12 @@ impl App for CloseAfterFrames {
 
 fn main() {
     AppBuilder::new()
-        .run(
-            |_creation_context, _engine| -> Result<CloseAfterFrames, AppCreationError> {
-                Ok(CloseAfterFrames {
-                    completed: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-                    limit: 30,
-                })
-            },
-        )
+        .run(|_engine| -> Result<CloseAfterFrames, AppCreationError> {
+            Ok(CloseAfterFrames {
+                completed: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                limit: 30,
+            })
+        })
         .unwrap();
 }
 
@@ -58,7 +56,7 @@ mod tests {
             .with_size([32, 32])
             .with_env_logger(false)
             .with_headless(None)
-            .run(move |_creation_context, _engine| {
+            .run(move |_engine| {
                 Ok::<_, AppCreationError>(CloseAfterFrames {
                     completed: app_completed,
                     limit: 3,

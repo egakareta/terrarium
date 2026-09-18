@@ -541,6 +541,6 @@ fn main() {
         .with_wgpu_options(|wgpu_options| {
             wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
         })
-        .run(move |_creation_context, engine| Benchmark::new(engine, config))
+        .run(move |engine| Benchmark::new(engine, config))
         .unwrap();
 }
