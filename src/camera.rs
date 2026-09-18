@@ -65,14 +65,12 @@ impl Camera {
 
     /// Returns the right-handed DirectX view-projection matrix for this camera.
     pub fn view_projection_matrix(&self) -> Mat4 {
-        let view = self.pivot().inverse();
-        let projection = glam::camera::rh::proj::directx::perspective(
-            self.fovy,
-            self.aspect,
-            self.znear,
-            self.zfar,
-        );
-        projection * view
+        self.projection_matrix() * self.pivot().inverse()
+    }
+
+    /// Returns the right-handed DirectX perspective projection matrix.
+    pub fn projection_matrix(&self) -> Mat4 {
+        glam::camera::rh::proj::directx::perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 }
 
