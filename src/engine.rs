@@ -555,9 +555,7 @@ impl<'a> AppConfig<'a> {
 
     /// Runs one headless frame instead of opening a native window.
     ///
-    /// This is useful for short-lived rendering checks that run on test worker threads and need to
-    /// inspect the initialized engine after [`Self::run`] returns. It has no useful effect on web
-    /// applications.
+    /// This has no useful effect on web applications.
     pub fn with_headless(self) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         {
