@@ -352,13 +352,13 @@ impl Image {
     }
 
     /// Mirrors the image left-to-right and returns it for chaining.
-    pub fn flip_horizontal(&mut self) -> &mut Self {
+    pub fn flip_horizontal(mut self) -> Self {
         flip_horizontal_in_place(self.width, self.height, &mut self.pixels);
         self
     }
 
     /// Mirrors the image top-to-bottom and returns it for chaining.
-    pub fn flip_vertical(&mut self) -> &mut Self {
+    pub fn flip_vertical(mut self) -> Self {
         flip_vertical_in_place(self.width, self.height, &mut self.pixels);
         self
     }
@@ -366,13 +366,13 @@ impl Image {
     /// Rotates the image 90 degrees clockwise and returns it for chaining.
     ///
     /// Width and height are swapped.
-    pub fn rotate90(&mut self) -> &mut Self {
+    pub fn rotate90(mut self) -> Self {
         rotate90_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
         self
     }
 
     /// Rotates the image 180 degrees and returns it for chaining.
-    pub fn rotate180(&mut self) -> &mut Self {
+    pub fn rotate180(mut self) -> Self {
         rotate180_in_place(&mut self.pixels);
         self
     }
@@ -381,7 +381,7 @@ impl Image {
     /// counter-clockwise) and returns it for chaining.
     ///
     /// Width and height are swapped.
-    pub fn rotate270(&mut self) -> &mut Self {
+    pub fn rotate270(mut self) -> Self {
         rotate270_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
         self
     }
@@ -392,7 +392,7 @@ impl Image {
     /// Each result is rounded and clamped to `0..=255`. Pass `1.0` for a
     /// channel that should stay unchanged, so `[0.8, 1.0, 0.8, 1.0]` darkens
     /// red and blue while keeping green and alpha intact.
-    pub fn tint(&mut self, multiplier: [f32; 4]) -> &mut Self {
+    pub fn tint(mut self, multiplier: [f32; 4]) -> Self {
         tint_in_place(&mut self.pixels, multiplier);
         self
     }
@@ -401,14 +401,14 @@ impl Image {
     ///
     /// Each pixel's RGB channels are replaced by their byte-space luma while
     /// alpha is preserved.
-    pub fn grayscale(&mut self) -> &mut Self {
+    pub fn grayscale(mut self) -> Self {
         grayscale_in_place(&mut self.pixels);
         self
     }
 
     /// Inverts the RGB channels (`255 - value`) and returns the image for
     /// chaining. Alpha is preserved.
-    pub fn invert_rgb(&mut self) -> &mut Self {
+    pub fn invert_rgb(mut self) -> Self {
         invert_rgb_in_place(&mut self.pixels);
         self
     }
@@ -555,13 +555,13 @@ impl Texture {
     }
 
     /// Mirrors the texture left-to-right and returns it for chaining.
-    pub fn flip_horizontal(&mut self) -> &mut Self {
+    pub fn flip_horizontal(mut self) -> Self {
         flip_horizontal_in_place(self.width, self.height, &mut self.pixels);
         self
     }
 
     /// Mirrors the texture top-to-bottom and returns it for chaining.
-    pub fn flip_vertical(&mut self) -> &mut Self {
+    pub fn flip_vertical(mut self) -> Self {
         flip_vertical_in_place(self.width, self.height, &mut self.pixels);
         self
     }
@@ -569,13 +569,13 @@ impl Texture {
     /// Rotates the texture 90 degrees clockwise and returns it for chaining.
     ///
     /// Width and height are swapped.
-    pub fn rotate90(&mut self) -> &mut Self {
+    pub fn rotate90(mut self) -> Self {
         rotate90_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
         self
     }
 
     /// Rotates the texture 180 degrees and returns it for chaining.
-    pub fn rotate180(&mut self) -> &mut Self {
+    pub fn rotate180(mut self) -> Self {
         rotate180_in_place(&mut self.pixels);
         self
     }
@@ -584,7 +584,7 @@ impl Texture {
     /// counter-clockwise) and returns it for chaining.
     ///
     /// Width and height are swapped.
-    pub fn rotate270(&mut self) -> &mut Self {
+    pub fn rotate270(mut self) -> Self {
         rotate270_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
         self
     }
@@ -595,7 +595,7 @@ impl Texture {
     /// Each result is rounded and clamped to `0..=255`. Pass `1.0` for a
     /// channel that should stay unchanged, so `[0.8, 1.0, 0.8, 1.0]` darkens
     /// red and blue while keeping green and alpha intact.
-    pub fn tint(&mut self, multiplier: [f32; 4]) -> &mut Self {
+    pub fn tint(mut self, multiplier: [f32; 4]) -> Self {
         tint_in_place(&mut self.pixels, multiplier);
         self
     }
@@ -604,14 +604,14 @@ impl Texture {
     ///
     /// Each pixel's RGB channels are replaced by their byte-space luma while
     /// alpha is preserved.
-    pub fn grayscale(&mut self) -> &mut Self {
+    pub fn grayscale(mut self) -> Self {
         grayscale_in_place(&mut self.pixels);
         self
     }
 
     /// Inverts the RGB channels (`255 - value`) and returns the texture for
     /// chaining. Alpha is preserved.
-    pub fn invert_rgb(&mut self) -> &mut Self {
+    pub fn invert_rgb(mut self) -> Self {
         invert_rgb_in_place(&mut self.pixels);
         self
     }
@@ -1024,19 +1024,19 @@ mod tests {
         .collect();
 
         let mut texture = Texture::linear(2, 2, pixels.clone()).unwrap();
-        texture.flip_horizontal();
+        texture = texture.flip_horizontal();
         assert_eq!(texture.pixel(0, 0)[0], 20);
         assert_eq!(texture.pixel(1, 0)[0], 10);
         assert_eq!(texture.pixel(0, 1)[0], 40);
         assert_eq!(texture.pixel(1, 1)[0], 30);
-        texture.flip_horizontal();
+        texture = texture.flip_horizontal();
         assert_eq!(texture.pixels(), &pixels);
 
         let mut texture = Texture::linear(2, 2, pixels.clone()).unwrap();
-        texture.flip_vertical();
+        texture = texture.flip_vertical();
         assert_eq!(texture.pixel(0, 0)[0], 30);
         assert_eq!(texture.pixel(0, 1)[0], 10);
-        texture.flip_vertical();
+        texture = texture.flip_vertical();
         assert_eq!(texture.pixels(), &pixels);
     }
 
@@ -1048,34 +1048,31 @@ mod tests {
             .flatten()
             .collect();
 
-        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
-        texture.rotate90();
+        let texture = Texture::linear(2, 1, pixels.clone()).unwrap().rotate90();
         assert_eq!((texture.width, texture.height), (1, 2));
         // Clockwise: the left texel swings to the top.
         assert_eq!(texture.pixel(0, 0)[0], 10);
         assert_eq!(texture.pixel(0, 1)[0], 20);
-        texture.rotate270();
+        let texture = texture.rotate270();
         assert_eq!((texture.width, texture.height), (2, 1));
         assert_eq!(texture.pixels(), &pixels);
 
-        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
-        texture.rotate270();
+        let texture = Texture::linear(2, 1, pixels.clone()).unwrap().rotate270();
         assert_eq!((texture.width, texture.height), (1, 2));
         // Counter-clockwise: the right texel swings to the top.
         assert_eq!(texture.pixel(0, 0)[0], 20);
         assert_eq!(texture.pixel(0, 1)[0], 10);
 
-        let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
-        texture.rotate180();
+        let texture = Texture::linear(2, 1, pixels.clone()).unwrap().rotate180();
         assert_eq!((texture.width, texture.height), (2, 1));
         assert_eq!(texture.pixel(0, 0)[0], 20);
         assert_eq!(texture.pixel(1, 0)[0], 10);
-        texture.rotate180();
+        let texture = texture.rotate180();
         assert_eq!(texture.pixels(), &pixels);
 
         let mut texture = Texture::linear(2, 1, pixels.clone()).unwrap();
         for _ in 0..4 {
-            texture.rotate90();
+            texture = texture.rotate90();
         }
         assert_eq!((texture.width, texture.height), (2, 1));
         assert_eq!(texture.pixels(), &pixels);
@@ -1083,17 +1080,20 @@ mod tests {
 
     #[test]
     fn texture_color_adjustments_scale_and_replace_channels() {
-        let mut texture = Texture::linear(1, 1, vec![200, 100, 50, 255]).unwrap();
-        texture.tint([0.5, 1.0, 2.0, 1.0]);
+        let texture = Texture::linear(1, 1, vec![200, 100, 50, 255])
+            .unwrap()
+            .tint([0.5, 1.0, 2.0, 1.0]);
         assert_eq!(texture.pixel(0, 0), [100, 100, 100, 255]);
 
-        let mut texture = Texture::linear(1, 1, vec![255, 0, 0, 128]).unwrap();
-        texture.grayscale();
+        let texture = Texture::linear(1, 1, vec![255, 0, 0, 128])
+            .unwrap()
+            .grayscale();
         let gray = texture.pixel(0, 0);
         assert_eq!(gray, [54, 54, 54, 128]);
 
-        let mut texture = Texture::linear(1, 1, vec![10, 20, 30, 40]).unwrap();
-        texture.invert_rgb();
+        let texture = Texture::linear(1, 1, vec![10, 20, 30, 40])
+            .unwrap()
+            .invert_rgb();
         assert_eq!(texture.pixel(0, 0), [245, 235, 225, 40]);
     }
 
@@ -1104,17 +1104,17 @@ mod tests {
         image.set_pixel(0, 0, [9, 9, 9, 9]);
         assert_eq!(image.pixel(0, 0), [9, 9, 9, 9]);
 
-        image.flip_horizontal().flip_vertical();
+        image = image.flip_horizontal().flip_vertical();
         assert_eq!(image.pixel(0, 0), [5, 6, 7, 8]);
         assert_eq!(image.pixel(1, 0), [9, 9, 9, 9]);
 
-        image.rotate90();
+        image = image.rotate90();
         assert_eq!((image.width, image.height), (1, 2));
-        image.rotate270();
+        image = image.rotate270();
         assert_eq!((image.width, image.height), (2, 1));
 
-        image.rotate180().rotate180();
-        image.tint([1.0, 1.0, 1.0, 1.0]).grayscale().invert_rgb();
+        image = image.rotate180().rotate180();
+        image = image.tint([1.0, 1.0, 1.0, 1.0]).grayscale().invert_rgb();
         assert_eq!(image.pixels().len(), 8);
     }
 }
