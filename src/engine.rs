@@ -5,10 +5,11 @@ use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use std::rc::{Rc, Weak};
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
@@ -23,17 +24,22 @@ pub const MONOSPACE_FONT_NAME: &str = "SUSEMono";
 /// Returns [`egui`] font definitions using fonts bundled in Terrarium.
 pub fn font_definitions() -> egui::FontDefinitions {
     let mut fonts = egui::FontDefinitions::default();
+    let mut tweak = egui::FontTweak::default();
+    tweak.coords.push(b"wght", 400.0);
+
     fonts.font_data.insert(
         PROPORTIONAL_FONT_NAME.to_owned(),
-        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
-            "fonts/Outfit-VariableFont_wght.ttf"
-        ))),
+        Arc::new(
+            egui::FontData::from_static(include_bytes!("fonts/Outfit-VariableFont_wght.ttf"))
+                .tweak(tweak.clone()),
+        ),
     );
     fonts.font_data.insert(
         MONOSPACE_FONT_NAME.to_owned(),
-        std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
-            "fonts/SUSEMono-VariableFont_wght.ttf"
-        ))),
+        Arc::new(
+            egui::FontData::from_static(include_bytes!("fonts/SUSEMono-VariableFont_wght.ttf"))
+                .tweak(tweak.clone()),
+        ),
     );
     fonts.families.insert(
         egui::FontFamily::Proportional,
