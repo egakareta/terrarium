@@ -135,6 +135,7 @@ pub struct Engine {
     renderer: RendererHandle,
     /// The [`Workspace`] rendered by this engine.
     pub workspace: Workspace,
+    creation_context: eframe::CreationContext<'static>,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
     clear_color: [f32; 4],
@@ -173,10 +174,29 @@ impl Engine {
         Ok(Self {
             renderer,
             workspace: Workspace::new(),
+            creation_context: Self::owned_creation_context(creation_context),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
             clear_color: DEFAULT_CLEAR_COLOR,
         })
+    }
+
+    fn owned_creation_context(
+        creation_context: &eframe::CreationContext<'_>,
+    ) -> eframe::CreationContext<'static> {
+        let mut owned = eframe::CreationContext::_new_kittest(creation_context.egui_ctx.clone());
+        owned.integration_info = creation_context.integration_info.clone();
+        owned.wgpu_render_state = creation_context.wgpu_render_state.clone();
+        owned
+    }
+
+    /// Returns the eframe creation context associated with this engine.
+    ///
+    /// The context retains the egui context, integration information, and WGPU render state from
+    /// application creation. It is owned by the engine so it remains available after the eframe
+    /// app-creation callback returns.
+    pub fn creation_context(&self) -> &eframe::CreationContext<'_> {
+        &self.creation_context
     }
 
     /// Returns the color eframe should use to clear the window.
@@ -542,13 +562,16 @@ impl<'a> AppBuilder<'a> {
 
     /// Creates an [`Engine`] and runs the initialized [`App`].
     ///
+    /// The initializer receives the engine after it has been created. Access eframe's creation
+    /// context through [`Engine::creation_context`].
+    ///
     /// The configured window size is used as the renderer's fallback size. Return `()` from the
     /// initializer when no additional application behavior is needed.
     ///
     /// Returns the created engine on native platforms, [`None`] on web platforms.
     pub fn run<A, E>(
         self,
-        initialize: impl FnOnce(&eframe::CreationContext<'_>, &mut Engine) -> Result<A, E> + 'static,
+        initialize: impl FnOnce(&mut Engine) -> Result<A, E> + 'static,
     ) -> Result<Option<Engine>, AppCreationError>
     where
         A: App,
@@ -567,10 +590,8 @@ impl<'a> AppBuilder<'a> {
                 }
                 let engine = Engine::new(creation_context, size)?;
                 store_engine(&app_engine_slot, engine);
-                let app = with_engine(&app_engine_slot, |engine| {
-                    initialize(creation_context, engine)
-                })
-                .map_err(|error| -> AppCreationError { error.into() })?;
+                let app = with_engine(&app_engine_slot, initialize)
+                    .map_err(|error| -> AppCreationError { error.into() })?;
                 Ok(Box::new(AppAdapter {
                     engine: app_engine_slot.clone(),
                     app,

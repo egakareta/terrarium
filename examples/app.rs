@@ -24,10 +24,7 @@ impl App for FpsOverlay {
     }
 }
 
-fn initialize(
-    _creation_context: &eframe::CreationContext<'_>,
-    engine: &mut Engine,
-) -> Result<FpsOverlay, RendererError> {
+fn initialize(engine: &mut Engine) -> Result<FpsOverlay, RendererError> {
     engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
     let dirt = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
