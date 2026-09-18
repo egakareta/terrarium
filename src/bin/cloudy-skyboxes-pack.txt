@@ -1,0 +1,8 @@
+Asset: Cloudy Skyboxes Pack
+Author/Creator: Screaming Brain Studios
+Source: https://screamingbrainstudios.itch.io/cloudy-skyboxes-pack
+
+License: CC0 1.0 Universal (Creative Commons Zero)
+
+License URL:
+https://creativecommons.org/publicdomain/zero/1.0/
