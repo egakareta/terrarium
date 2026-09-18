@@ -65,10 +65,13 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         include_bytes!("../assets/grass_top.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let grass_side = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/grass_side.png"),
-        TextureColorSpace::Srgb,
-    )?)?;
+    let grass_side = workspace.add_texture(
+        Texture::from_bytes(
+            include_bytes!("../assets/grass_side.png"),
+            TextureColorSpace::Srgb,
+        )?
+        .rotate180(),
+    )?;
     let festival_lantern = workspace.add_texture(Texture::from_bytes(
         include_bytes!("../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
