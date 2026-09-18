@@ -31,7 +31,7 @@ fn main() {
 
 #[test]
 fn one_block_screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
-    let engine = create_app().unwrap().engine.unwrap();
+    let engine = create_app().unwrap().unwrap();
     let renderer = engine.renderer();
     let pixels = renderer.read_pixels()?;
     let top_left = pixels[0];
