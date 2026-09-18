@@ -665,6 +665,24 @@ mod tests {
     }
 
     #[test]
+    fn cylinder_side_slots_cover_horizontal_quarters() {
+        let mesh = Mesh::cylinder(1.0, 1.0, 24, [1.0; 4]);
+        let mut counts = [0usize; MaterialSlot::ALL_DIRECTIONS.len()];
+
+        for segment in mesh.vertices.chunks_exact(10) {
+            let slot = segment[0].material_slot as usize;
+            if slot >= MaterialSlot::Top as usize {
+                counts[slot - 1] += 1;
+            }
+        }
+
+        assert_eq!(counts[MaterialSlot::Front as usize - 1], 6);
+        assert_eq!(counts[MaterialSlot::Back as usize - 1], 6);
+        assert_eq!(counts[MaterialSlot::Left as usize - 1], 6);
+        assert_eq!(counts[MaterialSlot::Right as usize - 1], 6);
+    }
+
+    #[test]
     fn wedge_faces_use_directional_slots_matching_their_normals() {
         let mesh = Mesh::wedge([1.0; 4]);
         let expected_slots = [

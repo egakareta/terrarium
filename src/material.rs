@@ -212,7 +212,9 @@ impl MeshMaterialSlots {
     pub fn set(&mut self, slot: MaterialSlot, material: Material) {
         assert!(slot != MaterialSlot::Base, "slot zero is Part::material");
         let index = slot.index() - 1;
-        self.slots.resize(index + 1, None);
+        if self.slots.len() <= index {
+            self.slots.resize(index + 1, None);
+        }
         self.slots[index] = Some(material);
     }
 
@@ -990,10 +992,13 @@ mod tests {
     #[test]
     fn mesh_material_slots_leave_skipped_slots_unset() {
         let mut slots = MeshMaterialSlots::default();
-        let material = Material::from_color(Color3::new(0.0, 1.0, 0.0));
-        slots.set(MaterialSlot::Right, material);
+        let right = Material::from_color(Color3::new(0.0, 1.0, 0.0));
+        let bottom = Material::from_color(Color3::new(0.0, 0.0, 1.0));
+        slots.set(MaterialSlot::Right, right);
+        slots.set(MaterialSlot::Bottom, bottom);
         assert!(slots.get(MaterialSlot::Top).is_none());
-        assert_eq!(slots.get(MaterialSlot::Right), Some(&material));
+        assert_eq!(slots.get(MaterialSlot::Bottom), Some(&bottom));
+        assert_eq!(slots.get(MaterialSlot::Right), Some(&right));
     }
 
     #[test]
