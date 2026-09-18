@@ -548,6 +548,22 @@ fn import_material(
             material.filter = import_filter(info.texture().sampler());
         }
     }
+    if let Some(info) = source.emissive_texture() {
+        require_tex_coord_zero(info.tex_coord())?;
+        material.textures.emissive = Some(import_texture(
+            info.texture().source().index(),
+            TextureColorSpace::Srgb,
+            images,
+            workspace,
+            texture_cache,
+        )?);
+        if pbr.base_color_texture().is_none()
+            && source.normal_texture().is_none()
+            && pbr.metallic_roughness_texture().is_none()
+        {
+            material.filter = import_filter(info.texture().sampler());
+        }
+    }
     Ok(material)
 }
 
@@ -711,6 +727,7 @@ mod tests {
                         textures.base_color,
                         textures.normal,
                         textures.metallic_roughness,
+                        textures.emissive,
                     ]
                 })
                 .flatten()

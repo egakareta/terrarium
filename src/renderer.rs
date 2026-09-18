@@ -1,6 +1,7 @@
-use std::collections::HashMap;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::OnceLock;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::OnceLock,
+};
 
 use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
@@ -151,6 +152,7 @@ struct MaterialTextures {
     base_color: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
     normal: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
     metallic_roughness: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
+    emissive: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -252,7 +254,6 @@ struct GpuMaterialTexture {
 }
 
 struct GpuTexture {
-    _texture: wgpu::Texture,
     source: Texture,
 }
 
@@ -558,19 +559,31 @@ impl Renderer {
         let default_base_color = Texture::new(1, 1, vec![255, 255, 255, 255])?;
         let default_normal = Texture::linear(1, 1, vec![128, 128, 255, 255])?;
         let default_metallic_roughness = Texture::linear(1, 1, vec![0, 255, 0, 255])?;
+        let default_emissive = Texture::new(1, 1, vec![255, 255, 255, 255])?;
         let textures = vec![
-            upload_texture(&device, &queue, &default_base_color)?,
-            upload_texture(&device, &queue, &default_normal)?,
-            upload_texture(&device, &queue, &default_metallic_roughness)?,
+            GpuTexture {
+                source: default_base_color.clone(),
+            },
+            GpuTexture {
+                source: default_normal.clone(),
+            },
+            GpuTexture {
+                source: default_metallic_roughness.clone(),
+            },
+            GpuTexture {
+                source: default_emissive.clone(),
+            },
         ];
         let mut texture_dedup = HashMap::new();
         texture_dedup.insert(default_base_color, GpuTextureHandle(0));
         texture_dedup.insert(default_normal, GpuTextureHandle(1));
         texture_dedup.insert(default_metallic_roughness, GpuTextureHandle(2));
+        texture_dedup.insert(default_emissive, GpuTextureHandle(3));
         let default_material_textures = MaterialTextures {
             base_color: [GpuTextureHandle(0); MATERIAL_SLOT_COUNT],
             normal: [GpuTextureHandle(1); MATERIAL_SLOT_COUNT],
             metallic_roughness: [GpuTextureHandle(2); MATERIAL_SLOT_COUNT],
+            emissive: [GpuTextureHandle(3); MATERIAL_SLOT_COUNT],
         };
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("PBR mesh shader"),
@@ -1010,10 +1023,16 @@ impl Renderer {
             material.textures.metallic_roughness,
             self.default_material_textures.metallic_roughness[0],
         )?;
+        let emissive = resolve(
+            self,
+            material.textures.emissive,
+            self.default_material_textures.emissive[0],
+        )?;
         let mut textures = MaterialTextures {
             base_color: [base_color; MATERIAL_SLOT_COUNT],
             normal: [normal; MATERIAL_SLOT_COUNT],
             metallic_roughness: [metallic_roughness; MATERIAL_SLOT_COUNT],
+            emissive: [emissive; MATERIAL_SLOT_COUNT],
         };
         for (index, material) in material_slots
             .slots
@@ -1030,6 +1049,7 @@ impl Renderer {
                 material.textures.metallic_roughness,
                 metallic_roughness,
             )?;
+            textures.emissive[slot] = resolve(self, material.textures.emissive, emissive)?;
         }
         Ok(textures)
     }
@@ -1152,13 +1172,15 @@ impl Renderer {
                 return Ok(gpu_handle);
             }
             // The workspace texture was edited after upload.
-            if self.gpu_texture_is_shared(gpu_handle, texture) {
-                // This GPU copy is shared with another logical texture (a
-                // dedup hit or a built-in default): allocate a fresh copy
-                // instead of overwriting storage other owners still sample.
+            if self.texture_source_is_shared(gpu_handle, texture) {
+                // This source entry is shared with another logical texture (a
+                // dedup hit or a built-in default), so preserve it for the
+                // other owners and allocate a new entry.
                 let new_handle = GpuTextureHandle(self.textures.len());
-                self.textures
-                    .push(upload_texture(&self.device, &self.queue, texture)?);
+                texture.validate()?;
+                self.textures.push(GpuTexture {
+                    source: texture.clone(),
+                });
                 self.texture_dedup.insert(texture.clone(), new_handle);
                 self.workspace_texture_handles
                     .insert(workspace_handle, (new_handle, version));
@@ -1181,7 +1203,7 @@ impl Renderer {
     /// That happens when distinct workspace textures deduplicated to the same
     /// GPU copy, or when a workspace texture matched a built-in default.
     /// Such copies must not be overwritten in place on edit.
-    fn gpu_texture_is_shared(&self, gpu_handle: GpuTextureHandle, texture: &Texture) -> bool {
+    fn texture_source_is_shared(&self, gpu_handle: GpuTextureHandle, texture: &Texture) -> bool {
         if self
             .default_material_textures
             .base_color
@@ -1191,6 +1213,10 @@ impl Renderer {
                 .default_material_textures
                 .metallic_roughness
                 .contains(&gpu_handle)
+            || self
+                .default_material_textures
+                .emissive
+                .contains(&gpu_handle)
         {
             return true;
         }
@@ -1199,11 +1225,11 @@ impl Renderer {
             .any(|(known, &known_handle)| known_handle == gpu_handle && known != texture)
     }
 
-    /// Re-uploads an edited workspace texture and refreshes every packed
-    /// material texture built from it.
+    /// Stores an edited workspace texture and refreshes every packed material
+    /// texture built from it.
     ///
     /// The caller guarantees `gpu_handle` is exclusively owned by this
-    /// texture (see [`gpu_texture_is_shared`](Self::gpu_texture_is_shared)).
+    /// texture (see [`texture_source_is_shared`](Self::texture_source_is_shared)).
     /// Textures validate on the way in, so edits made through
     /// [`Workspace::get_texture_mut`] that break the RGBA8 invariant surface
     /// here as an error instead of panicking inside surface packing.
@@ -1213,31 +1239,6 @@ impl Renderer {
         texture: &Texture,
     ) -> Result<(), RendererError> {
         texture.validate()?;
-        let mips = texture.mip_levels()?;
-        let format = texture_gpu_format(texture.color_space);
-        let gpu_texture = &self.textures[gpu_handle.0]._texture;
-        if gpu_texture.size().width != texture.width
-            || gpu_texture.size().height != texture.height
-            || gpu_texture.format() != format
-            || gpu_texture.mip_level_count() != mips.len() as u32
-        {
-            let replacement = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("material texture"),
-                size: wgpu::Extent3d {
-                    width: texture.width,
-                    height: texture.height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: mips.len() as u32,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            self.textures[gpu_handle.0]._texture = replacement;
-        }
-        write_texture_mips(&self.queue, &self.textures[gpu_handle.0]._texture, &mips);
         let old_source =
             std::mem::replace(&mut self.textures[gpu_handle.0].source, texture.clone());
         if self.texture_dedup.get(&old_source) == Some(&gpu_handle) {
@@ -1261,30 +1262,41 @@ impl Renderer {
                 textures.base_color.contains(&changed)
                     || textures.normal.contains(&changed)
                     || textures.metallic_roughness.contains(&changed)
+                    || textures.emissive.contains(&changed)
             })
             .copied()
             .collect();
         let mut recreated = Vec::new();
+        let mut refreshed = HashSet::new();
         for textures in affected {
             let packed = self.packed_material_textures[&textures];
             for (slot, packed_handle) in packed.textures.into_iter().enumerate() {
+                if !refreshed.insert(packed_handle) {
+                    continue;
+                }
                 let base_texture = self.textures[textures.base_color[slot].0].source.clone();
-                let normal_texture = self.textures[textures.normal[slot].0].source.clone();
-                let metallic_roughness_texture = self.textures[textures.metallic_roughness[slot].0]
-                    .source
-                    .clone();
                 let surface_texture = Texture::linear(
                     base_texture.width,
                     base_texture.height,
                     pack_surface_pixels(
-                        &normal_texture,
-                        &metallic_roughness_texture,
+                        &self.textures[textures.normal[slot].0].source,
+                        &self.textures[textures.metallic_roughness[slot].0].source,
+                        base_texture.width,
+                        base_texture.height,
+                    ),
+                )?;
+                let emissive_texture = Texture::new(
+                    base_texture.width,
+                    base_texture.height,
+                    resize_texture_pixels(
+                        &self.textures[textures.emissive[slot].0].source,
                         base_texture.width,
                         base_texture.height,
                     ),
                 )?;
                 let base_mips = base_texture.mip_levels()?;
                 let surface_mips = surface_texture.mip_levels()?;
+                let emissive_mips = emissive_texture.mip_levels()?;
                 let format = texture_gpu_format(base_texture.color_space);
                 let entry = &self.gpu_material_textures[packed_handle.0];
                 if entry._texture.size().width != base_texture.width
@@ -1297,7 +1309,7 @@ impl Renderer {
                         size: wgpu::Extent3d {
                             width: base_texture.width,
                             height: base_texture.height,
-                            depth_or_array_layers: 2,
+                            depth_or_array_layers: 3,
                         },
                         mip_level_count: base_mips.len() as u32,
                         sample_count: 1,
@@ -1311,11 +1323,12 @@ impl Renderer {
                         &replacement,
                         &base_mips,
                         &surface_mips,
+                        &emissive_mips,
                         base_texture.color_space,
                     );
                     let view = replacement.create_view(&wgpu::TextureViewDescriptor {
                         dimension: Some(wgpu::TextureViewDimension::D2Array),
-                        array_layer_count: Some(2),
+                        array_layer_count: Some(3),
                         ..Default::default()
                     });
                     self.gpu_material_textures[packed_handle.0] = GpuMaterialTexture {
@@ -1329,6 +1342,7 @@ impl Renderer {
                         &entry._texture,
                         &base_mips,
                         &surface_mips,
+                        &emissive_mips,
                         base_texture.color_space,
                     );
                 }
@@ -1348,9 +1362,11 @@ impl Renderer {
         if let Some(&gpu_handle) = self.texture_dedup.get(texture) {
             return Ok(gpu_handle);
         }
+        texture.validate()?;
         let gpu_handle = GpuTextureHandle(self.textures.len());
-        self.textures
-            .push(upload_texture(&self.device, &self.queue, texture)?);
+        self.textures.push(GpuTexture {
+            source: texture.clone(),
+        });
         self.texture_dedup.insert(texture.clone(), gpu_handle);
         Ok(gpu_handle)
     }
@@ -1359,16 +1375,18 @@ impl Renderer {
         &mut self,
         base_color: &Texture,
         surface: &Texture,
+        emissive: &Texture,
     ) -> Result<PackedTextureHandle, RendererError> {
         let base_mips = base_color.mip_levels()?;
         let surface_mips = surface.mip_levels()?;
+        let emissive_mips = emissive.mip_levels()?;
         let format = texture_gpu_format(base_color.color_space);
         let gpu_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("packed material texture"),
             size: wgpu::Extent3d {
                 width: base_color.width,
                 height: base_color.height,
-                depth_or_array_layers: 2,
+                depth_or_array_layers: 3,
             },
             mip_level_count: base_mips.len() as u32,
             sample_count: 1,
@@ -1382,11 +1400,12 @@ impl Renderer {
             &gpu_texture,
             &base_mips,
             &surface_mips,
+            &emissive_mips,
             base_color.color_space,
         );
         let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
-            array_layer_count: Some(2),
+            array_layer_count: Some(3),
             ..Default::default()
         });
         let handle = PackedTextureHandle(self.gpu_material_textures.len());
@@ -1406,23 +1425,41 @@ impl Renderer {
         }
 
         let mut packed_textures = [PackedTextureHandle(usize::MAX); MATERIAL_SLOT_COUNT];
+        let mut packed_slots = HashMap::new();
         for (slot, packed_texture) in packed_textures.iter_mut().enumerate() {
+            let slot_textures = (
+                textures.base_color[slot],
+                textures.normal[slot],
+                textures.metallic_roughness[slot],
+                textures.emissive[slot],
+            );
+            if let Some(&packed) = packed_slots.get(&slot_textures) {
+                *packed_texture = packed;
+                continue;
+            }
             let base_texture = self.textures[textures.base_color[slot].0].source.clone();
-            let normal_texture = self.textures[textures.normal[slot].0].source.clone();
-            let metallic_roughness_texture = self.textures[textures.metallic_roughness[slot].0]
-                .source
-                .clone();
             let surface_texture = Texture::linear(
                 base_texture.width,
                 base_texture.height,
                 pack_surface_pixels(
-                    &normal_texture,
-                    &metallic_roughness_texture,
+                    &self.textures[textures.normal[slot].0].source,
+                    &self.textures[textures.metallic_roughness[slot].0].source,
                     base_texture.width,
                     base_texture.height,
                 ),
             )?;
-            *packed_texture = self.upload_material_texture(&base_texture, &surface_texture)?;
+            let emissive_texture = Texture::new(
+                base_texture.width,
+                base_texture.height,
+                resize_texture_pixels(
+                    &self.textures[textures.emissive[slot].0].source,
+                    base_texture.width,
+                    base_texture.height,
+                ),
+            )?;
+            *packed_texture =
+                self.upload_material_texture(&base_texture, &surface_texture, &emissive_texture)?;
+            packed_slots.insert(slot_textures, *packed_texture);
         }
         let packed = PackedMaterialTextures {
             textures: packed_textures,
@@ -1625,10 +1662,12 @@ impl Renderer {
                     && (part.material.textures.base_color.is_some()
                         || part.material.textures.normal.is_some()
                         || part.material.textures.metallic_roughness.is_some()
+                        || part.material.textures.emissive.is_some()
                         || part.material_slots.slots.iter().flatten().any(|material| {
                             material.textures.base_color.is_some()
                                 || material.textures.normal.is_some()
                                 || material.textures.metallic_roughness.is_some()
+                                || material.textures.emissive.is_some()
                         }));
                 let custom_textures = if has_custom_textures {
                     let textures =
@@ -1734,6 +1773,7 @@ impl Renderer {
                 && (meshpart.material.textures.base_color.is_some()
                     || meshpart.material.textures.normal.is_some()
                     || meshpart.material.textures.metallic_roughness.is_some()
+                    || meshpart.material.textures.emissive.is_some()
                     || meshpart
                         .material_slots
                         .slots
@@ -1743,6 +1783,7 @@ impl Renderer {
                             material.textures.base_color.is_some()
                                 || material.textures.normal.is_some()
                                 || material.textures.metallic_roughness.is_some()
+                                || material.textures.emissive.is_some()
                         }));
             let textures = if has_custom_textures {
                 self.material_textures(workspace, &meshpart.material, &meshpart.material_slots)?
@@ -2270,38 +2311,20 @@ fn create_material_factor_bind_group(
     })
 }
 
-fn write_texture_mips(queue: &wgpu::Queue, texture: &wgpu::Texture, mips: &[Image]) {
-    for (mip_level, image) in mips.iter().enumerate() {
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: mip_level as u32,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &image.pixels,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(image.width * 4),
-                rows_per_image: Some(image.height),
-            },
-            wgpu::Extent3d {
-                width: image.width,
-                height: image.height,
-                depth_or_array_layers: 1,
-            },
-        );
-    }
-}
-
 fn write_packed_mips(
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     base_mips: &[Image],
     surface_mips: &[Image],
+    emissive_mips: &[Image],
     base_color_space: TextureColorSpace,
 ) {
-    for (mip_level, (base_image, surface_image)) in base_mips.iter().zip(surface_mips).enumerate() {
+    for (mip_level, ((base_image, surface_image), emissive_image)) in base_mips
+        .iter()
+        .zip(surface_mips)
+        .zip(emissive_mips)
+        .enumerate()
+    {
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -2345,35 +2368,26 @@ fn write_packed_mips(
                 depth_or_array_layers: 1,
             },
         );
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: mip_level as u32,
+                origin: wgpu::Origin3d { x: 0, y: 0, z: 2 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &emissive_image.pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(emissive_image.width * 4),
+                rows_per_image: Some(emissive_image.height),
+            },
+            wgpu::Extent3d {
+                width: emissive_image.width,
+                height: emissive_image.height,
+                depth_or_array_layers: 1,
+            },
+        );
     }
-}
-
-fn upload_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    texture: &Texture,
-) -> Result<GpuTexture, TextureError> {
-    let format = texture_gpu_format(texture.color_space);
-    let mip_levels = texture.mip_levels()?;
-    let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("material texture"),
-        size: wgpu::Extent3d {
-            width: texture.width,
-            height: texture.height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: mip_levels.len() as u32,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-    });
-    write_texture_mips(queue, &gpu_texture, &mip_levels);
-    Ok(GpuTexture {
-        _texture: gpu_texture,
-        source: texture.clone(),
-    })
 }
 
 fn pack_surface_pixels(
@@ -2406,6 +2420,25 @@ fn pack_surface_pixels(
     pixels
 }
 
+fn resize_texture_pixels(texture: &Texture, width: u32, height: u32) -> Vec<u8> {
+    if texture.width == width && texture.height == height {
+        return texture.pixels.clone();
+    }
+
+    let mut pixels = vec![0; width as usize * height as usize * 4];
+    for y in 0..height {
+        let source_y = (y as u64 * texture.height as u64 / height as u64) as usize;
+        for x in 0..width {
+            let source_x = (x as u64 * texture.width as u64 / width as u64) as usize;
+            let source = (source_y * texture.width as usize + source_x) * 4;
+            let destination = (y as usize * width as usize + x as usize) * 4;
+            pixels[destination..destination + 4]
+                .copy_from_slice(&texture.pixels[source..source + 4]);
+        }
+    }
+    pixels
+}
+
 fn encode_srgb_rgb(pixels: &[u8]) -> Vec<u8> {
     let mut encoded = pixels.to_vec();
     for pixel in encoded.chunks_exact_mut(4) {
@@ -2417,13 +2450,18 @@ fn encode_srgb_rgb(pixels: &[u8]) -> Vec<u8> {
 }
 
 fn linear_to_srgb_byte(value: u8) -> u8 {
-    let value = value as f32 / 255.0;
-    let value = if value <= 0.0031308 {
-        value * 12.92
-    } else {
-        1.055 * value.powf(1.0 / 2.4) - 0.055
-    };
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+    static LOOKUP: OnceLock<[u8; 256]> = OnceLock::new();
+    LOOKUP.get_or_init(|| {
+        std::array::from_fn(|value| {
+            let value = value as f32 / 255.0;
+            let value = if value <= 0.0031308 {
+                value * 12.92
+            } else {
+                1.055 * value.powf(1.0 / 2.4) - 0.055
+            };
+            (value.clamp(0.0, 1.0) * 255.0).round() as u8
+        })
+    })[value as usize]
 }
 
 fn light_view_projections(

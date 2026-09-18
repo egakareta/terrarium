@@ -252,6 +252,23 @@ fn sample_surface(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) 
     return textureSampleGrad(material_texture_0, material_sampler_0, uv, 1, uv_dx, uv_dy);
 }
 
+fn sample_emissive(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
+    if slot == 1u {
+        return textureSampleGrad(material_texture_1, material_sampler_1, uv, 2, uv_dx, uv_dy);
+    } else if slot == 2u {
+        return textureSampleGrad(material_texture_2, material_sampler_2, uv, 2, uv_dx, uv_dy);
+    } else if slot == 3u {
+        return textureSampleGrad(material_texture_3, material_sampler_3, uv, 2, uv_dx, uv_dy);
+    } else if slot == 4u {
+        return textureSampleGrad(material_texture_4, material_sampler_4, uv, 2, uv_dx, uv_dy);
+    } else if slot == 5u {
+        return textureSampleGrad(material_texture_5, material_sampler_5, uv, 2, uv_dx, uv_dy);
+    } else if slot == 6u {
+        return textureSampleGrad(material_texture_6, material_sampler_6, uv, 2, uv_dx, uv_dy);
+    }
+    return textureSampleGrad(material_texture_0, material_sampler_0, uv, 2, uv_dx, uv_dy);
+}
+
 fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
     let inverse_w = 1.0 / max(shadow_position.w, 0.0001);
     let projected = shadow_position.xyz * inverse_w;
@@ -311,6 +328,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // the same surface layer, so one fetch serves both: previously this sampled
     // the identical texel twice with bitwise-identical results.
     let surface_sample = sample_surface(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+    let emissive_sample = sample_emissive(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
     let normal_sample = unpack_normal(surface_sample);
     let metallic_roughness_sample = vec4<f32>(0.0, surface_sample.a, surface_sample.b, 1.0);
     let world_normal = normalize(vertex.normal);
@@ -393,7 +411,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         * normal_dot_light
         * shadow_visibility;
     let ambient = base_color.rgb * camera.ambient_color.rgb * (1.0 - metallic);
-    let color = ambient + direct + slot_emissive_roughness.rgb;
+    let color = ambient + direct + slot_emissive_roughness.rgb * emissive_sample.rgb;
     let tone_mapped = color / (color + vec3<f32>(1.0));
     var display_color = linear_to_srgb(tone_mapped);
     if FRAMEBUFFER_IS_SRGB > 0.5 {

@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use thiserror::Error;
 
 use crate::Color3;
@@ -95,6 +97,8 @@ pub struct TextureSet {
     pub normal: Option<TextureHandle>,
     /// Optional linear glTF metallic-roughness texture.
     pub metallic_roughness: Option<TextureHandle>,
+    /// Optional sRGB emissive texture.
+    pub emissive: Option<TextureHandle>,
 }
 
 /// PBR factors and optional texture maps used by a [`crate::Part`].
@@ -158,6 +162,12 @@ impl Material {
     /// Returns a copy of this material with a metallic-roughness map assigned.
     pub fn with_metallic_roughness_texture(mut self, texture: TextureHandle) -> Self {
         self.textures.metallic_roughness = Some(texture);
+        self
+    }
+
+    /// Returns a copy of this material with an emissive map assigned.
+    pub fn with_emissive_texture(mut self, texture: TextureHandle) -> Self {
+        self.textures.emissive = Some(texture);
         self
     }
 
@@ -640,22 +650,22 @@ impl Texture {
         let mut levels = Vec::with_capacity(self.mip_level_count() as usize);
         let mut width = self.width;
         let mut height = self.height;
-        let mut pixels = self.pixels.clone();
+        let pixels = self.pixels.clone();
         levels.push(Image {
             width,
             height,
-            pixels: pixels.clone(),
+            pixels,
         });
 
         while width > 1 || height > 1 {
             let next_width = (width / 2).max(1);
             let next_height = (height / 2).max(1);
-            pixels = downsample_rgba8(
+            let pixels = downsample_rgba8(
                 width,
                 height,
                 next_width,
                 next_height,
-                &pixels,
+                &levels.last().expect("base mip was inserted").pixels,
                 self.color_space,
             );
             width = next_width;
@@ -663,7 +673,7 @@ impl Texture {
             levels.push(Image {
                 width,
                 height,
-                pixels: pixels.clone(),
+                pixels,
             });
         }
 
@@ -845,21 +855,33 @@ fn downsample_rgba8(
 }
 
 fn srgb_to_linear(value: u8) -> f32 {
-    let value = value as f32 / 255.0;
-    if value <= 0.04045 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.4)
-    }
+    static LOOKUP: OnceLock<[f32; 256]> = OnceLock::new();
+    LOOKUP.get_or_init(|| {
+        std::array::from_fn(|value| {
+            let value = value as f32 / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        })
+    })[value as usize]
 }
 
 fn linear_to_srgb(value: f32) -> u8 {
-    let value = if value <= 0.0031308 {
-        value * 12.92
-    } else {
-        1.055 * value.powf(1.0 / 2.4) - 0.055
-    };
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+    static LOOKUP: OnceLock<[u8; 65_536]> = OnceLock::new();
+    let lookup = LOOKUP.get_or_init(|| {
+        std::array::from_fn(|value| {
+            let value = value as f32 / 65_535.0;
+            let value = if value <= 0.0031308 {
+                value * 12.92
+            } else {
+                1.055 * value.powf(1.0 / 2.4) - 0.055
+            };
+            (value.clamp(0.0, 1.0) * 255.0).round() as u8
+        })
+    });
+    lookup[(value.clamp(0.0, 1.0) * 65_535.0).round() as usize]
 }
 
 #[cfg(test)]
@@ -885,6 +907,7 @@ mod tests {
         assert!(material.textures.base_color.is_none());
         assert!(material.textures.normal.is_none());
         assert!(material.textures.metallic_roughness.is_none());
+        assert!(material.textures.emissive.is_none());
     }
 
     #[test]
@@ -892,7 +915,8 @@ mod tests {
         let texture = TextureHandle(7);
         let material = Material::textured(texture)
             .with_normal_texture(TextureHandle(8))
-            .with_metallic_roughness_texture(TextureHandle(9));
+            .with_metallic_roughness_texture(TextureHandle(9))
+            .with_emissive_texture(TextureHandle(10));
 
         assert_eq!(
             material.textures,
@@ -900,6 +924,7 @@ mod tests {
                 base_color: Some(texture),
                 normal: Some(TextureHandle(8)),
                 metallic_roughness: Some(TextureHandle(9)),
+                emissive: Some(TextureHandle(10)),
             }
         );
     }
