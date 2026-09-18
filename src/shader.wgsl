@@ -8,6 +8,11 @@ struct Camera {
     ambient_color: vec4<f32>,
     shadow_cascade_splits: array<vec4<f32>, 2>,
     shadow_texel_sizes: array<vec4<f32>, 2>,
+    // x: environment cubemap mip level count,
+    // y: image-based lighting intensity,
+    // z: exposure applied before tone mapping,
+    // w: 1.0 when an environment is bound, 0.0 for the ambient fallback.
+    environment_params: vec4<f32>,
 };
 
 struct ShadowCamera {
@@ -32,6 +37,12 @@ var shadow_sampler: sampler_comparison;
 
 @group(0) @binding(3)
 var<uniform> shadow_camera: ShadowCamera;
+
+@group(0) @binding(4)
+var environment_map: texture_cube<f32>;
+
+@group(0) @binding(5)
+var environment_sampler: sampler;
 
 @group(1) @binding(0)
 var material_texture_0: texture_2d_array<f32>;
@@ -210,6 +221,37 @@ fn linear_to_srgb(linear_color: vec3<f32>) -> vec3<f32> {
         1.055 * pow(color, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055),
         color > vec3<f32>(0.0031308),
     );
+}
+
+// Narkowicz ACES filmic approximation: the same family of curve Three.js
+// uses by default. It keeps specular highlights punchy instead of washing
+// them out to gray the way Reinhard does.
+fn aces_tone_map(color: vec3<f32>) -> vec3<f32> {
+    let a = 2.51;
+    let b = 0.03;
+    let c = 2.43;
+    let d = 0.59;
+    let e = 0.14;
+    return clamp(
+        (color * (a * color + b)) / (color * (c * color + d) + e),
+        vec3<f32>(0.0),
+        vec3<f32>(1.0),
+    );
+}
+
+// Unreal's analytic environment BRDF approximation: splits the specular
+// image-based term into a Fresnel/roughness response without a LUT texture.
+fn environment_brdf_approx(
+    base_reflectance: vec3<f32>,
+    roughness: f32,
+    normal_dot_view: f32,
+) -> vec3<f32> {
+    let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
+    let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
+    let r = roughness * c0 + c1;
+    let a004 = min(r.x * r.x, exp2(-9.28 * normal_dot_view)) * r.x + r.y;
+    let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;
+    return base_reflectance * ab.x + ab.y;
 }
 
 fn sample_base_color(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
@@ -410,9 +452,43 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         * camera.light_color.rgb
         * normal_dot_light
         * shadow_visibility;
-    let ambient = base_color.rgb * camera.ambient_color.rgb * (1.0 - metallic);
-    let color = ambient + direct + slot_emissive_roughness.rgb * emissive_sample.rgb;
-    let tone_mapped = color / (color + vec3<f32>(1.0));
+    // Image-based lighting from the workspace skybox: metals get their
+    // reflections here. Diffuse irradiance is a heavily blurred normal sample,
+    // specular is a roughness-driven prefiltered reflection modulated by an
+    // analytic environment BRDF (no LUT texture required).
+    let environment_mip_count = camera.environment_params.x;
+    let environment_intensity = camera.environment_params.y;
+    let exposure = camera.environment_params.z;
+    let has_environment = camera.environment_params.w;
+    let max_environment_lod = max(environment_mip_count - 1.0, 0.0);
+    let reflection = reflect(-view_direction, mapped_normal);
+    let specular_lod = roughness * max_environment_lod;
+    let prefiltered = textureSampleLevel(
+        environment_map,
+        environment_sampler,
+        reflection,
+        specular_lod,
+    ).rgb;
+    let diffuse_lod = clamp(
+        environment_mip_count - 3.0,
+        0.0,
+        max_environment_lod,
+    );
+    let irradiance = textureSampleLevel(
+        environment_map,
+        environment_sampler,
+        mapped_normal,
+        diffuse_lod,
+    ).rgb;
+    let diffuse_ibl = irradiance * base_color.rgb * (1.0 - metallic);
+    let specular_ibl = prefiltered
+        * environment_brdf_approx(base_reflectance, roughness, normal_dot_view);
+    let image_based = (diffuse_ibl + specular_ibl) * environment_intensity * has_environment;
+    let ambient = base_color.rgb * camera.ambient_color.rgb * (1.0 - metallic)
+        * (1.0 - has_environment);
+    let color = ambient + direct + slot_emissive_roughness.rgb * emissive_sample.rgb
+        + image_based;
+    let tone_mapped = aces_tone_map(color * exposure);
     var display_color = linear_to_srgb(tone_mapped);
     if FRAMEBUFFER_IS_SRGB > 0.5 {
         display_color = tone_mapped;

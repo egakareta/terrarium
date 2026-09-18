@@ -26,6 +26,11 @@ const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Uno
 const SHADOW_DISTANCE: f32 = 80.0;
 const SHADOW_CASTER_MARGIN: f32 = 20.0;
 const SHADOW_RECEIVER_MARGIN: f32 = 5.0;
+/// Exposure applied to scene and skybox colors before ACES tone mapping,
+/// giving a punchy look.
+const EXPOSURE: f32 = 1.0;
+/// Strength of skybox image-based lighting on PBR materials.
+const ENVIRONMENT_INTENSITY: f32 = 1.0;
 
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
@@ -282,6 +287,7 @@ struct ShadowCameraUniform {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct SkyboxCameraUniform {
     view_projection: [[f32; 4]; 4],
+    exposure: [f32; 4],
 }
 
 /// Unit-cube corners shared by the skybox vertex buffer.
@@ -343,6 +349,10 @@ pub struct Renderer {
     skybox_revision: Option<u64>,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
+    shadow_view: wgpu::TextureView,
+    _fallback_environment_texture: wgpu::Texture,
+    fallback_environment_view: wgpu::TextureView,
     shadow_camera_buffer: wgpu::Buffer,
     shadow_camera_bind_group: wgpu::BindGroup,
     shadow_camera_stride: u32,
@@ -413,6 +423,9 @@ pub struct CameraUniform {
     pub shadow_cascade_splits: [[f32; 4]; 2],
     /// World-space width of one texel in each directional shadow cascade.
     pub shadow_texel_sizes: [[f32; 4]; 2],
+    /// Image-based lighting parameters: cubemap mip count, IBL intensity,
+    /// exposure, and 1.0/0.0 environment presence.
+    pub environment_params: [f32; 4],
 }
 
 impl Renderer {
@@ -468,6 +481,20 @@ impl Renderer {
             mapped_at_creation: false,
         });
 
+        let skybox_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("skybox sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 32.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("camera bind group layout"),
@@ -498,7 +525,72 @@ impl Renderer {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                         count: None,
                     },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 4,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 5,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
+            });
+        // Black 1x1 cubemap bound until the first skybox upload (and whenever
+        // the workspace has no skybox). The shader multiplies IBL by zero in
+        // that case, so its contents never contribute.
+        let fallback_environment_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fallback environment cubemap"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for layer in 0..6u32 {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &fallback_environment_texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &[0, 0, 0, 255],
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(4),
+                    rows_per_image: Some(1),
+                },
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        let fallback_environment_view =
+            fallback_environment_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("fallback environment cubemap view"),
+                dimension: Some(wgpu::TextureViewDimension::Cube),
+                array_layer_count: Some(6),
+                ..Default::default()
             });
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("camera bind group"),
@@ -515,6 +607,14 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::Sampler(&shadow_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(&fallback_environment_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&skybox_sampler),
                 },
             ],
         });
@@ -751,7 +851,7 @@ impl Renderer {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -782,20 +882,6 @@ impl Renderer {
             size: std::mem::size_of::<SkyboxCameraUniform>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
-        });
-        let skybox_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("skybox sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Linear,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 32.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
         });
         let skybox_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("skybox cube vertex buffer"),
@@ -894,6 +980,10 @@ impl Renderer {
             skybox_revision: None,
             camera_buffer,
             camera_bind_group,
+            camera_bind_group_layout,
+            shadow_view,
+            _fallback_environment_texture: fallback_environment_texture,
+            fallback_environment_view,
             shadow_camera_buffer,
             shadow_camera_bind_group,
             shadow_camera_stride,
@@ -1711,6 +1801,13 @@ impl Renderer {
         let light_direction = Vec3::new(-0.45, 0.85, 0.35);
         let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
             light_view_projections(&workspace.current_camera, light_direction);
+        // Image-based lighting comes from the workspace skybox cubemap, which
+        // carries a full CPU-generated mip chain: smooth surfaces sample sharp
+        // reflections at LOD 0 while rough surfaces sample blurred mips.
+        let (environment_mip_count, has_environment) = match workspace.skybox() {
+            Some(skybox) => (skybox.face_size().ilog2() as f32 + 1.0, 1.0),
+            None => (1.0, 0.0),
+        };
         let camera_uniform = CameraUniform {
             view_projection: camera_vp.to_cols_array_2d(),
             light_view_projections: light_vps.map(|matrix| matrix.to_cols_array_2d()),
@@ -1727,6 +1824,12 @@ impl Renderer {
             ambient_color: [0.035, 0.045, 0.06, 0.0],
             shadow_cascade_splits: pack_shadow_values(shadow_cascade_splits),
             shadow_texel_sizes: pack_shadow_values(shadow_texel_sizes),
+            environment_params: [
+                environment_mip_count,
+                ENVIRONMENT_INTENSITY,
+                EXPOSURE,
+                has_environment,
+            ],
         };
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&camera_uniform));
@@ -1748,6 +1851,7 @@ impl Renderer {
             0,
             bytemuck::bytes_of(&SkyboxCameraUniform {
                 view_projection: sky_view_projection.to_cols_array_2d(),
+                exposure: [EXPOSURE, 0.0, 0.0, 0.0],
             }),
         );
         if self.skybox_revision != Some(workspace.skybox_revision()) {
@@ -2185,12 +2289,15 @@ impl Renderer {
     ///
     /// A `None` skybox clears the GPU copy so the scene falls back to the
     /// clear color. Faces are uploaded with a full mip chain generated on the
-    /// CPU, matching material texture filtering.
+    /// CPU, matching material texture filtering. The same cubemap doubles as
+    /// the PBR environment map, so the camera bind group is refreshed to
+    /// reference the new view (or the black fallback when cleared).
     fn sync_skybox(&mut self, skybox: Option<&Skybox>) -> Result<(), RendererError> {
         let Some(skybox) = skybox else {
             self.skybox_texture = None;
             self.skybox_view = None;
             self.skybox_bind_group = None;
+            self.refresh_environment_binding();
             return Ok(());
         };
         let face_size = skybox.face_size();
@@ -2272,7 +2379,44 @@ impl Renderer {
         self.skybox_texture = Some(texture);
         self.skybox_view = Some(view);
         self.skybox_bind_group = Some(bind_group);
+        self.refresh_environment_binding();
         Ok(())
+    }
+
+    /// Rebinds the PBR environment map to the current skybox view, or to the
+    /// black fallback cubemap when no skybox is set.
+    fn refresh_environment_binding(&mut self) {
+        let camera_bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("camera bind group"),
+            layout: &self.camera_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&self.shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self._shadow_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(
+                        self.skybox_view
+                            .as_ref()
+                            .unwrap_or(&self.fallback_environment_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(&self.skybox_sampler),
+                },
+            ],
+        });
+        self.camera_bind_group = camera_bind_group;
     }
 
     fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>, cascade: usize) {
