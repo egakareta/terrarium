@@ -258,7 +258,12 @@ impl Engine {
         (config.wgpu_options)(&mut wgpu_options);
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if config.headless {
+            let headless_frame_limit = match config.headless {
+                HeadlessMode::Disabled => None,
+                HeadlessMode::Frames(frame_count) => Some(Some(frame_count)),
+                HeadlessMode::UntilClose => Some(None),
+            };
+            if let Some(mut frames_remaining) = headless_frame_limit {
                 let instance = pollster::block_on(wgpu_options.wgpu_setup.new_instance());
                 let render_state = pollster::block_on(egui_wgpu::RenderState::create(
                     &wgpu_options,
@@ -271,19 +276,34 @@ impl Engine {
                 creation_context.wgpu_render_state = Some(render_state);
                 let mut app = app_creator(&creation_context).map_err(eframe::Error::AppCreation)?;
                 let mut frame = eframe::Frame::_new_kittest();
-                let mut raw_input = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(config.size[0] as f32, config.size[1] as f32),
-                    )),
-                    ..Default::default()
-                };
-                app.raw_input_hook(&context, &mut raw_input);
-                let mut output = context.run_ui(raw_input, |ui| {
-                    app.logic(ui.ctx(), &mut frame);
-                    app.ui(ui, &mut frame);
-                });
-                output.textures_delta.clear();
+                while !matches!(frames_remaining, Some(0)) {
+                    let mut raw_input = egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(config.size[0] as f32, config.size[1] as f32),
+                        )),
+                        ..Default::default()
+                    };
+                    app.raw_input_hook(&context, &mut raw_input);
+                    let mut output = context.run_ui(raw_input, |ui| {
+                        app.logic(ui.ctx(), &mut frame);
+                        app.ui(ui, &mut frame);
+                    });
+                    let close_requested = output
+                        .viewport_output
+                        .get(&egui::ViewportId::ROOT)
+                        .is_some_and(|viewport| {
+                            viewport.commands.contains(&egui::ViewportCommand::Close)
+                        });
+                    output.textures_delta.clear();
+
+                    if close_requested {
+                        break;
+                    }
+                    if let Some(frames_remaining) = &mut frames_remaining {
+                        *frames_remaining -= 1;
+                    }
+                }
                 return Ok(());
             }
 
@@ -473,7 +493,15 @@ impl DerefMut for Engine {
     }
 }
 
-/// Options controlling the behavior of the window.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy)]
+enum HeadlessMode {
+    Disabled,
+    Frames(usize),
+    UntilClose,
+}
+
+/// Options controlling the behavior of the application.
 pub struct AppConfig<'a> {
     title: &'a str,
     size: [u32; 2],
@@ -482,7 +510,7 @@ pub struct AppConfig<'a> {
     wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
     env_logger: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    headless: bool,
+    headless: HeadlessMode,
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook: bool,
     bundle_fonts: bool,
@@ -498,7 +526,7 @@ impl<'a> Default for AppConfig<'a> {
             wgpu_options: Box::new(|_| {}),
             env_logger: true,
             #[cfg(not(target_arch = "wasm32"))]
-            headless: false,
+            headless: HeadlessMode::Disabled,
             #[cfg(target_arch = "wasm32")]
             console_error_panic_hook: true,
             bundle_fonts: true,
@@ -553,19 +581,27 @@ impl<'a> AppConfig<'a> {
         Ok(take_engine(engine_slot))
     }
 
-    /// Runs one headless frame instead of opening a native window.
+    /// Runs headlessly instead of opening a native window.
+    ///
+    /// `Some(frame_count)` runs at most that many frames, while `None` runs indefinitely. A frame
+    /// that sends [`egui::ViewportCommand::Close`] stops either mode early. A count of zero
+    /// initializes the application without running a frame.
     ///
     /// This has no useful effect on web applications.
-    pub fn with_headless(self) -> Self {
+    pub fn with_headless(self, frame_count: Option<usize>) -> Self {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let mut this = self;
-            this.headless = true;
+            this.headless = match frame_count {
+                Some(frame_count) => HeadlessMode::Frames(frame_count),
+                None => HeadlessMode::UntilClose,
+            };
             this
         }
 
         #[cfg(target_arch = "wasm32")]
         {
+            let _ = frame_count;
             self
         }
     }
