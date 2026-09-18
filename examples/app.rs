@@ -107,6 +107,9 @@ fn create_workspace() -> Result<Workspace, RendererError> {
             ..Material::default()
         };
         part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
+        part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
+        part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
+        part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
     });
 
     workspace.add_child_with(Part::new("GrassBlock"), |part| {
