@@ -13,6 +13,7 @@ eframe = { version = "0.36", default-features = false, features = [
 ] }
 env_logger = "0.11"
 glam = "0.33"
+gltf = "1"
 image = { version = "0.25" }
 log = "0.4"
 serde = "1"

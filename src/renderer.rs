@@ -8,7 +8,7 @@ use web_time::Instant;
 
 use crate::{
     Camera, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material, MaterialSlot,
-    Mesh, MeshMaterialSlots, Part, PartShape, Texture, TextureColorSpace, TextureError,
+    Mesh, MeshMaterialSlots, MeshPart, Part, PartShape, Texture, TextureColorSpace, TextureError,
     TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
@@ -115,10 +115,10 @@ impl InstanceRaw {
 }
 
 /// A handle to mesh data stored on the GPU.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct MeshHandle(usize);
 struct RenderBatch {
-    shape: PartShape,
+    mesh: MeshHandle,
     textures: MaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u8,
@@ -127,7 +127,7 @@ struct RenderBatch {
 }
 
 struct PreparedRenderBatch {
-    shape: PartShape,
+    mesh: MeshHandle,
     packed_textures: PackedMaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u8,
@@ -203,16 +203,21 @@ impl MaterialSetKey {
         Self([base; MATERIAL_SLOT_COUNT])
     }
 
-    fn from_part(part: &Part) -> Self {
-        if part.material_slots.slots.is_empty() {
-            return Self::uniform(Self::base_bits(&part.material));
+    fn from_materials(material: &Material, material_slots: &MeshMaterialSlots) -> Self {
+        if material_slots.slots.is_empty() {
+            return Self::uniform(Self::base_bits(material));
         }
         let mut slots = [[0u32; 9]; MATERIAL_SLOT_COUNT];
         for (index, slot) in std::iter::once(MaterialSlot::Base)
             .chain(MaterialSlot::ALL_DIRECTIONS)
             .enumerate()
         {
-            slots[index] = Self::base_bits(part.material_slot(slot));
+            let material = if slot == MaterialSlot::Base {
+                material
+            } else {
+                material_slots.get(slot).unwrap_or(material)
+            };
+            slots[index] = Self::base_bits(material);
         }
         Self(slots)
     }
@@ -255,6 +260,12 @@ struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+}
+
+#[derive(Clone, Copy)]
+struct CachedMeshPart {
+    revision: u64,
+    handle: MeshHandle,
 }
 
 #[repr(C)]
@@ -315,6 +326,8 @@ pub struct Renderer {
     instance_buffer: wgpu::Buffer,
     meshes: Vec<GpuMesh>,
     primitive_meshes: [MeshHandle; PartShape::COUNT],
+    meshpart_meshes: HashMap<InstanceId, CachedMeshPart>,
+    free_meshpart_meshes: Vec<MeshHandle>,
     clear_color: wgpu::Color,
     last_frame: Instant,
     fps_timer: Instant,
@@ -324,7 +337,7 @@ pub struct Renderer {
     batch_scratch: Vec<RenderBatch>,
     batch_indices_scratch: HashMap<
         (
-            PartShape,
+            MeshHandle,
             MaterialTextures,
             [TextureFilter; MATERIAL_SLOT_COUNT],
             u8,
@@ -713,6 +726,8 @@ impl Renderer {
             instance_buffer,
             meshes: Vec::new(),
             primitive_meshes: [MeshHandle(usize::MAX); PartShape::COUNT],
+            meshpart_meshes: HashMap::new(),
+            free_meshpart_meshes: Vec::new(),
             clear_color: wgpu::Color {
                 r: 0.018,
                 g: 0.028,
@@ -899,6 +914,13 @@ impl Renderer {
 
     /// Uploads a custom mesh and returns its GPU handle.
     pub fn add_mesh(&mut self, mesh: &Mesh) -> Result<MeshHandle, RendererError> {
+        let gpu_mesh = self.create_gpu_mesh(mesh)?;
+        let handle = MeshHandle(self.meshes.len());
+        self.meshes.push(gpu_mesh);
+        Ok(handle)
+    }
+
+    fn create_gpu_mesh(&self, mesh: &Mesh) -> Result<GpuMesh, RendererError> {
         if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Err(RendererError::EmptyMesh);
         }
@@ -922,12 +944,39 @@ impl Renderer {
                 contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             });
-        let handle = MeshHandle(self.meshes.len());
-        self.meshes.push(GpuMesh {
+        Ok(GpuMesh {
             vertex_buffer,
             index_buffer,
             index_count: mesh.indices.len() as u32,
-        });
+        })
+    }
+
+    fn meshpart_mesh(&mut self, meshpart: &MeshPart) -> Result<MeshHandle, RendererError> {
+        if let Some(cached) = self.meshpart_meshes.get(&meshpart.id())
+            && cached.revision == meshpart.mesh_revision()
+        {
+            return Ok(cached.handle);
+        }
+
+        let gpu_mesh = self.create_gpu_mesh(meshpart.mesh())?;
+        let handle = if let Some(cached) = self.meshpart_meshes.get(&meshpart.id()).copied() {
+            self.meshes[cached.handle.0] = gpu_mesh;
+            cached.handle
+        } else if let Some(handle) = self.free_meshpart_meshes.pop() {
+            self.meshes[handle.0] = gpu_mesh;
+            handle
+        } else {
+            let handle = MeshHandle(self.meshes.len());
+            self.meshes.push(gpu_mesh);
+            handle
+        };
+        self.meshpart_meshes.insert(
+            meshpart.id(),
+            CachedMeshPart {
+                revision: meshpart.mesh_revision(),
+                handle,
+            },
+        );
         Ok(handle)
     }
 
@@ -985,11 +1034,13 @@ impl Renderer {
         Ok(textures)
     }
 
-    fn material_filters(part: &Part) -> [TextureFilter; MATERIAL_SLOT_COUNT] {
-        let base_filter = part.material.filter;
+    fn material_filters(
+        material: &Material,
+        material_slots: &MeshMaterialSlots,
+    ) -> [TextureFilter; MATERIAL_SLOT_COUNT] {
+        let base_filter = material.filter;
         let mut filters = [base_filter; MATERIAL_SLOT_COUNT];
-        for (index, material) in part
-            .material_slots
+        for (index, material) in material_slots
             .slots
             .iter()
             .take(MATERIAL_SLOT_COUNT - 1)
@@ -1004,11 +1055,15 @@ impl Renderer {
         filters
     }
 
-    fn material_set_index(&mut self, part: &Part) -> u32 {
+    fn material_set_index(
+        &mut self,
+        material: &Material,
+        material_slots: &MeshMaterialSlots,
+    ) -> u32 {
         // Fast path: no overrides means every face uses the base material, so
         // only the 9 base words need comparing.
-        if part.material_slots.slots.is_empty() {
-            let base = MaterialSetKey::base_bits(&part.material);
+        if material_slots.slots.is_empty() {
+            let base = MaterialSetKey::base_bits(material);
             if let Some((last_base, index)) = self.material_factor_last_uniform
                 && last_base == base
             {
@@ -1019,7 +1074,7 @@ impl Renderer {
             self.material_factor_last_uniform = Some((base, index));
             return index;
         }
-        let key = MaterialSetKey::from_part(part);
+        let key = MaterialSetKey::from_materials(material, material_slots);
         if let Some((last_key, index)) = self.material_factor_last
             && last_key == key
         {
@@ -1475,12 +1530,26 @@ impl Renderer {
         let default_textures = self.default_material_textures;
         let default_filters = self.default_material_filters;
 
+        let stale_meshparts: Vec<_> = self
+            .meshpart_meshes
+            .keys()
+            .copied()
+            .filter(|&id| workspace.get::<MeshPart>(id).is_none())
+            .collect();
+        for id in stale_meshparts {
+            if let Some(cached) = self.meshpart_meshes.remove(&id) {
+                self.free_meshpart_meshes.push(cached.handle);
+            }
+        }
+
         // Keep the finite set of default-material batches and their allocations
         // alive across frames. Custom material combinations can be unbounded,
         // so rebuild those rather than retaining stale scratch storage forever.
         let mut batches = std::mem::take(&mut self.batch_scratch);
         let mut batch_indices = std::mem::take(&mut self.batch_indices_scratch);
-        batches.retain(|batch| batch.textures == default_textures);
+        batches.retain(|batch| {
+            batch.textures == default_textures && self.primitive_meshes.contains(&batch.mesh)
+        });
         batch_indices.clear();
         for batch in &mut batches {
             batch.instances.clear();
@@ -1488,10 +1557,13 @@ impl Renderer {
         // Fast path for the common untextured case: index directly by shape
         // and pass visibility instead of hashing a large material key per part.
         let mut default_batches = [[None; VISIBILITY_MASK_COUNT]; PartShape::COUNT];
-        for (batch_index, batch) in batches.iter().enumerate() {
-            if batch.textures == default_textures {
-                default_batches[batch.shape.index()][batch.visibility_mask as usize] =
-                    Some(batch_index);
+        for shape in PartShape::ALL {
+            let mesh = self.primitive_meshes[shape.index()];
+            for (batch_index, batch) in batches.iter().enumerate() {
+                if batch.mesh == mesh {
+                    default_batches[shape.index()][batch.visibility_mask as usize] =
+                        Some(batch_index);
+                }
             }
         }
         let mut parts = workspace.get_all::<Part>();
@@ -1569,21 +1641,22 @@ impl Renderer {
                 // textures sample identically under any filter, so untextured
                 // parts keep sharing the fast-path default batch.
                 let custom_filters = if custom_textures.is_some() {
-                    let filters = Self::material_filters(part);
+                    let filters = Self::material_filters(&part.material, &part.material_slots);
                     (filters != default_filters).then_some(filters)
                 } else {
                     None
                 };
                 let batch_index = if let Some(textures) = custom_textures {
                     let filters = custom_filters.unwrap_or(default_filters);
-                    let key = (part.shape, textures, filters, visibility_mask);
+                    let mesh = self.primitive_meshes[part.shape.index()];
+                    let key = (mesh, textures, filters, visibility_mask);
                     if let Some(&batch_index) = batch_indices.get(&key) {
                         batch_index
                     } else {
                         let batch_index = batches.len();
                         batch_indices.insert(key, batch_index);
                         batches.push(RenderBatch {
-                            shape: part.shape,
+                            mesh,
                             textures,
                             filters,
                             visibility_mask,
@@ -1600,7 +1673,7 @@ impl Renderer {
                         let batch_index = batches.len();
                         *slot = Some(batch_index);
                         batches.push(RenderBatch {
-                            shape: part.shape,
+                            mesh: self.primitive_meshes[part.shape.index()],
                             textures: default_textures,
                             filters: default_filters,
                             visibility_mask,
@@ -1620,7 +1693,7 @@ impl Renderer {
                     (
                         normal_scales_from_model(&model),
                         part.color.rgba(),
-                        self.material_set_index(part),
+                        self.material_set_index(&part.material, &part.material_slots),
                     )
                 } else {
                     ([0.0; 3], [0.0; 4], 0)
@@ -1639,9 +1712,95 @@ impl Renderer {
             }
         }
 
+        for meshpart in workspace.get_all::<MeshPart>() {
+            let pivot = meshpart.pivot();
+            let center = pivot.w_axis.truncate();
+            let radius = meshpart.bounding_radius() * meshpart.size.abs().max_element() * 1.01;
+            let mut visibility_mask = 0;
+            if sphere_visible(&camera_planes, center, radius) {
+                visibility_mask |= 1;
+            }
+            for (cascade, planes) in light_planes.iter().enumerate() {
+                if sphere_visible(planes, center, radius) {
+                    visibility_mask |= 1 << (cascade + 1);
+                }
+            }
+            if visibility_mask == 0 {
+                continue;
+            }
+
+            let mesh = self.meshpart_mesh(meshpart)?;
+            let has_custom_textures = visibility_mask & 1 != 0
+                && (meshpart.material.textures.base_color.is_some()
+                    || meshpart.material.textures.normal.is_some()
+                    || meshpart.material.textures.metallic_roughness.is_some()
+                    || meshpart
+                        .material_slots
+                        .slots
+                        .iter()
+                        .flatten()
+                        .any(|material| {
+                            material.textures.base_color.is_some()
+                                || material.textures.normal.is_some()
+                                || material.textures.metallic_roughness.is_some()
+                        }));
+            let textures = if has_custom_textures {
+                self.material_textures(workspace, &meshpart.material, &meshpart.material_slots)?
+            } else {
+                default_textures
+            };
+            let filters = if textures == default_textures {
+                default_filters
+            } else {
+                Self::material_filters(&meshpart.material, &meshpart.material_slots)
+            };
+            let key = (mesh, textures, filters, visibility_mask);
+            let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
+                batch_index
+            } else {
+                let batch_index = batches.len();
+                batch_indices.insert(key, batch_index);
+                batches.push(RenderBatch {
+                    mesh,
+                    textures,
+                    filters,
+                    visibility_mask,
+                    instances: Vec::new(),
+                    instance_start: 0,
+                });
+                batch_index
+            };
+            let model = Mat4::from_cols(
+                pivot.x_axis * meshpart.size.x,
+                pivot.y_axis * meshpart.size.y,
+                pivot.z_axis * meshpart.size.z,
+                pivot.w_axis,
+            );
+            let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
+                (
+                    normal_scales_from_model(&model),
+                    meshpart.color.rgba(),
+                    self.material_set_index(&meshpart.material, &meshpart.material_slots),
+                )
+            } else {
+                ([0.0; 3], [0.0; 4], 0)
+            };
+            batches[batch_index].instances.push(InstanceRaw {
+                model: [
+                    model.x_axis.truncate().to_array(),
+                    model.y_axis.truncate().to_array(),
+                    model.z_axis.truncate().to_array(),
+                    model.w_axis.truncate().to_array(),
+                ],
+                normal_scales,
+                tint,
+                material_set,
+            });
+        }
+
         let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
         self.upload_material_factors();
-        batches.sort_unstable_by_key(|batch| (batch.shape.index(), batch.visibility_mask));
+        batches.sort_unstable_by_key(|batch| (batch.mesh.0, batch.visibility_mask));
         let mut instance_start = 0;
         for batch in &mut batches {
             batch.instance_start = instance_start;
@@ -1690,7 +1849,7 @@ impl Renderer {
                 packed
             };
             self.prepared_batches.push(PreparedRenderBatch {
-                shape: batch.shape,
+                mesh: batch.mesh,
                 packed_textures: packed,
                 filters: batch.filters,
                 visibility_mask: batch.visibility_mask,
@@ -1719,7 +1878,7 @@ impl Renderer {
         if use_materials {
             pass.set_bind_group(2, &self.material_factors_bind_group, &[]);
         }
-        let mut bound_shape = None;
+        let mut bound_mesh = None;
         let mut bound_material = None;
         let mut index = 0;
         while index < self.prepared_batches.len() {
@@ -1732,7 +1891,7 @@ impl Renderer {
             let mut next = index + 1;
             while let Some(candidate) = self.prepared_batches.get(next) {
                 if candidate.visibility_mask & visibility_bit == 0
-                    || candidate.shape != batch.shape
+                    || candidate.mesh != batch.mesh
                     || (use_materials
                         && (candidate.packed_textures != batch.packed_textures
                             || candidate.filters != batch.filters))
@@ -1743,15 +1902,14 @@ impl Renderer {
                 instance_count += candidate.instance_count;
                 next += 1;
             }
-            let mesh_handle = self.primitive_meshes[batch.shape.index()];
-            let Some(mesh) = self.meshes.get(mesh_handle.0) else {
+            let Some(mesh) = self.meshes.get(batch.mesh.0) else {
                 index = next;
                 continue;
             };
-            if bound_shape != Some(batch.shape) {
+            if bound_mesh != Some(batch.mesh) {
                 pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
                 pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                bound_shape = Some(batch.shape);
+                bound_mesh = Some(batch.mesh);
             }
             let instance_start =
                 batch.instance_start as u64 * std::mem::size_of::<InstanceRaw>() as u64;
@@ -2573,7 +2731,7 @@ mod tests {
         };
         part.set_material_slot(MaterialSlot::Top, top);
 
-        let vec4s = MaterialSetKey::from_part(&part).vec4s();
+        let vec4s = MaterialSetKey::from_materials(&part.material, &part.material_slots).vec4s();
         // Base slot carries the base factors.
         assert_eq!(vec4s[0], [0.76, 0.30, 0.14, 1.0]);
         assert_eq!(vec4s[1], [0.1, 0.2, 0.3, 0.24]);
@@ -2607,12 +2765,15 @@ mod tests {
         copper_clone.material.metallic = 0.82;
 
         assert_eq!(
-            MaterialSetKey::from_part(&copper),
-            MaterialSetKey::from_part(&copper_clone)
+            MaterialSetKey::from_materials(&copper.material, &copper.material_slots),
+            MaterialSetKey::from_materials(&copper_clone.material, &copper_clone.material_slots)
         );
         assert_ne!(
-            MaterialSetKey::from_part(&copper),
-            MaterialSetKey::from_part(&copper_top_metal)
+            MaterialSetKey::from_materials(&copper.material, &copper.material_slots),
+            MaterialSetKey::from_materials(
+                &copper_top_metal.material,
+                &copper_top_metal.material_slots
+            )
         );
     }
 
