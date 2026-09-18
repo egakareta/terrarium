@@ -124,8 +124,7 @@ impl Part {
     /// Slots are directional, so they work for any [`PartShape`]: setting
     /// [`MaterialSlot::Top`] affects the top-facing triangles of a block,
     /// cylinder cap, wedge slope, sphere pole, or custom mesh alike. Setting
-    /// [`MaterialSlot::Base`] replaces the whole-part material, just like
-    /// Roblox's `BasePart.Material`.
+    /// [`MaterialSlot::Base`] replaces the whole-part material.
     pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
         if slot == MaterialSlot::Base {
             self.material = material;
