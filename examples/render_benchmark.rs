@@ -6,8 +6,8 @@ use std::{
 };
 
 use terrarium::{
-    App, AppBuilder, Camera, Color3, Engine, Instance, InstanceId, Material, MaterialSlot, Part,
-    PartShape, RendererError, Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
+    App, Camera, Color3, Engine, Instance, InstanceId, Material, MaterialSlot, Part, PartShape,
+    RendererError, Terrarium, Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
 };
@@ -535,7 +535,7 @@ fn main() {
         config.parts, config.warmup_frames, config.measured_frames
     );
 
-    AppBuilder::new()
+    Terrarium::new()
         .with_title("Render benchmark")
         .with_size([config.width, config.height])
         .with_wgpu_options(|wgpu_options| {

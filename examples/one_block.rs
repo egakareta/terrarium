@@ -1,5 +1,5 @@
 use terrarium::{
-    AppBuilder, Engine, Instance, Material, MaterialSlot, Part, PartShape, Texture,
+    Engine, Instance, Material, MaterialSlot, Part, PartShape, Terrarium, Texture,
     TextureColorSpace, TextureError, glam::Vec3,
 };
 
@@ -21,12 +21,12 @@ fn initialize(engine: &mut Engine) -> Result<(), TextureError> {
 }
 
 fn main() {
-    AppBuilder::new().run(initialize).unwrap();
+    Terrarium::new().run(initialize).unwrap();
 }
 
 #[test]
 fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
-    let engine = AppBuilder::new()
+    let engine = Terrarium::new()
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(initialize)

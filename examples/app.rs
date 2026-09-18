@@ -1,7 +1,6 @@
 use terrarium::{
-    App, AppBuilder, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape,
-    RendererError, Repeat, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui,
-    glam::Vec3,
+    App, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
+    Repeat, Terrarium, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui, glam::Vec3,
 };
 
 struct FpsOverlay;
@@ -209,12 +208,12 @@ fn initialize(engine: &mut Engine) -> Result<FpsOverlay, RendererError> {
 }
 
 fn main() {
-    AppBuilder::new().run(initialize).unwrap();
+    Terrarium::new().run(initialize).unwrap();
 }
 
 #[test]
 fn app_loads() -> Result<(), terrarium::AppCreationError> {
-    AppBuilder::new()
+    Terrarium::new()
         .with_size([32, 32])
         .with_headless(Some(1))
         .run(initialize)?;

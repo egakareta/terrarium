@@ -269,7 +269,7 @@ impl Engine {
         Ok(())
     }
 
-    fn start(config: AppBuilder<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+    fn start(config: Terrarium<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         if config.env_logger {
             let _ = env_logger::try_init();
         }
@@ -521,8 +521,8 @@ enum HeadlessMode {
     UntilClose,
 }
 
-/// Options controlling the behavior of the application.
-pub struct AppBuilder<'a> {
+/// The primary entry point for configuring and running a Terrarium application.
+pub struct Terrarium<'a> {
     title: &'a str,
     size: [u32; 2],
     #[cfg(target_arch = "wasm32")]
@@ -536,7 +536,7 @@ pub struct AppBuilder<'a> {
     bundle_fonts: bool,
 }
 
-impl<'a> Default for AppBuilder<'a> {
+impl<'a> Default for Terrarium<'a> {
     fn default() -> Self {
         Self {
             title: "app",
@@ -554,8 +554,10 @@ impl<'a> Default for AppBuilder<'a> {
     }
 }
 
-impl<'a> AppBuilder<'a> {
-    /// Equivalent to [`RunConfig::default`].
+impl<'a> Terrarium<'a> {
+    /// Creates a Terrarium application launcher with default settings.
+    ///
+    /// Equivalent to [`Terrarium::default()`].
     pub fn new() -> Self {
         Self::default()
     }

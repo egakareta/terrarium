@@ -1,5 +1,5 @@
 use terrarium::{
-    App, AppBuilder, AppCreationError, Engine, eframe, egui,
+    App, AppCreationError, Engine, Terrarium, eframe, egui,
     egui::{FontId, RichText},
 };
 
@@ -29,7 +29,7 @@ impl App for CloseAfterFrames {
 }
 
 fn main() {
-    AppBuilder::new()
+    Terrarium::new()
         .run(|_engine| -> Result<CloseAfterFrames, AppCreationError> {
             Ok(CloseAfterFrames {
                 completed: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -52,7 +52,7 @@ mod tests {
 
         let completed = Arc::new(AtomicUsize::new(0));
         let app_completed = Arc::clone(&completed);
-        AppBuilder::new()
+        Terrarium::new()
             .with_size([32, 32])
             .with_env_logger(false)
             .with_headless(None)

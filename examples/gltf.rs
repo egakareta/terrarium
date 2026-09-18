@@ -1,4 +1,4 @@
-use terrarium::{AppBuilder, Engine, GltfError, Instance, MeshPart, glam::Vec3};
+use terrarium::{Engine, GltfError, Instance, MeshPart, Terrarium, glam::Vec3};
 
 fn initialize(engine: &mut Engine) -> Result<(), GltfError> {
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
@@ -10,12 +10,12 @@ fn initialize(engine: &mut Engine) -> Result<(), GltfError> {
 }
 
 fn main() {
-    AppBuilder::new().run(initialize).unwrap();
+    Terrarium::new().run(initialize).unwrap();
 }
 
 #[test]
 fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
-    let engine = AppBuilder::new()
+    let engine = Terrarium::new()
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(initialize)?
@@ -41,7 +41,7 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
 
 #[test]
 fn baseline() -> Result<(), terrarium::AppCreationError> {
-    AppBuilder::new()
+    Terrarium::new()
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|_| Ok::<(), terrarium::AppCreationError>(()))?;
