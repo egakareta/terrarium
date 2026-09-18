@@ -96,7 +96,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         });
     }
 
-    let tower = workspace.add_child_with(Part::new("CopperTower"), |part| {
+    let tower = workspace.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Cylinder;
         part.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
@@ -140,7 +140,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.material.roughness = 0.82;
     });
 
-    let orb = workspace.add_child_with(Part::new("OrbitingOrb"), |part| {
+    let orb = workspace.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Ball;
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
@@ -149,7 +149,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.can_collide = false;
     });
 
-    workspace.add_child_with(Part::new("CopperPillar"), |part| {
+    workspace.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::Wedge;
         part.set_position(Vec3::new(2.7, 1.5, 2.2));
         part.size = Vec3::new(1.1, 3.0, 1.1);
@@ -157,7 +157,7 @@ fn create_workspace() -> Result<Workspace, RendererError> {
         part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
-    workspace.add_child_with(Part::new("TealMonolith"), |part| {
+    workspace.add_child_with(Part::unnamed(), |part| {
         part.shape = PartShape::CornerWedge;
         part.set_position(Vec3::new(-4.7, 0.6, 3.1));
         part.size = Vec3::new(1.8, 1.2, 1.8);
