@@ -25,7 +25,8 @@ impl Workspace {
         let mut instance = Box::new(InstanceData::new("Workspace"));
         let lookup = Rc::new(InstanceLookup::default());
         lookup.set_root(&mut instance);
-        let workspace = Self {
+        instance.set_lookup(Some(&lookup));
+        Self {
             instance,
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
@@ -34,9 +35,7 @@ impl Workspace {
             texture_revisions: Vec::new(),
             texture_revision: 0,
             lookup,
-        };
-        crate::instance::register_instance_lookup(workspace.id(), &workspace.lookup);
-        workspace
+        }
     }
 
     /// Takes ownership of a validated CPU-side texture and returns its workspace handle.
@@ -205,6 +204,7 @@ impl Clone for Workspace {
         let lookup = Rc::new(InstanceLookup::default());
         let mut instance = Box::new((*self.instance).clone());
         lookup.set_root(&mut instance);
+        instance.set_lookup(Some(&lookup));
         let mut workspace = Self {
             instance,
             current_camera: self.current_camera.clone(),
@@ -215,7 +215,6 @@ impl Clone for Workspace {
             texture_revision: self.texture_revision,
             lookup: lookup.clone(),
         };
-        crate::instance::register_instance_lookup(workspace.id(), &lookup);
         for child in workspace.instance.children_mut() {
             child.set_instance_lookup(Some(lookup.clone()));
         }

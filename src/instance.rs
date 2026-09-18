@@ -43,11 +43,6 @@ slotmap::new_key_type! {
 
 static INSTANCE_IDS: OnceLock<Mutex<SlotMap<InstanceId, ()>>> = OnceLock::new();
 
-thread_local! {
-    static INSTANCE_LOOKUPS: RefCell<InstanceMap<Weak<InstanceLookup>>> =
-        RefCell::new(InstanceMap::default());
-}
-
 fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
     INSTANCE_IDS.get_or_init(|| Mutex::new(SlotMap::with_key()))
 }
@@ -69,7 +64,7 @@ impl InstanceLookup {
             .insert(instance.id(), NonNull::from(instance));
     }
 
-    fn unregister(&self, id: InstanceId) {
+    pub(crate) fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
     }
 
@@ -97,28 +92,6 @@ impl InstanceLookup {
         // The workspace root is boxed so this pointer remains valid when Workspace moves.
         unsafe { root.as_mut().remove_child(child_id) }
     }
-}
-
-#[doc(hidden)]
-pub fn register_instance_lookup(id: InstanceId, lookup: &Rc<InstanceLookup>) {
-    INSTANCE_LOOKUPS.with_borrow_mut(|lookups| {
-        lookups.insert(id, Rc::downgrade(lookup));
-    });
-}
-
-#[doc(hidden)]
-pub fn unregister_instance_lookup(id: InstanceId) {
-    INSTANCE_LOOKUPS.with_borrow_mut(|lookups| {
-        if let Some(lookup) = lookups.remove(&id).and_then(|lookup| lookup.upgrade()) {
-            lookup.unregister(id);
-        }
-    });
-}
-
-/// Returns the lookup index associated with an instance, if it is parented.
-#[doc(hidden)]
-pub fn instance_lookup(id: InstanceId) -> Option<Rc<InstanceLookup>> {
-    INSTANCE_LOOKUPS.with_borrow(|lookups| lookups.get(&id).and_then(Weak::upgrade))
 }
 
 /// Implements the common [`Instance`] plumbing for a type backed by
@@ -175,6 +148,14 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.set_parent(parent);
             }
 
+            fn sibling_index(&self) -> usize {
+                self.$data $(.$data_tail)*.sibling_index()
+            }
+
+            fn set_sibling_index(&mut self, index: usize) {
+                self.$data $(.$data_tail)*.set_sibling_index(index);
+            }
+
             fn as_any(&self) -> &dyn ::std::any::Any {
                 self
             }
@@ -188,15 +169,20 @@ macro_rules! impl_instance {
                 lookup: Option<::std::rc::Rc<$crate::InstanceLookup>>,
             ) {
                 if let Some(lookup) = &lookup {
-                    $crate::register_instance_lookup(self.id(), lookup);
                     lookup.register(self);
-                } else {
-                    $crate::unregister_instance_lookup(self.id());
+                } else if let Some(lookup) = self.instance_lookup() {
+                    lookup.unregister(self.id());
                 }
+
+                self.$data $(.$data_tail)*.set_lookup(lookup.as_ref());
 
                 for child in self.children_mut() {
                     child.set_instance_lookup(lookup.clone());
                 }
+            }
+
+            fn instance_lookup(&self) -> Option<::std::rc::Rc<$crate::InstanceLookup>> {
+                self.$data $(.$data_tail)*.lookup()
             }
         }
     };
@@ -212,53 +198,13 @@ impl InstanceId {
 }
 
 #[derive(Debug)]
-struct IndexedVec<T> {
-    values: Vec<T>,
-    indices: InstanceMap<usize>,
-}
-
-impl<T> Default for IndexedVec<T> {
-    fn default() -> Self {
-        Self {
-            values: Vec::new(),
-            indices: InstanceMap::default(),
-        }
-    }
-}
-
-impl IndexedVec<Box<dyn Instance>> {
-    fn as_slice(&self) -> &[Box<dyn Instance>] {
-        &self.values
-    }
-
-    fn iter_mut(&mut self) -> std::slice::IterMut<'_, Box<dyn Instance>> {
-        self.values.iter_mut()
-    }
-
-    fn push(&mut self, value: Box<dyn Instance>) -> InstanceId {
-        let id = value.id();
-        let index = self.values.len();
-        self.values.push(value);
-        self.indices.insert(id, index);
-        id
-    }
-
-    fn remove(&mut self, id: InstanceId) -> Option<Box<dyn Instance>> {
-        let index = self.indices.remove(&id)?;
-        let value = self.values.swap_remove(index);
-        if let Some(moved_value) = self.values.get(index) {
-            self.indices.insert(moved_value.id(), index);
-        }
-        Some(value)
-    }
-}
-
-#[derive(Debug)]
 pub(crate) struct InstanceData {
     name: String,
     id: InstanceId,
     parent: Option<InstanceId>,
-    children: IndexedVec<Box<dyn Instance>>,
+    children: Vec<Box<dyn Instance>>,
+    sibling_index: usize,
+    lookup: Weak<InstanceLookup>,
 }
 
 impl InstanceData {
@@ -267,7 +213,9 @@ impl InstanceData {
             name: name.into(),
             id: InstanceId::new(),
             parent: None,
-            children: IndexedVec::default(),
+            children: Vec::new(),
+            sibling_index: usize::MAX,
+            lookup: Weak::new(),
         }
     }
 
@@ -291,8 +239,24 @@ impl InstanceData {
         self.parent = parent;
     }
 
+    pub(crate) fn sibling_index(&self) -> usize {
+        self.sibling_index
+    }
+
+    pub(crate) fn set_sibling_index(&mut self, index: usize) {
+        self.sibling_index = index;
+    }
+
+    pub(crate) fn lookup(&self) -> Option<Rc<InstanceLookup>> {
+        self.lookup.upgrade()
+    }
+
+    pub(crate) fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
+        self.lookup = lookup.map_or_else(Weak::new, Rc::downgrade);
+    }
+
     pub(crate) fn children(&self) -> &[Box<dyn Instance>] {
-        self.children.as_slice()
+        &self.children
     }
 
     pub(crate) fn children_mut(&mut self) -> ChildrenMut<'_> {
@@ -301,11 +265,12 @@ impl InstanceData {
 
     pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
         child.set_instance_parent(Some(self.id));
-        let child_id = self.children.push(child);
-        if let Some(lookup) = instance_lookup(self.id) {
+        child.set_sibling_index(self.children.len());
+        let child_id = child.id();
+        self.children.push(child);
+        if let Some(lookup) = self.lookup() {
             self.children
-                .iter_mut()
-                .next_back()
+                .last_mut()
                 .expect("just pushed child")
                 .set_instance_lookup(Some(lookup));
         }
@@ -313,10 +278,27 @@ impl InstanceData {
     }
 
     pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
-        let Some(mut child) = self.children.remove(id) else {
+        let indexed_position = self.lookup().and_then(|lookup| {
+            let instance = lookup.get(id)?;
+            // Registered instances remain boxed at stable addresses while parented.
+            Some(unsafe { instance.as_ref().sibling_index() })
+        });
+        let Some(index) = indexed_position
+            .filter(|&index| {
+                self.children
+                    .get(index)
+                    .is_some_and(|child| child.id() == id)
+            })
+            .or_else(|| self.children.iter().position(|child| child.id() == id))
+        else {
             return false;
         };
+        let mut child = self.children.swap_remove(index);
+        if let Some(moved_child) = self.children.get_mut(index) {
+            moved_child.set_sibling_index(index);
+        }
         child.set_instance_parent(None);
+        child.set_sibling_index(usize::MAX);
         child.set_instance_lookup(None);
         true
     }
@@ -324,7 +306,6 @@ impl InstanceData {
 
 impl Drop for InstanceData {
     fn drop(&mut self) {
-        unregister_instance_lookup(self.id);
         instance_ids()
             .lock()
             .expect("instance ID registry poisoned")
@@ -336,9 +317,7 @@ impl Clone for InstanceData {
     fn clone(&self) -> Self {
         let mut cloned = Self::new(self.name.clone());
         for child in self.children() {
-            let mut child = child.clone();
-            child.set_instance_parent(Some(cloned.id));
-            cloned.children.push(child);
+            cloned.add_child(child.clone());
         }
         cloned
     }
@@ -391,7 +370,7 @@ pub trait Instance: Any + Debug + InstanceClone {
             return false;
         };
         let id = self.id();
-        let Some(lookup) = instance_lookup(parent_id) else {
+        let Some(lookup) = self.instance_lookup() else {
             return false;
         };
 
@@ -463,6 +442,18 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Sets the internal parent link while a parent takes ownership of this instance.
     fn set_instance_parent(&mut self, parent: Option<InstanceId>);
 
+    /// Returns this instance's position in its parent's child storage.
+    #[doc(hidden)]
+    fn sibling_index(&self) -> usize {
+        usize::MAX
+    }
+
+    /// Updates this instance's position in its parent's child storage.
+    #[doc(hidden)]
+    fn set_sibling_index(&mut self, index: usize) {
+        let _ = index;
+    }
+
     /// Returns this value as [`Any`] for downcasting.
     fn as_any(&self) -> &dyn Any;
 
@@ -475,6 +466,12 @@ pub trait Instance: Any + Debug + InstanceClone {
         for child in self.children_mut() {
             child.set_instance_lookup(lookup.clone());
         }
+    }
+
+    /// Returns the workspace lookup associated with this instance.
+    #[doc(hidden)]
+    fn instance_lookup(&self) -> Option<Rc<InstanceLookup>> {
+        None
     }
 
     /// Parents an isolated instance to any instance.
