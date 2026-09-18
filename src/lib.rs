@@ -6,6 +6,7 @@ mod color3;
 mod engine;
 mod instance;
 mod material;
+#[cfg(feature = "meshpart")]
 mod meshpart;
 mod part;
 mod renderer;
@@ -22,6 +23,7 @@ pub use engine::*;
 pub use glam;
 pub use instance::*;
 pub use material::*;
+#[cfg(feature = "meshpart")]
 pub use meshpart::*;
 pub use part::*;
 pub use renderer::*;

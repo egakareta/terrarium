@@ -1,9 +1,11 @@
 use std::rc::Rc;
 
 use crate::{
-    Camera, CameraController, GltfError, Instance, InstanceData, InstanceId, InstanceLookup,
-    MeshHandle, MeshPart, MeshSource, Skybox, Texture, TextureError, TextureHandle, TweenManager,
+    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Skybox, Texture,
+    TextureError, TextureHandle, TweenManager,
 };
+#[cfg(feature = "meshpart")]
+use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
 
 /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
 #[derive(Debug)]
@@ -13,6 +15,7 @@ pub struct Workspace {
     pub current_camera: Camera,
     camera_controller: CameraController,
     tween_manager: TweenManager,
+    #[cfg(feature = "meshpart")]
     meshes: Vec<MeshHandle>,
     textures: Vec<Texture>,
     texture_revisions: Vec<u64>,
@@ -34,6 +37,7 @@ impl Workspace {
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
+            #[cfg(feature = "meshpart")]
             meshes: Vec::new(),
             textures: Vec::new(),
             texture_revisions: Vec::new(),
@@ -50,6 +54,7 @@ impl Workspace {
     /// part gets independent transforms and material overrides while sharing
     /// the registered geometry. Imported glTF materials are copied into each
     /// part when it is constructed.
+    #[cfg(feature = "meshpart")]
     pub fn add_mesh<'a>(
         &mut self,
         source: impl Into<MeshSource<'a>>,
@@ -63,6 +68,7 @@ impl Workspace {
     }
 
     /// Returns the geometry referenced by a mesh handle owned by this workspace.
+    #[cfg(feature = "meshpart")]
     pub fn get_mesh(&self, handle: &MeshHandle) -> Option<&crate::Mesh> {
         self.meshes
             .iter()
@@ -277,6 +283,7 @@ impl Clone for Workspace {
             current_camera: self.current_camera.clone(),
             camera_controller: self.camera_controller.clone(),
             tween_manager: self.tween_manager.clone(),
+            #[cfg(feature = "meshpart")]
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
             texture_revisions: self.texture_revisions.clone(),
@@ -303,8 +310,11 @@ crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, Mesh, MeshPart, Part, PartShape, TextureColorSpace};
+    use crate::{BasePart, Camera, Part, PartShape, TextureColorSpace};
+    #[cfg(feature = "meshpart")]
+    use crate::{Mesh, MeshPart};
 
+    #[cfg(feature = "meshpart")]
     #[test]
     fn workspace_mesh_handles_can_create_multiple_part_variants() {
         let mut workspace = Workspace::new();

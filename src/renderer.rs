@@ -7,9 +7,11 @@ use bytemuck::{Pod, Zeroable};
 use thiserror::Error;
 use web_time::Instant;
 
+#[cfg(feature = "meshpart")]
+use crate::MeshPart;
 use crate::{
     Camera, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material,
-    MaterialSlot, Mesh, MeshMaterialSlots, MeshPart, Part, PartShape, Skybox, SkyboxError, Texture,
+    MaterialSlot, Mesh, MeshMaterialSlots, Part, PartShape, Skybox, SkyboxError, Texture,
     TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
@@ -271,6 +273,7 @@ struct GpuMesh {
     index_count: u32,
 }
 
+#[cfg(feature = "meshpart")]
 #[derive(Clone, Copy)]
 struct CachedMeshPart {
     revision: u64,
@@ -379,7 +382,9 @@ pub struct Renderer {
     instance_buffer: wgpu::Buffer,
     meshes: Vec<GpuMesh>,
     primitive_meshes: [GpuMeshHandle; PartShape::COUNT],
+    #[cfg(feature = "meshpart")]
     meshpart_meshes: HashMap<InstanceId, CachedMeshPart>,
+    #[cfg(feature = "meshpart")]
     free_meshpart_meshes: Vec<GpuMeshHandle>,
     clear_color: wgpu::Color,
     last_frame: Instant,
@@ -1007,7 +1012,9 @@ impl Renderer {
             instance_buffer,
             meshes: Vec::new(),
             primitive_meshes: [GpuMeshHandle(usize::MAX); PartShape::COUNT],
+            #[cfg(feature = "meshpart")]
             meshpart_meshes: HashMap::new(),
+            #[cfg(feature = "meshpart")]
             free_meshpart_meshes: Vec::new(),
             clear_color: wgpu::Color {
                 r: 0.018,
@@ -1232,6 +1239,7 @@ impl Renderer {
         })
     }
 
+    #[cfg(feature = "meshpart")]
     fn meshpart_mesh(&mut self, meshpart: &MeshPart) -> Result<GpuMeshHandle, RendererError> {
         if let Some(cached) = self.meshpart_meshes.get(&meshpart.id())
             && cached.revision == meshpart.mesh_revision()
@@ -1863,12 +1871,14 @@ impl Renderer {
         let default_textures = self.default_material_textures;
         let default_filters = self.default_material_filters;
 
+        #[cfg(feature = "meshpart")]
         let stale_meshparts: Vec<_> = self
             .meshpart_meshes
             .keys()
             .copied()
             .filter(|&id| workspace.get::<MeshPart>(id).is_none())
             .collect();
+        #[cfg(feature = "meshpart")]
         for id in stale_meshparts {
             if let Some(cached) = self.meshpart_meshes.remove(&id) {
                 self.free_meshpart_meshes.push(cached.handle);
@@ -2047,6 +2057,7 @@ impl Renderer {
             }
         }
 
+        #[cfg(feature = "meshpart")]
         for meshpart in workspace.get_all::<MeshPart>() {
             let pivot = meshpart.pivot();
             let center = pivot.w_axis.truncate();
