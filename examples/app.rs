@@ -1,37 +1,14 @@
 use terrarium::{
-    Color3, Easing, Framework, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
+    App, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
     Repeat, RunConfig, Texture, TextureColorSpace, TextureFilter, Tween, Workspace, eframe, egui,
     glam::Vec3,
 };
 
-struct App {
-    framework: Framework,
-}
+struct FpsOverlay;
 
-impl App {
-    fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, RendererError> {
-        let mut framework = Framework::new(cc, [1280, 720])?;
-        framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
-        create_workspace(&mut framework.workspace)?;
-        Ok(Self { framework })
-    }
-}
-
-impl eframe::App for App {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.framework.clear_color()
-    }
-
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.framework.update(ctx);
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if let Err(error) = self.framework.render(ui) {
-            log::error!("scene preparation failed: {error}");
-        }
-
-        let fps = self.framework.renderer().fps();
+impl App for FpsOverlay {
+    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let fps = engine.renderer().fps();
         egui::Area::new("fps_counter".into())
             .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
             .order(egui::Order::Foreground)
@@ -232,11 +209,12 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
 }
 
 fn main() {
-    Framework::run(
-        RunConfig::new()
-            .with_title("App")
-            .with_canvas_id("the_canvas_id"),
-        Box::new(|cc| Ok(Box::new(App::new(cc)?))),
-    )
-    .unwrap();
+    RunConfig::new()
+        .with_title("App")
+        .with_canvas_id("the_canvas_id")
+        .run(|_creation_context, engine| {
+            engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
+            create_workspace(&mut engine.workspace).map(|()| FpsOverlay)
+        })
+        .unwrap();
 }

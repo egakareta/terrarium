@@ -6,7 +6,7 @@ use std::{
 };
 
 use terrarium::{
-    Camera, Color3, Framework, Instance, InstanceId, Material, MaterialSlot, Part, PartShape,
+    App, Camera, Color3, Engine, Instance, InstanceId, Material, MaterialSlot, Part, PartShape,
     RendererError, RunConfig, Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
@@ -50,9 +50,8 @@ struct Sample {
     frame_complete: Duration,
 }
 
-struct App {
+struct Benchmark {
     config: Config,
-    framework: Framework,
     base_camera_pivot: Mat4,
     part_ids: Vec<InstanceId>,
     base_parts: Vec<Part>,
@@ -70,25 +69,23 @@ struct App {
     finished: bool,
 }
 
-impl App {
-    fn new(cc: &eframe::CreationContext<'_>, config: Config) -> Result<Self, RendererError> {
-        let mut framework = Framework::new(cc, [config.width, config.height])?;
-        framework.set_clear_color([0.012, 0.019, 0.050, 1.0]);
+impl Benchmark {
+    fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
+        engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
         let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
-            &mut framework.workspace,
+            &mut engine.workspace,
             config.parts,
             config.width,
             config.height,
         )?;
-        let base_camera_pivot = framework.current_camera.pivot();
-        let base_parts = framework.get_all::<Part>().cloned().collect();
+        let base_camera_pivot = engine.current_camera.pivot();
+        let base_parts = engine.get_all::<Part>().cloned().collect();
         let random_state = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(1, |duration| duration.as_nanos() as u64)
             | 1;
         let mut app = Self {
             config,
-            framework,
             base_camera_pivot,
             part_ids,
             base_parts,
@@ -105,15 +102,15 @@ impl App {
             cpu_submission: None,
             finished: false,
         };
-        app.replace_upper_layer();
+        app.replace_upper_layer(engine);
         Ok(app)
     }
 
-    fn finish_previous_frame(&mut self, ctx: &egui::Context) {
+    fn finish_previous_frame(&mut self, engine: &mut Engine, ctx: &egui::Context) {
         let Some(started) = self.frame_started.take() else {
             return;
         };
-        if let Err(error) = self.framework.renderer().wait_for_gpu() {
+        if let Err(error) = engine.renderer().wait_for_gpu() {
             report_renderer_error(error);
             self.finished = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -138,7 +135,7 @@ impl App {
         }
     }
 
-    fn animate_parts(&mut self) {
+    fn animate_parts(&mut self, engine: &mut Engine) {
         let part_count = self.part_ids.len();
         let animated_count = part_count / ANIMATED_PARTS_RATIO
             + usize::from(!part_count.is_multiple_of(ANIMATED_PARTS_RATIO));
@@ -150,7 +147,7 @@ impl App {
         {
             for offset in 0..animated_count {
                 let index = (self.animation_pool_start + offset) % part_count;
-                self.reset_part(index);
+                self.reset_part(engine, index);
             }
             self.animation_pool_start = (self.animation_pool_start + animated_count) % part_count;
         }
@@ -160,7 +157,7 @@ impl App {
                 .animation_frame
                 .is_multiple_of(DYNAMIC_LAYER_CHANGE_INTERVAL)
         {
-            self.replace_upper_layer();
+            self.replace_upper_layer(engine);
         }
 
         let time = self.animation_frame as f32 * 0.02;
@@ -170,7 +167,7 @@ impl App {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        self.framework
+        engine
             .current_camera
             .pivot_to(Mat4::from_rotation_translation(
                 camera_rotation,
@@ -185,7 +182,7 @@ impl App {
             let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
-            if let Some(part) = self.framework.get_mut::<Part>(id) {
+            if let Some(part) = engine.get_mut::<Part>(id) {
                 let (_, base_rotation, base_position) =
                     base.pivot().to_scale_rotation_translation();
                 let position = base_position
@@ -214,10 +211,10 @@ impl App {
         self.animation_frame += 1;
     }
 
-    fn replace_upper_layer(&mut self) {
+    fn replace_upper_layer(&mut self, engine: &mut Engine) {
         let previous_layer = std::mem::take(&mut self.upper_layer_ids);
         for id in previous_layer {
-            if let Some(instance) = self.framework.instance_mut(id) {
+            if let Some(instance) = engine.instance_mut(id) {
                 instance.destroy();
             }
         }
@@ -254,7 +251,7 @@ impl App {
                 block.set_material_slot(slot, material);
             }
             self.upper_layer_ids
-                .push(block.set_parent(&mut self.framework.workspace));
+                .push(block.set_parent(&mut engine.workspace));
         }
     }
 
@@ -269,10 +266,10 @@ impl App {
         self.next_random() as f32 / u64::MAX as f32
     }
 
-    fn reset_part(&mut self, index: usize) {
+    fn reset_part(&mut self, engine: &mut Engine, index: usize) {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
-        if let Some(part) = self.framework.get_mut::<Part>(id) {
+        if let Some(part) = engine.get_mut::<Part>(id) {
             part.pivot_to(base.pivot());
             part.size = base.size;
             part.color = base.color;
@@ -280,30 +277,26 @@ impl App {
     }
 }
 
-impl eframe::App for App {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        self.framework.clear_color()
-    }
-
-    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+impl App for Benchmark {
+    fn logic(&mut self, engine: &mut Engine, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.finished {
             return;
         }
-        self.finish_previous_frame(ctx);
+        self.finish_previous_frame(engine, ctx);
         if self.finished {
             return;
         }
         self.logic_started = Some(Instant::now());
-        self.animate_parts();
+        self.animate_parts(engine);
         ctx.request_repaint();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn render(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.finished {
             return;
         }
         let started = self.logic_started.take().unwrap_or_else(Instant::now);
-        if let Err(error) = self.framework.prepare(ui) {
+        if let Err(error) = engine.prepare(ui) {
             report_renderer_error(error);
             self.finished = true;
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -311,7 +304,7 @@ impl eframe::App for App {
         }
         self.cpu_submission = Some(started.elapsed());
         self.frame_started = Some(started);
-        self.framework.paint(ui);
+        engine.paint(ui);
     }
 }
 
@@ -542,14 +535,12 @@ fn main() {
         config.parts, config.warmup_frames, config.measured_frames
     );
 
-    Framework::run(
-        RunConfig::new()
-            .with_title("Render benchmark")
-            .with_size([config.width, config.height])
-            .with_wgpu_options(|wgpu_options| {
-                wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
-            }),
-        Box::new(move |cc| Ok(Box::new(App::new(cc, config)?))),
-    )
-    .unwrap();
+    RunConfig::new()
+        .with_title("Render benchmark")
+        .with_size([config.width, config.height])
+        .with_wgpu_options(|wgpu_options| {
+            wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
+        })
+        .run(move |_creation_context, engine| Benchmark::new(engine, config))
+        .unwrap();
 }

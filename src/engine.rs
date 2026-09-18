@@ -10,6 +10,9 @@ use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
 
 const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
 
+/// Error returned while creating an application.
+pub type AppCreationError = Box<dyn std::error::Error + Send + Sync>;
+
 #[cfg(target_arch = "wasm32")]
 type RendererHandle = Rc<RefCell<Renderer>>;
 
@@ -51,7 +54,7 @@ fn with_renderer<R>(id: usize, f: impl FnOnce(&mut Renderer) -> R) -> R {
             .get(id)
             .and_then(Option::as_ref)
             .and_then(Weak::upgrade)
-            .unwrap_or_else(|| panic!("framework renderer {id} is no longer available"))
+            .unwrap_or_else(|| panic!("engine renderer {id} is no longer available"))
     });
     f(&mut renderer.borrow_mut())
 }
@@ -73,7 +76,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         #[cfg(not(target_arch = "wasm32"))]
         self.renderer
             .lock()
-            .expect("framework renderer lock poisoned")
+            .expect("engine renderer lock poisoned")
             .paint_eframe_scene(render_pass);
 
         #[cfg(target_arch = "wasm32")]
@@ -83,18 +86,18 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
-/// Handles integration with [`eframe`].
-pub struct Framework {
+/// Owns a [`Workspace`] and renderer integrated with [`eframe`].
+pub struct Engine {
     renderer: RendererHandle,
-    /// The [`Workspace`] rendered by this framework.
+    /// The [`Workspace`] rendered by this engine.
     pub workspace: Workspace,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
     clear_color: [f32; 4],
 }
 
-impl Framework {
-    /// Creates the framework from eframe's WGPU creation context.
+impl Engine {
+    /// Creates the engine from eframe's WGPU creation context.
     ///
     /// `fallback_size` is used on web and when no native window is available. The renderer is
     /// automatically resized to the UI region when [`Self::render`] is called.
@@ -151,9 +154,7 @@ impl Framework {
     /// Returns locked access to the underlying renderer for advanced operations.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn renderer(&self) -> MutexGuard<'_, Renderer> {
-        self.renderer
-            .lock()
-            .expect("framework renderer lock poisoned")
+        self.renderer.lock().expect("engine renderer lock poisoned")
     }
 
     /// Returns mutable access to the underlying renderer for advanced operations.
@@ -204,8 +205,7 @@ impl Framework {
         Ok(())
     }
 
-    /// Runs a new eframe application with the specified configuration and app creator.
-    pub fn run(config: RunConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+    fn start(config: RunConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         if config.env_logger {
             env_logger::init();
         }
@@ -260,21 +260,121 @@ impl Framework {
     }
 }
 
+impl eframe::App for Engine {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        Engine::clear_color(self)
+    }
+
+    fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update(context);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Err(error) = self.render(ui) {
+            log::error!("scene preparation failed: {error}");
+        }
+    }
+}
+
+/// Application behavior run by an [`Engine`].
+///
+/// The default methods run Terrarium's complete update and rendering lifecycle. Applications can
+/// add logic through [`Self::after_update`] and egui content through [`Self::ui`] without
+/// reimplementing that lifecycle, or override [`Self::logic`] and [`Self::render`] when they need
+/// complete control over a phase.
+pub trait App: 'static {
+    /// Returns the color eframe should use to clear the window.
+    fn clear_color(&self, engine: &Engine, _visuals: &egui::Visuals) -> [f32; 4] {
+        engine.clear_color()
+    }
+
+    /// Processes one application update.
+    fn logic(&mut self, engine: &mut Engine, context: &egui::Context, frame: &mut eframe::Frame) {
+        engine.update(context);
+        self.after_update(engine, context, frame);
+    }
+
+    /// Runs after Terrarium has processed input and updated the workspace.
+    fn after_update(
+        &mut self,
+        _engine: &mut Engine,
+        _context: &egui::Context,
+        _frame: &mut eframe::Frame,
+    ) {
+    }
+
+    /// Renders one application UI frame.
+    fn render(&mut self, engine: &mut Engine, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if let Err(error) = engine.render(ui) {
+            self.on_ui_error(engine, error, &ui.ctx().clone());
+        }
+        self.ui(engine, ui, frame);
+    }
+
+    /// Draws application UI after Terrarium has attempted to render the scene.
+    fn ui(&mut self, _engine: &mut Engine, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
+
+    /// Handles an error produced while preparing the scene for rendering.
+    fn on_ui_error(
+        &mut self,
+        _engine: &mut Engine,
+        error: RendererError,
+        _context: &egui::Context,
+    ) {
+        log::error!("scene preparation failed: {error}");
+    }
+
+    /// Manipulates raw egui input before it is processed.
+    fn raw_input_hook(
+        &mut self,
+        _engine: &mut Engine,
+        _context: &egui::Context,
+        _raw_input: &mut egui::RawInput,
+    ) {
+    }
+}
+
+impl App for () {}
+
+struct AppAdapter<A> {
+    engine: Engine,
+    app: A,
+}
+
+impl<A: App> eframe::App for AppAdapter<A> {
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        self.app.clear_color(&self.engine, visuals)
+    }
+
+    fn logic(&mut self, context: &egui::Context, frame: &mut eframe::Frame) {
+        self.app.logic(&mut self.engine, context, frame);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.app.render(&mut self.engine, ui, frame);
+    }
+
+    fn raw_input_hook(&mut self, context: &egui::Context, raw_input: &mut egui::RawInput) {
+        self.app
+            .raw_input_hook(&mut self.engine, context, raw_input);
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
-impl Drop for Framework {
+impl Drop for Engine {
     fn drop(&mut self) {
         unregister_renderer(self.renderer_id);
     }
 }
 
-impl Deref for Framework {
+impl Deref for Engine {
     type Target = Workspace;
     fn deref(&self) -> &Self::Target {
         &self.workspace
     }
 }
 
-impl DerefMut for Framework {
+impl DerefMut for Engine {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.workspace
     }
@@ -311,6 +411,30 @@ impl<'a> RunConfig<'a> {
     /// Equivalent to [`RunConfig::default`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates an [`Engine`] and runs the initialized [`App`].
+    ///
+    /// The configured window size is used as the renderer's fallback size. Return `()` from the
+    /// initializer when no additional application behavior is needed.
+    pub fn run<A, E>(
+        self,
+        initialize: impl FnOnce(&eframe::CreationContext<'_>, &mut Engine) -> Result<A, E> + 'static,
+    ) -> eframe::Result
+    where
+        A: App,
+        E: Into<AppCreationError>,
+    {
+        let size = self.size;
+        Engine::start(
+            self,
+            Box::new(move |creation_context| {
+                let mut engine = Engine::new(creation_context, size)?;
+                let app = initialize(creation_context, &mut engine)
+                    .map_err(|error| -> AppCreationError { error.into() })?;
+                Ok(Box::new(AppAdapter { engine, app }))
+            }),
+        )
     }
 
     /// The application title on native platforms.
