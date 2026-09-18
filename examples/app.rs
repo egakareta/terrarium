@@ -237,19 +237,10 @@ fn create_workspace() -> Result<Workspace, RendererError> {
 }
 
 fn main() {
-    env_logger::init();
-    #[cfg(target_arch = "wasm32")]
-    {
-        console_error_panic_hook::set_once();
-    }
-
     Framework::run(
-        RunConfig {
-            title: "App",
-            #[cfg(target_arch = "wasm32")]
-            canvas_id: "the_canvas_id",
-            ..Default::default()
-        },
+        RunConfig::new()
+            .with_title("App")
+            .with_canvas_id("the_canvas_id"),
         Box::new(|cc| Ok(Box::new(App::new(cc)?))),
     )
     .unwrap();

@@ -210,6 +210,10 @@ impl Framework {
 
     /// Runs a new eframe application with the specified configuration and app creator.
     pub fn run(config: RunConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+        if config.env_logger {
+            env_logger::init();
+        }
+
         let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
         (config.wgpu_options)(&mut wgpu_options);
         #[cfg(not(target_arch = "wasm32"))]
@@ -229,6 +233,10 @@ impl Framework {
         #[cfg(target_arch = "wasm32")]
         {
             use wasm_bindgen::JsCast as _;
+
+            if config.console_error_panic_hook {
+                console_error_panic_hook::set_once();
+            }
 
             let canvas_id = config.canvas_id.to_owned();
 
@@ -265,15 +273,14 @@ impl Drop for Framework {
 
 /// Options controlling the behavior of the window.
 pub struct RunConfig<'a> {
-    /// The application title on native platforms.
-    pub title: &'a str,
-    /// The window size on native platforms.
-    pub size: [u32; 2],
-    /// The element to render the web application.
+    title: &'a str,
+    size: [u32; 2],
     #[cfg(target_arch = "wasm32")]
-    pub canvas_id: &'a str,
-    /// Configures wgpu instance/device/adapter/surface creation and renderloop.
-    pub wgpu_options: Box<dyn FnOnce(&mut eframe::egui_wgpu::WgpuConfiguration) + 'a>,
+    canvas_id: &'a str,
+    wgpu_options: Box<dyn FnOnce(&mut eframe::egui_wgpu::WgpuConfiguration) + 'a>,
+    env_logger: bool,
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook: bool,
 }
 
 impl<'a> Default for RunConfig<'a> {
@@ -284,11 +291,47 @@ impl<'a> Default for RunConfig<'a> {
             #[cfg(target_arch = "wasm32")]
             canvas_id: "app",
             wgpu_options: Box::new(|_| {}),
+            env_logger: true,
+            #[cfg(target_arch = "wasm32")]
+            console_error_panic_hook: true,
         }
     }
 }
 
 impl<'a> RunConfig<'a> {
+    /// Equivalent to [`RunConfig::default`].
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The application title on native platforms.
+    pub fn with_title(mut self, title: &'a str) -> Self {
+        self.title = title;
+        self
+    }
+
+    /// The window size on native platforms.
+    pub fn with_size(mut self, size: [u32; 2]) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// The element to render the web application.
+    pub fn with_canvas_id(self, canvas_id: &'a str) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut this = self;
+            this.canvas_id = canvas_id;
+            this
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = canvas_id;
+            self
+        }
+    }
+
     /// Configures wgpu instance/device/adapter/surface creation and renderloop.
     pub fn with_wgpu_options(
         mut self,
@@ -296,5 +339,31 @@ impl<'a> RunConfig<'a> {
     ) -> Self {
         self.wgpu_options = Box::new(f);
         self
+    }
+
+    /// Whether to automatically call [`env_logger::init()`].
+    ///
+    /// By default, this is enabled.
+    pub fn with_env_logger(mut self, enabled: bool) -> Self {
+        self.env_logger = enabled;
+        self
+    }
+
+    /// Whether to automatically call [`console_error_panic_hook::set_once()`].
+    ///
+    /// By default, this is enabled.
+    pub fn with_console_error_panic_hook(self, enabled: bool) -> Self {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut this = self;
+            this.console_error_panic_hook = enabled;
+            this
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = enabled;
+            self
+        }
     }
 }

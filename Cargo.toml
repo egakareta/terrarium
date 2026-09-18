@@ -24,10 +24,10 @@ wgpu = "30"
 winit = "0.30"
 
 [target."wasm32-unknown-unknown".dependencies]
+console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
 
 [target."wasm32-unknown-unknown".dev-dependencies]
-console_error_panic_hook = "0.1"
 getrandom = { version = "0.4", features = ["wasm_js"] }

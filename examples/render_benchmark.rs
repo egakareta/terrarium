@@ -534,7 +534,6 @@ fn parse_config() -> Result<Config, String> {
 }
 
 fn main() {
-    env_logger::init();
     let config = parse_config().unwrap();
     println!(
         "Rendering {} parts for {} warmup + {} measured frames...",
@@ -542,15 +541,13 @@ fn main() {
     );
 
     Framework::run(
-        RunConfig {
-            title: "Render benchmark",
-            size: [config.width, config.height],
-            ..Default::default()
-        }
-        .with_wgpu_options(|wgpu_options| {
-            wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
-        }),
+        RunConfig::new()
+            .with_title("Render benchmark")
+            .with_size([config.width, config.height])
+            .with_wgpu_options(|wgpu_options| {
+                wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
+            }),
         Box::new(move |cc| Ok(Box::new(App::new(cc, config)?))),
     )
-    .expect("run benchmark eframe application");
+    .unwrap();
 }
