@@ -1,11 +1,65 @@
+#[cfg(target_arch = "wasm32")]
+use std::cell::{RefCell, RefMut};
+#[cfg(target_arch = "wasm32")]
+use std::rc::{Rc, Weak};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
 
 const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
 
+#[cfg(target_arch = "wasm32")]
+type RendererHandle = Rc<RefCell<Renderer>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+type RendererHandle = Arc<Mutex<Renderer>>;
+
+// WebGPU objects are not transferable between browser threads. Keep the renderer on its owning
+// thread and let the Send + Sync callback carry only an index into this thread-local registry.
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static RENDERERS: RefCell<Vec<Option<Weak<RefCell<Renderer>>>>>
+        = const { RefCell::new(Vec::new()) };
+}
+
+#[cfg(target_arch = "wasm32")]
+fn register_renderer(renderer: &RendererHandle) -> usize {
+    RENDERERS.with(|renderers| {
+        let mut renderers = renderers.borrow_mut();
+        let id = renderers.len();
+        renderers.push(Some(Rc::downgrade(renderer)));
+        id
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unregister_renderer(id: usize) {
+    RENDERERS.with(|renderers| {
+        if let Some(renderer) = renderers.borrow_mut().get_mut(id) {
+            *renderer = None;
+        }
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn with_renderer<R>(id: usize, f: impl FnOnce(&mut Renderer) -> R) -> R {
+    let renderer = RENDERERS.with(|renderers| {
+        renderers
+            .borrow()
+            .get(id)
+            .and_then(Option::as_ref)
+            .and_then(Weak::upgrade)
+            .unwrap_or_else(|| panic!("framework renderer {id} is no longer available"))
+    });
+    f(&mut renderer.borrow_mut())
+}
+
 struct SceneCallback {
+    #[cfg(not(target_arch = "wasm32"))]
     renderer: Arc<Mutex<Renderer>>,
+    #[cfg(target_arch = "wasm32")]
+    renderer_id: usize,
 }
 
 impl egui_wgpu::CallbackTrait for SceneCallback {
@@ -15,16 +69,24 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         render_pass: &mut egui_wgpu::wgpu::RenderPass<'static>,
         _callback_resources: &egui_wgpu::CallbackResources,
     ) {
+        #[cfg(not(target_arch = "wasm32"))]
         self.renderer
             .lock()
             .expect("framework renderer lock poisoned")
             .paint_eframe_scene(render_pass);
+
+        #[cfg(target_arch = "wasm32")]
+        with_renderer(self.renderer_id, |renderer| {
+            renderer.paint_eframe_scene(render_pass);
+        });
     }
 }
 
 /// Handles integration with [`eframe`].
 pub struct Framework {
-    renderer: Arc<Mutex<Renderer>>,
+    renderer: RendererHandle,
+    #[cfg(target_arch = "wasm32")]
+    renderer_id: usize,
     clear_color: [f32; 4],
 }
 
@@ -50,8 +112,18 @@ impl Framework {
             .as_ref()
             .ok_or(RendererError::MissingEframeWgpuRenderState)?;
         let renderer = Renderer::new(render_state, [size[0].max(1), size[1].max(1)])?;
+        #[cfg(target_arch = "wasm32")]
+        let renderer = Rc::new(RefCell::new(renderer));
+        #[cfg(not(target_arch = "wasm32"))]
+        let renderer = Arc::new(Mutex::new(renderer));
+
+        #[cfg(target_arch = "wasm32")]
+        let renderer_id = register_renderer(&renderer);
+
         Ok(Self {
-            renderer: Arc::new(Mutex::new(renderer)),
+            renderer,
+            #[cfg(target_arch = "wasm32")]
+            renderer_id,
             clear_color: DEFAULT_CLEAR_COLOR,
         })
     }
@@ -73,10 +145,17 @@ impl Framework {
     }
 
     /// Returns locked access to the underlying renderer for advanced operations.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn renderer(&self) -> MutexGuard<'_, Renderer> {
         self.renderer
             .lock()
             .expect("framework renderer lock poisoned")
+    }
+
+    /// Returns mutable access to the underlying renderer for advanced operations.
+    #[cfg(target_arch = "wasm32")]
+    pub fn renderer(&self) -> RefMut<'_, Renderer> {
+        self.renderer.borrow_mut()
     }
 
     /// Processes camera input, advances the workspace, and requests the next frame.
@@ -106,12 +185,15 @@ impl Framework {
     /// Registers the paint callback for a workspace prepared with [`Self::prepare`].
     pub fn paint(&self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
-        let callback = egui_wgpu::Callback::new_paint_callback(
-            rect,
-            SceneCallback {
-                renderer: Arc::clone(&self.renderer),
-            },
-        );
+        #[cfg(not(target_arch = "wasm32"))]
+        let callback = SceneCallback {
+            renderer: Arc::clone(&self.renderer),
+        };
+        #[cfg(target_arch = "wasm32")]
+        let callback = SceneCallback {
+            renderer_id: self.renderer_id,
+        };
+        let callback = egui_wgpu::Callback::new_paint_callback(rect, callback);
         ui.painter().add(egui::Shape::Callback(callback));
     }
 
@@ -171,6 +253,13 @@ impl Framework {
 
             Ok(())
         }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for Framework {
+    fn drop(&mut self) {
+        unregister_renderer(self.renderer_id);
     }
 }
 
