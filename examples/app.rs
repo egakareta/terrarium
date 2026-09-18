@@ -210,8 +210,6 @@ fn create_workspace(workspace: &mut Workspace) -> Result<(), RendererError> {
 
 fn main() {
     AppConfig::new()
-        .with_title("App")
-        .with_canvas_id("the_canvas_id")
         .run(|_creation_context, engine| {
             engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
             create_workspace(&mut engine.workspace).map(|()| FpsOverlay)

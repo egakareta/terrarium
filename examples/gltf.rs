@@ -16,10 +16,7 @@ fn initialize(
 }
 
 fn main() {
-    AppConfig::new()
-        .with_canvas_id("the_canvas_id")
-        .run(initialize)
-        .unwrap();
+    AppConfig::new().run(initialize).unwrap();
 }
 
 #[test]
