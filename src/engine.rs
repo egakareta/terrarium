@@ -249,7 +249,7 @@ impl Engine {
         Ok(())
     }
 
-    fn start(config: AppConfig<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+    fn start(config: AppBuilder<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         if config.env_logger {
             env_logger::init();
         }
@@ -502,7 +502,7 @@ enum HeadlessMode {
 }
 
 /// Options controlling the behavior of the application.
-pub struct AppConfig<'a> {
+pub struct AppBuilder<'a> {
     title: &'a str,
     size: [u32; 2],
     #[cfg(target_arch = "wasm32")]
@@ -516,7 +516,7 @@ pub struct AppConfig<'a> {
     bundle_fonts: bool,
 }
 
-impl<'a> Default for AppConfig<'a> {
+impl<'a> Default for AppBuilder<'a> {
     fn default() -> Self {
         Self {
             title: "app",
@@ -534,7 +534,7 @@ impl<'a> Default for AppConfig<'a> {
     }
 }
 
-impl<'a> AppConfig<'a> {
+impl<'a> AppBuilder<'a> {
     /// Equivalent to [`RunConfig::default`].
     pub fn new() -> Self {
         Self::default()

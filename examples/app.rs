@@ -1,5 +1,5 @@
 use terrarium::{
-    App, AppConfig, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape,
+    App, AppBuilder, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape,
     RendererError, Repeat, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui,
     glam::Vec3,
 };
@@ -212,12 +212,12 @@ fn initialize(
 }
 
 fn main() {
-    AppConfig::new().run(initialize).unwrap();
+    AppBuilder::new().run(initialize).unwrap();
 }
 
 #[test]
 fn app_loads() -> Result<(), terrarium::AppCreationError> {
-    AppConfig::new()
+    AppBuilder::new()
         .with_size([32, 32])
         .with_headless(Some(1))
         .run(initialize)?;
