@@ -7,6 +7,7 @@ fn initialize(
     _creation_context: &eframe::CreationContext<'_>,
     engine: &mut Engine,
 ) -> Result<(), TextureError> {
+    engine.clear_skybox();
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     let lantern = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/festival_lantern.png"),
