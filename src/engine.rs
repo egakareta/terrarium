@@ -251,7 +251,7 @@ impl Engine {
 
     fn start(config: AppBuilder<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         if config.env_logger {
-            env_logger::init();
+            let _ = env_logger::try_init();
         }
 
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
