@@ -1,7 +1,41 @@
-use terrarium::{
-    HasBasePart, HasMaterials, HasPVInstance, HasPart, Instance, Material, Part, PartShape,
-    RendererError, Terrarium, Texture, TextureColorSpace, glam::Vec3,
-};
+use terrarium::{glam::*, *};
+
+#[test]
+fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
+    use terrarium::HasMaterials as _;
+    let engine = Terrarium::new()
+        .with_size([128, 128])
+        .with_headless(Some(1))
+        .run(|engine| {
+            let mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
+            engine.add_child(MeshPart::new(mesh).with_position(Vec3::new(0.0, 0.75, 0.0)));
+            Ok::<(), AppCreationError>(())
+        })?
+        .unwrap();
+    let meshpart = engine.get_all::<MeshPart>().next().unwrap();
+    assert!(
+        terrarium::Face::ALL.into_iter().any(|slot| meshpart
+            .material_slot(slot)
+            .textures()
+            .emissive
+            .is_some())
+    );
+    let pixels = engine.renderer().read_pixels()?;
+    let rendered_pixels = pixels
+        .iter()
+        .filter(|pixel| **pixel != [0, 0, 0, 255])
+        .collect::<Vec<_>>();
+    let rendered_pixel_count = rendered_pixels.len();
+    let max_channel_difference = rendered_pixels
+        .iter()
+        .map(|pixel| pixel[..3].iter().max().unwrap() - pixel[..3].iter().min().unwrap())
+        .max()
+        .unwrap_or(0);
+
+    assert!(rendered_pixel_count > 0);
+    assert!(max_channel_difference > 32);
+    Ok(())
+}
 
 #[test]
 fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,7 +58,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
                     .with_size(Vec3::new(2.0, 2.0, 2.0))
                     .with_material(Material::textured(lantern)),
             );
-            Ok::<(), RendererError>(())
+            Ok::<(), AppCreationError>(())
         })
         .unwrap()
         .unwrap();
