@@ -1,9 +1,9 @@
 use terrarium::{
-    Engine, Instance, Material, MaterialSlot, Part, PartShape, Terrarium, Texture,
-    TextureColorSpace, TextureError, glam::Vec3,
+    Engine, Instance, Material, MaterialSlot, Part, PartShape, RendererError, Terrarium, Texture,
+    TextureColorSpace, glam::Vec3,
 };
 
-fn initialize(engine: &mut Engine) -> Result<(), TextureError> {
+fn initialize(engine: &mut Engine) -> Result<(), RendererError> {
     engine.clear_skybox();
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     let lantern = engine.add_texture(Texture::from_bytes(
