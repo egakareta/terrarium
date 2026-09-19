@@ -1,18 +1,13 @@
 use crate::{Color3, Skybox, glam::Vec3};
 
 /// The high-level lighting model used by a [`Lighting`] configuration.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum LightingStyle {
     /// Physically based lighting with directional shadows.
+    #[default]
     Realistic,
     /// A softer model with less directional contrast.
     Soft,
-}
-
-impl Default for LightingStyle {
-    fn default() -> Self {
-        Self::Realistic
-    }
 }
 
 /// Errors returned when parsing a time-of-day value.
