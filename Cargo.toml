@@ -49,3 +49,7 @@ required-features = ["meshpart"]
 [[example]]
 name = "physics"
 required-features = ["physics"]
+
+[[test]]
+name = "gpu"
+required-features = ["meshpart"]
