@@ -3,9 +3,19 @@ use terrarium::{
     Repeat, Terrarium, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui, glam::Vec3,
 };
 
-struct FpsOverlay;
+struct SceneApp;
 
-impl App for FpsOverlay {
+impl App for SceneApp {
+    fn after_update(
+        &mut self,
+        engine: &mut Engine,
+        context: &egui::Context,
+        _frame: &mut eframe::Frame,
+    ) {
+        let delta_seconds = context.input(|input| input.stable_dt.min(0.1));
+        engine.advance_clock_time(delta_seconds, 0.25);
+    }
+
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let fps = engine.renderer().fps();
         egui::Area::new("fps_counter".into())
@@ -23,8 +33,7 @@ impl App for FpsOverlay {
     }
 }
 
-fn initialize(engine: &mut Engine) -> Result<FpsOverlay, RendererError> {
-    engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
+fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     let dirt = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
         TextureColorSpace::Srgb,
@@ -204,7 +213,7 @@ fn initialize(engine: &mut Engine) -> Result<FpsOverlay, RendererError> {
         )
         .repeat_forever(),
     );
-    Ok(FpsOverlay)
+    Ok(SceneApp)
 }
 
 fn main() {
