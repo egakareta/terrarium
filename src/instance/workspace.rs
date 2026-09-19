@@ -6,6 +6,8 @@ use crate::{
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
+#[cfg(feature = "physics")]
+use crate::{PhysicsInstance, PhysicsWorld, apply_transform};
 
 /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
 #[derive(Debug)]
@@ -15,6 +17,8 @@ pub struct Workspace {
     pub current_camera: Camera,
     camera_controller: CameraController,
     tween_manager: TweenManager,
+    #[cfg(feature = "physics")]
+    physics: PhysicsWorld,
     #[cfg(feature = "meshpart")]
     meshes: Vec<MeshHandle>,
     textures: Vec<Texture>,
@@ -37,6 +41,8 @@ impl Workspace {
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
             tween_manager: TweenManager::default(),
+            #[cfg(feature = "physics")]
+            physics: PhysicsWorld::default(),
             #[cfg(feature = "meshpart")]
             meshes: Vec::new(),
             textures: Vec::new(),
@@ -317,10 +323,38 @@ impl Workspace {
             .update_camera(&mut self.current_camera, delta);
     }
 
-    /// Advances camera input and all registered scene tweens.
+    /// Advances camera input, registered scene tweens, and physics when enabled.
     pub fn update(&mut self, delta_seconds: f32) {
         self.update_camera(delta_seconds);
         self.update_tweens(delta_seconds);
+        #[cfg(feature = "physics")]
+        self.update_physics(delta_seconds);
+    }
+
+    /// Returns the workspace's Rapier physics world.
+    #[cfg(feature = "physics")]
+    pub fn physics(&self) -> &PhysicsWorld {
+        &self.physics
+    }
+
+    /// Returns mutable access to the workspace's Rapier physics world.
+    #[cfg(feature = "physics")]
+    pub fn physics_mut(&mut self) -> &mut PhysicsWorld {
+        &mut self.physics
+    }
+
+    #[cfg(feature = "physics")]
+    fn update_physics(&mut self, delta_seconds: f32) {
+        let instances: Vec<_> = self
+            .instances()
+            .filter_map(PhysicsInstance::from_instance)
+            .collect();
+        let transforms = self.physics.step(&instances, delta_seconds);
+        for (id, transform) in transforms {
+            if let Some(instance) = self.instance_mut(id) {
+                apply_transform(instance, transform);
+            }
+        }
     }
 
     /// Advances all registered scene tweens without updating the camera.
@@ -377,6 +411,8 @@ impl Clone for Workspace {
             current_camera: self.current_camera.clone(),
             camera_controller: self.camera_controller.clone(),
             tween_manager: self.tween_manager.clone(),
+            #[cfg(feature = "physics")]
+            physics: self.physics.clone_configuration(),
             #[cfg(feature = "meshpart")]
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),

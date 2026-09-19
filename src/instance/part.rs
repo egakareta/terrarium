@@ -20,12 +20,13 @@ pub struct BasePart {
     pub color: Color3,
     /// Whether a physics system should treat this part as immovable.
     ///
-    /// Terrarium does not currently implement physics; this flag is metadata
-    /// for an application-level physics integration.
+    /// The default physics integration creates a fixed body when this is `true`
+    /// and a dynamic body when this is `false`.
     pub anchored: bool,
     /// Whether a physics system should consider this part for collisions.
     ///
-    /// Terrarium does not currently implement collision queries.
+    /// The default physics integration omits this part's collider when this is
+    /// `false`, while still simulating its rigid body.
     pub can_collide: bool,
 }
 
