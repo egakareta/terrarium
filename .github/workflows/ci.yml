@@ -21,8 +21,26 @@ jobs:
       - run: mise run check
   test:
     runs-on: ubuntu-latest
+    env:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      WGPU_BACKEND: vulkan
     steps:
       - uses: actions/checkout@v7
+      - uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: libssl-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgl1-mesa-dri libvulkan-dev mesa-vulkan-drivers vulkan-tools xvfb
+          version: 1.0
+      - name: Select lavapipe software Vulkan ICD
+        run: |
+          icd="$(ls /usr/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json 2>/dev/null | grep -iE '(lvp|lavapipe)' | head -1)"
+          if [ -z "$icd" ]; then
+            echo "::error::No lavapipe ICD found"
+            ls -la /usr/share/vulkan/icd.d/ || true
+            exit 1
+          fi
+          echo "Using lavapipe ICD: $icd"
+          echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+      - run: vulkaninfo --summary || true
       - uses: jdx/mise-action@v4
       - uses: Swatinem/rust-cache@v2
-      - run: mise run test
+      - run: xvfb-run -a mise run test
