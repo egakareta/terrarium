@@ -4,18 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["meshpart", "physics"]
+default = ["meshpart", "physics", "default-skybox", "default-fonts", "eframe-default-fonts"]
 meshpart = ["dep:gltf"]
 physics = ["dep:rapier3d"]
+default-skybox = []
+default-fonts = []
+eframe-default-fonts = ["eframe/default_fonts"]
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
-eframe = { version = "0.36", default-features = false, features = [
-  "default_fonts",
-  "wayland",
-  "wgpu",
-  "x11",
-] }
+eframe = { version = "0.36", default-features = false, features = ["wayland", "wgpu", "x11"] }
 env_logger = "0.11"
 glam = "0.33"
 gltf = { version = "1", optional = true }

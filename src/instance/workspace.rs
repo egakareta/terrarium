@@ -536,6 +536,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "default-skybox")]
     #[test]
     fn workspace_defaults_to_the_embedded_skybox() {
         use crate::{Face, Image, Skybox};
@@ -564,6 +565,14 @@ mod tests {
             1,
             "cloned workspaces keep their skybox"
         );
+    }
+
+    #[cfg(not(feature = "default-skybox"))]
+    #[test]
+    fn workspace_defaults_without_a_bundled_skybox() {
+        let workspace = Workspace::new();
+        assert!(workspace.lighting.skybox().is_none());
+        assert_eq!(workspace.lighting.skybox_revision(), 0);
     }
 
     #[test]

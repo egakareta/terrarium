@@ -90,8 +90,14 @@ impl Default for Lighting {
             outdoor_ambient: Color3::new(0.5, 0.5, 0.5),
             shadow_color: Color3::BLACK,
             shadow_softness: 0.2,
+            #[cfg(feature = "default-skybox")]
             skybox: Some(Skybox::default()),
+            #[cfg(not(feature = "default-skybox"))]
+            skybox: None,
+            #[cfg(feature = "default-skybox")]
             skybox_revision: 1,
+            #[cfg(not(feature = "default-skybox"))]
+            skybox_revision: 0,
             clock_time: 12.0,
             direction_override: None,
         }

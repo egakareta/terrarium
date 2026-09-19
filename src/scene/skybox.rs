@@ -66,6 +66,7 @@ pub struct Skybox {
 }
 
 /// Embedded default skybox: a 4x3 cross layout with 512-pixel faces.
+#[cfg(feature = "default-skybox")]
 const DEFAULT_SKYBOX_CROSS_BYTES: &[u8] = include_bytes!("../bin/Cubemap_Sky_01-512x512.webp");
 
 impl Skybox {
@@ -202,6 +203,7 @@ impl Skybox {
     }
 }
 
+#[cfg(feature = "default-skybox")]
 impl Default for Skybox {
     /// Returns an embedded default skybox.
     fn default() -> Self {
@@ -459,6 +461,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "default-skybox")]
     #[test]
     fn default_skybox_loads_the_embedded_cross_layout() {
         let skybox = Skybox::default();

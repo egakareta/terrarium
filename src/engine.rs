@@ -23,33 +23,41 @@ pub const MONOSPACE_FONT_NAME: &str = "SUSEMono";
 
 /// Returns [`egui`] font definitions using fonts bundled in Terrarium.
 pub fn font_definitions() -> egui::FontDefinitions {
-    let mut fonts = egui::FontDefinitions::default();
-    let mut tweak = egui::FontTweak::default();
-    tweak.coords.push(b"wght", 400.0);
+    #[cfg(feature = "default-fonts")]
+    {
+        let mut fonts = egui::FontDefinitions::default();
+        let mut tweak = egui::FontTweak::default();
+        tweak.coords.push(b"wght", 400.0);
 
-    fonts.font_data.insert(
-        PROPORTIONAL_FONT_NAME.to_owned(),
-        Arc::new(
-            egui::FontData::from_static(include_bytes!("bin/Outfit-VariableFont_wght.ttf"))
-                .tweak(tweak.clone()),
-        ),
-    );
-    fonts.font_data.insert(
-        MONOSPACE_FONT_NAME.to_owned(),
-        Arc::new(
-            egui::FontData::from_static(include_bytes!("bin/SUSEMono-VariableFont_wght.ttf"))
-                .tweak(tweak.clone()),
-        ),
-    );
-    fonts.families.insert(
-        egui::FontFamily::Proportional,
-        vec![PROPORTIONAL_FONT_NAME.to_owned()],
-    );
-    fonts.families.insert(
-        egui::FontFamily::Monospace,
-        vec![MONOSPACE_FONT_NAME.to_owned()],
-    );
-    fonts
+        fonts.font_data.insert(
+            PROPORTIONAL_FONT_NAME.to_owned(),
+            Arc::new(
+                egui::FontData::from_static(include_bytes!("bin/Outfit-VariableFont_wght.ttf"))
+                    .tweak(tweak.clone()),
+            ),
+        );
+        fonts.font_data.insert(
+            MONOSPACE_FONT_NAME.to_owned(),
+            Arc::new(
+                egui::FontData::from_static(include_bytes!("bin/SUSEMono-VariableFont_wght.ttf"))
+                    .tweak(tweak.clone()),
+            ),
+        );
+        fonts.families.insert(
+            egui::FontFamily::Proportional,
+            vec![PROPORTIONAL_FONT_NAME.to_owned()],
+        );
+        fonts.families.insert(
+            egui::FontFamily::Monospace,
+            vec![MONOSPACE_FONT_NAME.to_owned()],
+        );
+        fonts
+    }
+
+    #[cfg(not(feature = "default-fonts"))]
+    {
+        egui::FontDefinitions::default()
+    }
 }
 
 /// Error returned while creating an application.
@@ -590,7 +598,7 @@ impl<'a> Default for Terrarium<'a> {
             headless: HeadlessMode::Disabled,
             #[cfg(target_arch = "wasm32")]
             console_error_panic_hook: true,
-            bundle_fonts: true,
+            bundle_fonts: cfg!(feature = "default-fonts"),
         }
     }
 }
@@ -621,6 +629,7 @@ impl<'a> Terrarium<'a> {
         E: Into<AppCreationError>,
     {
         let size = self.size;
+        #[cfg(feature = "default-fonts")]
         let is_bundled_fonts = self.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
 
@@ -628,6 +637,7 @@ impl<'a> Terrarium<'a> {
         Engine::start(
             self,
             Box::new(move |creation_context| {
+                #[cfg(feature = "default-fonts")]
                 if is_bundled_fonts {
                     creation_context.egui_ctx.set_fonts(font_definitions());
                 }
