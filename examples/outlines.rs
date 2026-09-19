@@ -11,10 +11,6 @@ struct OutlinesApp {
 
 impl OutlinesApp {
     fn set_mode(&mut self, engine: &mut Engine, mode: OutlineMode) {
-        if self.mode == mode {
-            return;
-        }
-
         if let Some(outline) = self.outline {
             let Some(outline) = engine.get_mut::<Outline>(outline) else {
                 return;
@@ -60,11 +56,13 @@ fn main() {
 
             let mesh_part = engine.add_child(MeshPart::new(mesh));
 
-            Ok::<OutlinesApp, AppCreationError>(OutlinesApp {
+            let mut app = OutlinesApp {
                 mesh_part,
                 outline: None,
                 mode: OutlineMode::Stencil,
-            })
+            };
+            app.set_mode(engine, app.mode);
+            Ok::<OutlinesApp, AppCreationError>(app)
         })
         .unwrap();
 }
