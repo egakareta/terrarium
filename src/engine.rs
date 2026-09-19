@@ -5,7 +5,7 @@ use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use std::rc::{Rc, Weak};
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
@@ -62,6 +62,34 @@ type RendererHandle = Rc<RefCell<Renderer>>;
 type RendererHandle = Arc<Mutex<Renderer>>;
 
 type EngineSlot = Rc<RefCell<Option<Engine>>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+static DEFAULT_HEADLESS_RENDER_STATE: OnceLock<Result<egui_wgpu::RenderState, String>> =
+    OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn default_headless_render_state(
+    options: &egui_wgpu::WgpuConfiguration,
+) -> Result<egui_wgpu::RenderState, eframe::Error> {
+    let cached = DEFAULT_HEADLESS_RENDER_STATE.get_or_init(|| {
+        let instance = pollster::block_on(options.wgpu_setup.new_instance());
+        pollster::block_on(egui_wgpu::RenderState::create(
+            options,
+            &instance,
+            None,
+            egui_wgpu::RendererOptions::default(),
+        ))
+        .map_err(|error| error.to_string())
+    });
+
+    match cached {
+        Ok(render_state) => Ok(render_state.clone()),
+        Err(error) => Err(eframe::Error::AppCreation(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            error.clone(),
+        )))),
+    }
+}
 
 // WebGPU objects are not transferable between browser threads. Keep the renderer on its owning
 // thread and let the Send + Sync callback carry only an index into this thread-local registry.
@@ -284,13 +312,18 @@ impl Engine {
                 HeadlessMode::UntilClose => Some(None),
             };
             if let Some(mut frames_remaining) = headless_frame_limit {
-                let instance = pollster::block_on(wgpu_options.wgpu_setup.new_instance());
-                let render_state = pollster::block_on(egui_wgpu::RenderState::create(
-                    &wgpu_options,
-                    &instance,
-                    None,
-                    egui_wgpu::RendererOptions::default(),
-                ))?;
+                let render_state = if config.wgpu_options_customized {
+                    // TODO: maybe actual caching for custom wgpu_options?
+                    let instance = pollster::block_on(wgpu_options.wgpu_setup.new_instance());
+                    pollster::block_on(egui_wgpu::RenderState::create(
+                        &wgpu_options,
+                        &instance,
+                        None,
+                        egui_wgpu::RendererOptions::default(),
+                    ))?
+                } else {
+                    default_headless_render_state(&wgpu_options)?
+                };
                 let context = egui::Context::default();
                 let mut creation_context = eframe::CreationContext::_new_kittest(context.clone());
                 creation_context.wgpu_render_state = Some(render_state);
@@ -528,6 +561,7 @@ pub struct Terrarium<'a> {
     #[cfg(target_arch = "wasm32")]
     canvas_id: &'a str,
     wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
+    wgpu_options_customized: bool,
     env_logger: bool,
     #[cfg(not(target_arch = "wasm32"))]
     headless: HeadlessMode,
@@ -544,6 +578,7 @@ impl<'a> Default for Terrarium<'a> {
             #[cfg(target_arch = "wasm32")]
             canvas_id: "app",
             wgpu_options: Box::new(|_| {}),
+            wgpu_options_customized: false,
             env_logger: true,
             #[cfg(not(target_arch = "wasm32"))]
             headless: HeadlessMode::Disabled,
@@ -663,6 +698,7 @@ impl<'a> Terrarium<'a> {
         f: impl FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a,
     ) -> Self {
         self.wgpu_options = Box::new(f);
+        self.wgpu_options_customized = true;
         self
     }
 
