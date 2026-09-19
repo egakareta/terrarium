@@ -1,4 +1,4 @@
-//! A small, data-oriented 3D library built around `wgpu`.
+//! Terrarium is a small 3D engine.
 #![deny(missing_docs)]
 
 mod engine;

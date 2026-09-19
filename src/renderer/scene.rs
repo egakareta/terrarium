@@ -168,7 +168,7 @@ impl Renderer {
             let mut bounds_max = Vec3::splat(f32::NEG_INFINITY);
             for part in parts.by_ref().take(CULL_GROUP_SIZE) {
                 let pivot = part.pivot();
-                let max_scale = part.size.max_element().max(0.0);
+                let max_scale = part.size().max_element().max(0.0);
                 let radius = part.shape.bounding_radius() * max_scale * 1.01;
                 let center = pivot.w_axis.truncate();
                 let extent = Vec3::splat(radius);
@@ -314,15 +314,15 @@ impl Renderer {
                     }
                 };
                 let model = Mat4::from_cols(
-                    pivot.x_axis * part.size.x,
-                    pivot.y_axis * part.size.y,
-                    pivot.z_axis * part.size.z,
+                    pivot.x_axis * part.size().x,
+                    pivot.y_axis * part.size().y,
+                    pivot.z_axis * part.size().z,
                     pivot.w_axis,
                 );
                 let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
                     (
                         normal_scales_from_model(&model),
-                        part.color.rgba(),
+                        part.color().rgba(),
                         self.material_set_index(&part.material_slots),
                     )
                 } else {
@@ -346,7 +346,7 @@ impl Renderer {
         for meshpart in workspace.get_all::<MeshPart>() {
             let pivot = meshpart.pivot();
             let center = pivot.w_axis.truncate();
-            let radius = meshpart.bounding_radius() * meshpart.size.abs().max_element() * 1.01;
+            let radius = meshpart.bounding_radius() * meshpart.size().abs().max_element() * 1.01;
             let mut visibility_mask = 0;
             if sphere_visible(&camera_planes, center, radius) {
                 visibility_mask |= 1;
@@ -412,15 +412,15 @@ impl Renderer {
                 batch_index
             };
             let model = Mat4::from_cols(
-                pivot.x_axis * meshpart.size.x,
-                pivot.y_axis * meshpart.size.y,
-                pivot.z_axis * meshpart.size.z,
+                pivot.x_axis * meshpart.size().x,
+                pivot.y_axis * meshpart.size().y,
+                pivot.z_axis * meshpart.size().z,
                 pivot.w_axis,
             );
             let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
                 (
                     normal_scales_from_model(&model),
-                    meshpart.color.rgba(),
+                    meshpart.color().rgba(),
                     self.material_set_index(&meshpart.material_slots),
                 )
             } else {

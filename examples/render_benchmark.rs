@@ -199,13 +199,14 @@ impl Benchmark {
                         ((motion * 0.7).sin() * 10.0).to_radians(),
                     );
                 part.pivot_to(Mat4::from_rotation_translation(rotation, position));
-                part.size =
-                    base.size * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35);
-                part.color = Color3::new(
-                    (base.color.r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
-                    (base.color.g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
-                    (base.color.b + (color_shift + 4.2).sin() * 0.18).clamp(0.0, 1.0),
+                part.set_size(
+                    base.size() * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35),
                 );
+                part.set_color(Color3::new(
+                    (base.color().r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
+                    (base.color().g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
+                    (base.color().b + (color_shift + 4.2).sin() * 0.18).clamp(0.0, 1.0),
+                ));
             }
         }
         self.animation_frame += 1;
@@ -236,12 +237,12 @@ impl Benchmark {
                     (self.random_f32() - 0.5) * self.upper_layer_extent,
                 ),
             ));
-            block.size = Vec3::splat(0.82);
-            block.color = Color3::new(
+            block.set_size(Vec3::splat(0.82));
+            block.set_color(Color3::new(
                 0.30 + self.random_f32() * 0.22,
                 0.34 + self.random_f32() * 0.22,
                 0.44 + self.random_f32() * 0.22,
-            );
+            ));
             if self.random_f32() < 1.0 / TEXTURED_PART_DIVISOR as f32 {
                 let slot = Face::ALL[(self.next_random() % Face::ALL.len() as u64) as usize];
                 let material_index =
@@ -270,8 +271,8 @@ impl Benchmark {
         let base = &self.base_parts[index];
         if let Some(part) = engine.get_mut::<Part>(id) {
             part.pivot_to(base.pivot());
-            part.size = base.size;
-            part.color = base.color;
+            part.set_size(base.size());
+            part.set_color(base.color());
         }
     }
 }
@@ -345,12 +346,12 @@ fn create_benchmark_workspace(
                 (row as f32 - side as f32 * 0.5) * spacing,
             ),
         ));
-        part.size = Vec3::splat(0.82);
-        part.color = Color3::new(
+        part.set_size(Vec3::splat(0.82));
+        part.set_color(Color3::new(
             0.24 + (index % 5) as f32 * 0.12,
             0.32 + (index % 3) as f32 * 0.16,
             0.40 + (index % 4) as f32 * 0.11,
-        );
+        ));
         if index.is_multiple_of(TEXTURED_PART_DIVISOR) {
             let slot = Face::ALL[index % Face::ALL.len()];
             let material =
@@ -362,8 +363,12 @@ fn create_benchmark_workspace(
 
     let mut floor = Part::new();
     floor.pivot_to(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)));
-    floor.size = Vec3::new(extent + spacing * 2.0, 0.1, extent + spacing * 2.0);
-    floor.color = Color3::new(0.08, 0.10, 0.14);
+    floor.set_size(Vec3::new(
+        extent + spacing * 2.0,
+        0.1,
+        extent + spacing * 2.0,
+    ));
+    floor.set_color(Color3::new(0.08, 0.10, 0.14));
     floor.set_parent(workspace);
 
     Ok((part_ids, extent, benchmark_materials))

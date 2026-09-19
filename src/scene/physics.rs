@@ -277,9 +277,9 @@ impl PhysicsInstance {
             id,
             transform: part.pivot(),
             descriptor: BodyDescriptor {
-                anchored: part.anchored,
-                can_collide: part.can_collide,
-                size: part.size,
+                anchored: part.anchored(),
+                can_collide: part.can_collide(),
+                size: part.size(),
                 shape,
             },
         }
@@ -379,13 +379,13 @@ mod tests {
         let mut workspace = Workspace::new();
 
         let mut floor = Part::new();
-        floor.size = Vec3::new(10.0, 1.0, 10.0);
+        floor.set_size(Vec3::new(10.0, 1.0, 10.0));
         floor.set_position(Vec3::new(0.0, -0.5, 0.0));
         floor.set_parent(&mut workspace);
 
         let mut ball = Part::new();
         ball.shape = PartShape::Ball;
-        ball.anchored = false;
+        ball.set_anchored(false);
         ball.set_position(Vec3::new(0.0, 3.0, 0.0));
         let ball_id = ball.set_parent(&mut workspace);
 

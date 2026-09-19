@@ -69,7 +69,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
         ..Material::from_color(Color3::new(0.12, 0.16, 0.22))
     };
     engine.add_child_with(Part::new().named("Floor"), |part| {
-        part.size = Vec3::new(18.0, 0.5, 18.0);
+        part.set_size(Vec3::new(18.0, 0.5, 18.0));
         part.set_position(Vec3::new(0.0, -0.25, 0.0));
         part.set_material(floor_material);
     });
@@ -79,15 +79,15 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
         (Vec3::new(4.0, 1.2, 1.0), Vec3::new(3.0, 2.4, 3.0)),
     ] {
         engine.add_child_with(Part::new(), |part| {
-            part.size = size;
+            part.set_size(size);
             part.set_position(position);
-            part.color = Color3::new(0.18, 0.25, 0.34);
+            part.set_color(Color3::new(0.18, 0.25, 0.34));
         });
     }
 
     let light_anchor = engine.add_child_with_ref(Part::new().named("LightAnchor"), |part| {
-        part.can_collide = false;
-        part.size = Vec3::splat(0.1);
+        part.set_can_collide(false);
+        part.set_size(Vec3::splat(0.1));
         part.set_position(Vec3::new(0.0, 5.0, 2.0));
     });
     light_anchor.add_child_with(PointLight::new(), |light| {
@@ -113,17 +113,17 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
             let transform = Mat4::from_translation(position);
             let id = engine.add_child_with(Part::new(), |part| {
                 part.shape = shape;
-                part.anchored = false;
-                part.size = if shape == PartShape::Ball {
+                part.set_anchored(false);
+                part.set_size(if shape == PartShape::Ball {
                     Vec3::splat(0.9)
                 } else {
                     Vec3::new(0.95, 0.95, 0.95)
-                };
-                part.color = Color3::new(
+                });
+                part.set_color(Color3::new(
                     0.24 + (index % 3) as f32 * 0.18,
                     0.42 + (index % 2) as f32 * 0.18,
                     0.72 - (index % 4) as f32 * 0.08,
-                );
+                ));
                 part.set_position(position);
                 part.set_material(Material {
                     metallic: 0.12,

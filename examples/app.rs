@@ -64,7 +64,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     let ground = engine.add_child_with_ref(Part::new().named("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
-        part.size = Vec3::new(42.0, 0.2, 42.0);
+        part.set_size(Vec3::new(42.0, 0.2, 42.0));
         let mut material = Material::textured(dirt);
         material.roughness = 0.9;
         part.set_material(material);
@@ -75,7 +75,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         ground.add_child_with(Part::new(), |part| {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
-            part.size = Vec3::new(0.72, 0.45, 0.72);
+            part.set_size(Vec3::new(0.72, 0.45, 0.72));
             let mut material = Material::textured(cobblestone);
             material.roughness = 0.82;
             part.set_material(material);
@@ -85,8 +85,8 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     let tower = engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Cylinder;
         part.set_position(Vec3::new(-3.4, 1.0, -1.8));
-        part.size = Vec3::new(1.2, 2.0, 1.2);
-        part.color = Color3::new(0.76, 0.30, 0.14);
+        part.set_size(Vec3::new(1.2, 2.0, 1.2));
+        part.set_color(Color3::new(0.76, 0.30, 0.14));
         part.set_material(Material {
             metallic: 0.82,
             roughness: 0.24,
@@ -107,7 +107,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     engine.add_child_with(Part::new().named("GrassBlock"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
-        part.size = Vec3::new(1.5, 1.6, 1.5);
+        part.set_size(Vec3::new(1.5, 1.6, 1.5));
         part.set_orientation(Vec3::new(0.0, 31.0, 0.0));
         // Each face carries its own full PBR material: the top face is grass,
         // the bottom is dirt, and the sides blend grass over dirt.
@@ -129,8 +129,8 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     let platform = engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(-1.0, 0.55, 1.6));
-        part.size = Vec3::new(2.0, 1.1, 2.0);
-        part.color = Color3::new(0.60, 0.68, 0.50);
+        part.set_size(Vec3::new(2.0, 1.1, 2.0));
+        part.set_color(Color3::new(0.60, 0.68, 0.50));
         let mut material = Material::textured(festival_lantern);
         material.roughness = 0.82;
         part.set_material(material);
@@ -139,13 +139,13 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     let orb = engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Ball;
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
-        part.size = Vec3::splat(0.8);
-        part.color = Color3::new(0.95, 0.72, 0.22);
+        part.set_size(Vec3::splat(0.8));
+        part.set_color(Color3::new(0.95, 0.72, 0.22));
         part.set_material(Material {
             roughness: 0.18,
             ..Default::default()
         });
-        part.can_collide = false;
+        part.set_can_collide(false);
         part.add_child_with(PointLight::new(), |light| {
             light.color = Color3::new(1.0, 0.35, 0.08);
             light.brightness = 3.5;
@@ -157,16 +157,16 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Wedge;
         part.set_position(Vec3::new(2.7, 1.5, 2.2));
-        part.size = Vec3::new(1.1, 3.0, 1.1);
-        part.color = Color3::new(0.76, 0.30, 0.14);
+        part.set_size(Vec3::new(1.1, 3.0, 1.1));
+        part.set_color(Color3::new(0.76, 0.30, 0.14));
         part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
     engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::CornerWedge;
         part.set_position(Vec3::new(-4.7, 0.6, 3.1));
-        part.size = Vec3::new(1.8, 1.2, 1.8);
-        part.color = Color3::new(0.10, 0.48, 0.47);
+        part.set_size(Vec3::new(1.8, 1.2, 1.8));
+        part.set_color(Color3::new(0.10, 0.48, 0.47));
         part.set_orientation(Vec3::new(0.0, -46.0, 0.0));
     });
 

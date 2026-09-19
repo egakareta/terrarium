@@ -16,7 +16,7 @@ fn main() {
         .run(|engine| {
             // Create a cube
             let mut part = Part::new();
-            part.size = glam::Vec3::new(2.0, 2.0, 2.0);
+            part.set_size(glam::Vec3::new(2.0, 2.0, 2.0));
 
             // Add it into the scene
             engine.add_child(part);

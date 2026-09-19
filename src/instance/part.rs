@@ -15,19 +15,19 @@ pub struct BasePart {
     pub(crate) instance: InstanceData,
     pub(crate) pv_instance: PVInstance,
     /// World-space scale applied to the unit primitive mesh.
-    pub size: Vec3,
+    size: Vec3,
     /// Tint.
-    pub color: Color3,
+    color: Color3,
     /// Whether a physics system should treat this part as immovable.
     ///
     /// The default physics integration creates a fixed body when this is `true`
     /// and a dynamic body when this is `false`.
-    pub anchored: bool,
+    anchored: bool,
     /// Whether a physics system should consider this part for collisions.
     ///
     /// The default physics integration omits this part's collider when this is
     /// `false`, while still simulating its rigid body.
-    pub can_collide: bool,
+    can_collide: bool,
 }
 
 impl BasePart {
@@ -42,6 +42,46 @@ impl BasePart {
             anchored: true,
             can_collide: true,
         }
+    }
+
+    /// Returns the world-space scale applied to the unit primitive mesh.
+    pub fn size(&self) -> Vec3 {
+        self.size
+    }
+
+    /// Sets the world-space scale applied to the unit primitive mesh.
+    pub fn set_size(&mut self, size: Vec3) {
+        self.size = size;
+    }
+
+    /// Returns the tint.
+    pub fn color(&self) -> Color3 {
+        self.color
+    }
+
+    /// Sets the tint.
+    pub fn set_color(&mut self, color: Color3) {
+        self.color = color;
+    }
+
+    /// Returns whether a physics system should treat this part as immovable.
+    pub fn anchored(&self) -> bool {
+        self.anchored
+    }
+
+    /// Sets whether a physics system should treat this part as immovable.
+    pub fn set_anchored(&mut self, anchored: bool) {
+        self.anchored = anchored;
+    }
+
+    /// Returns whether a physics system should consider this part for collisions.
+    pub fn can_collide(&self) -> bool {
+        self.can_collide
+    }
+
+    /// Sets whether a physics system should consider this part for collisions.
+    pub fn set_can_collide(&mut self, can_collide: bool) {
+        self.can_collide = can_collide;
     }
 }
 

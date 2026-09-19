@@ -395,11 +395,11 @@ impl TweenTrack {
             }
             Self::Size { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| part.size = value);
+                with_base_part(workspace, *target, |part| part.set_size(value));
             }
             Self::Color { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| part.color = value);
+                with_base_part(workspace, *target, |part| part.set_color(value));
             }
         }
     }

@@ -92,7 +92,7 @@ pub(super) fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Optio
             return Some(LightParent {
                 id,
                 pivot: part.pivot(),
-                size: part.size.abs(),
+                size: part.size().abs(),
             });
         }
         #[cfg(feature = "meshpart")]
@@ -100,14 +100,14 @@ pub(super) fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Optio
             return Some(LightParent {
                 id,
                 pivot: part.pivot(),
-                size: part.size.abs(),
+                size: part.size().abs(),
             });
         }
         if let Some(part) = parent.downcast_ref::<BasePart>() {
             return Some(LightParent {
                 id,
                 pivot: part.pivot(),
-                size: part.size.abs(),
+                size: part.size().abs(),
             });
         }
         parent_id = parent.parent();
