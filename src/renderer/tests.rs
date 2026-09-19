@@ -13,7 +13,7 @@ fn surface_packing_preserves_normal_xy_and_material_channels() {
 
 #[test]
 fn material_shader_validates_with_explicit_texture_gradients() {
-    let module = wgpu::naga::front::wgsl::parse_str(include_str!("../shader.wgsl"))
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("shader.wgsl"))
         .expect("material shader should parse");
     let mut validator = wgpu::naga::valid::Validator::new(
         wgpu::naga::valid::ValidationFlags::all(),
@@ -26,7 +26,7 @@ fn material_shader_validates_with_explicit_texture_gradients() {
 
 #[test]
 fn skybox_shader_validates() {
-    let module = wgpu::naga::front::wgsl::parse_str(include_str!("../skybox.wgsl"))
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("skybox.wgsl"))
         .expect("skybox shader should parse");
     let mut validator = wgpu::naga::valid::Validator::new(
         wgpu::naga::valid::ValidationFlags::all(),
@@ -39,7 +39,7 @@ fn skybox_shader_validates() {
 
 #[test]
 fn eframe_composite_shader_validates() {
-    let module = wgpu::naga::front::wgsl::parse_str(include_str!("../blit.wgsl"))
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("blit.wgsl"))
         .expect("eframe composite shader should parse");
     let mut validator = wgpu::naga::valid::Validator::new(
         wgpu::naga::valid::ValidationFlags::all(),

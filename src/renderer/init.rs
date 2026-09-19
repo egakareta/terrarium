@@ -338,7 +338,7 @@ impl Renderer {
         };
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("PBR mesh shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
         let shader_constants = [
             (
@@ -452,7 +452,7 @@ impl Renderer {
         });
         let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("skybox shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../skybox.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
         });
         let skybox_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
