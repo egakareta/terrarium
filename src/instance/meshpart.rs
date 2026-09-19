@@ -242,7 +242,7 @@ pub trait HasMeshPart {
 
     /// Returns the CPU-side geometry rendered by this mesh part.
     fn mesh(&self) -> &Mesh {
-        self.mesh_part().mesh()
+        self.mesh_part().mesh.mesh()
     }
 
     /// Returns the shared mesh asset used by this part.
