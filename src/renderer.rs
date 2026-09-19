@@ -10,15 +10,31 @@ use web_time::Instant;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    Camera, Color3, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT,
-    Material, MaterialSlot, Mesh, MeshMaterialSlots, Part, PartShape, Skybox, SkyboxError, Texture,
-    TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
+    BasePart, Camera, Color3, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, LightFace,
+    MATERIAL_SLOT_COUNT, Material, MaterialSlot, Mesh, MeshMaterialSlots, Part, PartShape,
+    PointLight, Skybox, SkyboxError, SpotLight, SurfaceLight, Texture, TextureColorSpace,
+    TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
 
 const SHADOW_MAP_SIZE: u32 = 3072;
 const SHADOW_CASCADE_COUNT: usize = 7;
+/// Maximum number of camera-relevant local lights rendered in one frame.
+///
+/// When a scene contains more lights, the renderer keeps the lights with the
+/// strongest estimated contribution to the current camera.
+pub const MAX_LOCAL_LIGHTS: usize = 64;
+/// Maximum local-light shadow-map layers rendered in one frame.
+///
+/// Spot and surface lights consume one layer each. Omnidirectional point-light
+/// shadows consume six. Lights outside this budget still illuminate the scene
+/// without shadows.
+pub const MAX_LOCAL_SHADOW_LAYERS: usize = 8;
+const LOCAL_SHADOW_MAP_SIZE: u32 = 1024;
+const LOCAL_SHADOW_VISIBILITY_OFFSET: usize = SHADOW_CASCADE_COUNT + 1;
+const LOCAL_LIGHT_DERIVED_RANGE: f32 = 24.0;
+const LOCAL_LIGHT_MAX_RANGE: f32 = 100.0;
 // Keep native backend code loaded until thread-local driver state is gone.
 #[cfg(not(target_arch = "wasm32"))]
 static WGPU_INSTANCE_KEEPALIVE: OnceLock<wgpu::Instance> = OnceLock::new();
@@ -126,7 +142,7 @@ struct RenderBatch {
     mesh: GpuMeshHandle,
     textures: MaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
-    visibility_mask: u8,
+    visibility_mask: u16,
     instances: Vec<InstanceRaw>,
     instance_start: usize,
 }
@@ -135,7 +151,7 @@ struct PreparedRenderBatch {
     mesh: GpuMeshHandle,
     packed_textures: PackedMaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
-    visibility_mask: u8,
+    visibility_mask: u16,
     instance_start: usize,
     instance_count: u32,
 }
@@ -145,7 +161,46 @@ struct PartCandidate<'a> {
     pivot: Mat4,
     center: Vec3,
     radius: f32,
-    visibility_mask: u8,
+    visibility_mask: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct LocalLightRaw {
+    position_range: [f32; 4],
+    color_brightness: [f32; 4],
+    direction_type: [f32; 4],
+    axis_u_half_width: [f32; 4],
+    axis_v_half_height: [f32; 4],
+    params: [f32; 4],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct LocalLightsUniform {
+    params: [u32; 4],
+    lights: [LocalLightRaw; MAX_LOCAL_LIGHTS],
+    shadow_view_projections: [[[f32; 4]; 4]; MAX_LOCAL_SHADOW_LAYERS],
+}
+
+struct LocalLightCandidate {
+    raw: LocalLightRaw,
+    shadow_view_projections: [Mat4; 6],
+    shadow_layer_count: usize,
+    shadow_excluded_caster: InstanceId,
+    score: f32,
+}
+
+#[derive(Clone, Copy)]
+struct LightParent {
+    id: InstanceId,
+    pivot: Mat4,
+    size: Vec3,
+}
+
+struct PreparedLocalShadows {
+    planes: [[Vec4; 6]; MAX_LOCAL_SHADOW_LAYERS],
+    excluded_casters: [Option<InstanceId>; MAX_LOCAL_SHADOW_LAYERS],
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -330,6 +385,9 @@ pub struct Renderer {
     depth_view: wgpu::TextureView,
     _shadow_texture: wgpu::Texture,
     shadow_layer_views: [wgpu::TextureView; SHADOW_CASCADE_COUNT],
+    _local_shadow_texture: wgpu::Texture,
+    local_shadow_view: wgpu::TextureView,
+    local_shadow_layer_views: [wgpu::TextureView; MAX_LOCAL_SHADOW_LAYERS],
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
@@ -345,6 +403,7 @@ pub struct Renderer {
     skybox_bind_group: Option<wgpu::BindGroup>,
     skybox_revision: Option<u64>,
     camera_buffer: wgpu::Buffer,
+    local_lights_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_bind_group_layout: wgpu::BindGroupLayout,
     shadow_view: wgpu::TextureView,
@@ -382,18 +441,20 @@ pub struct Renderer {
     free_meshpart_meshes: Vec<GpuMeshHandle>,
     clear_color: wgpu::Color,
     shadow_pass_enabled: bool,
+    local_shadow_layer_count: usize,
     last_frame: Instant,
     fps_timer: Instant,
     frame_count: u32,
     fps: f32,
     prepared_batches: Vec<PreparedRenderBatch>,
+    local_light_scratch: Vec<LocalLightCandidate>,
     batch_scratch: Vec<RenderBatch>,
     batch_indices_scratch: HashMap<
         (
             GpuMeshHandle,
             MaterialTextures,
             [TextureFilter; MATERIAL_SLOT_COUNT],
-            u8,
+            u16,
         ),
         usize,
     >,
@@ -457,6 +518,8 @@ impl Renderer {
         let queue = render_state.queue.clone();
         let (depth_texture, depth_view) = create_depth_texture(&device, width, height);
         let (shadow_texture, shadow_view, shadow_layer_views) = create_shadow_texture(&device);
+        let (local_shadow_texture, local_shadow_view, local_shadow_layer_views) =
+            create_local_shadow_texture(&device, 1);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("shadow comparison sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -477,6 +540,12 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let local_lights_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("local lights uniform buffer"),
+            size: std::mem::size_of::<LocalLightsUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let shadow_camera_size = std::mem::size_of::<ShadowCameraUniform>() as u64;
         let shadow_camera_stride = align_to(
             shadow_camera_size,
@@ -484,7 +553,8 @@ impl Renderer {
         ) as u32;
         let shadow_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shadow camera uniform buffer"),
-            size: u64::from(shadow_camera_stride) * SHADOW_CASCADE_COUNT as u64,
+            size: u64::from(shadow_camera_stride)
+                * (SHADOW_CASCADE_COUNT + MAX_LOCAL_SHADOW_LAYERS) as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -553,6 +623,26 @@ impl Renderer {
                         binding: 5,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 6,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 7,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2Array,
+                            multisampled: false,
+                        },
                         count: None,
                     },
                 ],
@@ -629,6 +719,14 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&skybox_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: local_lights_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&local_shadow_view),
                 },
             ],
         });
@@ -978,6 +1076,9 @@ impl Renderer {
             depth_view,
             _shadow_texture: shadow_texture,
             shadow_layer_views,
+            _local_shadow_texture: local_shadow_texture,
+            local_shadow_view,
+            local_shadow_layer_views,
             _shadow_sampler: shadow_sampler,
             pipeline,
             shadow_pipeline,
@@ -993,6 +1094,7 @@ impl Renderer {
             skybox_bind_group: None,
             skybox_revision: None,
             camera_buffer,
+            local_lights_buffer,
             camera_bind_group,
             camera_bind_group_layout,
             shadow_view,
@@ -1032,11 +1134,13 @@ impl Renderer {
                 a: 1.0,
             },
             shadow_pass_enabled: true,
+            local_shadow_layer_count: 0,
             last_frame: Instant::now(),
             fps_timer: Instant::now(),
             frame_count: 0,
             fps: 0.0,
             prepared_batches: Vec::new(),
+            local_light_scratch: Vec::new(),
             batch_scratch: Vec::new(),
             batch_indices_scratch: HashMap::new(),
             material_bind_groups: HashMap::new(),
@@ -1813,9 +1917,93 @@ impl Renderer {
         });
     }
 
+    fn prepare_local_lights(
+        &mut self,
+        workspace: &Workspace,
+        camera_planes: &[Vec4; 6],
+    ) -> PreparedLocalShadows {
+        let camera = &workspace.current_camera;
+        let mut candidates = std::mem::take(&mut self.local_light_scratch);
+        candidates.clear();
+
+        for instance in workspace.instances() {
+            let candidate = if let Some(light) = instance.downcast_ref::<PointLight>() {
+                point_light_candidate(workspace, light, camera, camera_planes)
+            } else if let Some(light) = instance.downcast_ref::<SpotLight>() {
+                spot_light_candidate(workspace, light, camera, camera_planes)
+            } else if let Some(light) = instance.downcast_ref::<SurfaceLight>() {
+                surface_light_candidate(workspace, light, camera, camera_planes)
+            } else {
+                None
+            };
+            if let Some(candidate) = candidate {
+                candidates.push(candidate);
+            }
+        }
+
+        if candidates.len() > MAX_LOCAL_LIGHTS {
+            candidates.select_nth_unstable_by(MAX_LOCAL_LIGHTS, |a, b| b.score.total_cmp(&a.score));
+            candidates.truncate(MAX_LOCAL_LIGHTS);
+        }
+        candidates.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
+
+        let mut uniform = LocalLightsUniform::zeroed();
+        let mut shadow_planes = [[Vec4::ZERO; 6]; MAX_LOCAL_SHADOW_LAYERS];
+        let mut shadow_excluded_casters = [None; MAX_LOCAL_SHADOW_LAYERS];
+        let mut shadow_layer_count = 0;
+        for (light_index, candidate) in candidates.iter_mut().enumerate() {
+            let requested_layers = candidate.shadow_layer_count;
+            if requested_layers != 0
+                && shadow_layer_count + requested_layers <= MAX_LOCAL_SHADOW_LAYERS
+            {
+                candidate.raw.params[1] = shadow_layer_count as f32;
+                candidate.raw.params[2] = requested_layers as f32;
+                for matrix in candidate
+                    .shadow_view_projections
+                    .iter()
+                    .take(requested_layers)
+                {
+                    let layer = shadow_layer_count;
+                    uniform.shadow_view_projections[layer] = matrix.to_cols_array_2d();
+                    shadow_planes[layer] = frustum_planes(*matrix);
+                    shadow_excluded_casters[layer] = Some(candidate.shadow_excluded_caster);
+                    self.queue.write_buffer(
+                        &self.shadow_camera_buffer,
+                        (SHADOW_CASCADE_COUNT + layer) as u64
+                            * u64::from(self.shadow_camera_stride),
+                        bytemuck::bytes_of(&ShadowCameraUniform {
+                            light_view_projection: matrix.to_cols_array_2d(),
+                        }),
+                    );
+                    shadow_layer_count += 1;
+                }
+            }
+            uniform.lights[light_index] = candidate.raw;
+        }
+        uniform.params[0] = candidates.len() as u32;
+        self.queue
+            .write_buffer(&self.local_lights_buffer, 0, bytemuck::bytes_of(&uniform));
+        if shadow_layer_count != 0 && self._local_shadow_texture.width() != LOCAL_SHADOW_MAP_SIZE {
+            let (texture, view, layer_views) =
+                create_local_shadow_texture(&self.device, LOCAL_SHADOW_MAP_SIZE);
+            self._local_shadow_texture = texture;
+            self.local_shadow_view = view;
+            self.local_shadow_layer_views = layer_views;
+            self.refresh_environment_binding();
+        }
+        self.local_shadow_layer_count = shadow_layer_count;
+        self.local_light_scratch = candidates;
+        PreparedLocalShadows {
+            planes: shadow_planes,
+            excluded_casters: shadow_excluded_casters,
+        }
+    }
+
     fn prepare_scene(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
         self.prepared_batches.clear();
         let camera_vp = workspace.current_camera.view_projection_matrix();
+        let camera_planes = frustum_planes(camera_vp);
+        let local_shadows = self.prepare_local_lights(workspace, &camera_planes);
         let lighting = &workspace.lighting;
         let light_direction = workspace.sun_direction();
         let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
@@ -1910,7 +2098,6 @@ impl Renderer {
             self.sync_skybox(workspace.skybox())?;
             self.skybox_revision = Some(workspace.skybox_revision());
         }
-        let camera_planes = frustum_planes(camera_vp);
         let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;
         let default_filters = self.default_material_filters;
@@ -1935,7 +2122,11 @@ impl Renderer {
         let mut batches = std::mem::take(&mut self.batch_scratch);
         let mut batch_indices = std::mem::take(&mut self.batch_indices_scratch);
         batches.retain(|batch| {
-            batch.textures == default_textures && self.primitive_meshes.contains(&batch.mesh)
+            batch.textures == default_textures
+                && ((self.primitive_meshes.contains(&batch.mesh)
+                    && usize::from(batch.visibility_mask) < VISIBILITY_MASK_COUNT)
+                    || (usize::from(batch.visibility_mask) >= VISIBILITY_MASK_COUNT
+                        && !batch.instances.is_empty()))
         });
         batch_indices.clear();
         for batch in &mut batches {
@@ -1944,10 +2135,24 @@ impl Renderer {
         // Fast path for the common untextured case: index directly by shape
         // and pass visibility instead of hashing a large material key per part.
         let mut default_batches = [[None; VISIBILITY_MASK_COUNT]; PartShape::COUNT];
+        for (batch_index, batch) in batches.iter().enumerate() {
+            if usize::from(batch.visibility_mask) >= VISIBILITY_MASK_COUNT {
+                batch_indices.insert(
+                    (
+                        batch.mesh,
+                        default_textures,
+                        default_filters,
+                        batch.visibility_mask,
+                    ),
+                    batch_index,
+                );
+            }
+        }
         for shape in PartShape::ALL {
             let mesh = self.primitive_meshes[shape.index()];
             for (batch_index, batch) in batches.iter().enumerate() {
-                if batch.mesh == mesh {
+                if batch.mesh == mesh && usize::from(batch.visibility_mask) < VISIBILITY_MASK_COUNT
+                {
                     default_batches[shape.index()][batch.visibility_mask as usize] =
                         Some(batch_index);
                 }
@@ -1979,26 +2184,44 @@ impl Renderer {
                 break;
             }
 
-            let mut classify = |planes: &[Vec4; 6], visibility_bit: u8| match aabb_frustum_relation(
-                planes, bounds_min, bounds_max,
-            ) {
-                FrustumRelation::Inside => {
-                    for candidate in &mut group {
-                        candidate.visibility_mask |= visibility_bit;
-                    }
-                }
-                FrustumRelation::Intersecting => {
-                    for candidate in &mut group {
-                        if sphere_visible(planes, candidate.center, candidate.radius) {
-                            candidate.visibility_mask |= visibility_bit;
+            let mut classify =
+                |planes: &[Vec4; 6], visibility_bit: u16, excluded: Option<InstanceId>| {
+                    match aabb_frustum_relation(planes, bounds_min, bounds_max) {
+                        FrustumRelation::Inside => {
+                            for candidate in &mut group {
+                                if Some(candidate.part.id()) != excluded {
+                                    candidate.visibility_mask |= visibility_bit;
+                                }
+                            }
                         }
+                        FrustumRelation::Intersecting => {
+                            for candidate in &mut group {
+                                if Some(candidate.part.id()) != excluded
+                                    && sphere_visible(planes, candidate.center, candidate.radius)
+                                {
+                                    candidate.visibility_mask |= visibility_bit;
+                                }
+                            }
+                        }
+                        FrustumRelation::Outside => {}
                     }
-                }
-                FrustumRelation::Outside => {}
-            };
-            classify(&camera_planes, 1);
+                };
+            classify(&camera_planes, 1, None);
             for (cascade, planes) in light_planes.iter().enumerate() {
-                classify(planes, 1 << (cascade + 1));
+                classify(planes, 1 << (cascade + 1), None);
+            }
+            for (layer, planes) in local_shadows
+                .planes
+                .iter()
+                .take(self.local_shadow_layer_count)
+                .enumerate()
+            {
+                let visibility_bit = 1 << (LOCAL_SHADOW_VISIBILITY_OFFSET + layer);
+                classify(
+                    planes,
+                    visibility_bit,
+                    local_shadows.excluded_casters[layer],
+                );
             }
 
             for candidate in &group {
@@ -2055,21 +2278,42 @@ impl Renderer {
                         batch_index
                     }
                 } else {
-                    let slot = &mut default_batches[part.shape.index()][visibility_mask as usize];
-                    if let Some(batch_index) = *slot {
-                        batch_index
+                    let mesh = self.primitive_meshes[part.shape.index()];
+                    if usize::from(visibility_mask) < VISIBILITY_MASK_COUNT {
+                        let slot =
+                            &mut default_batches[part.shape.index()][visibility_mask as usize];
+                        if let Some(batch_index) = *slot {
+                            batch_index
+                        } else {
+                            let batch_index = batches.len();
+                            *slot = Some(batch_index);
+                            batches.push(RenderBatch {
+                                mesh,
+                                textures: default_textures,
+                                filters: default_filters,
+                                visibility_mask,
+                                instances: Vec::new(),
+                                instance_start: 0,
+                            });
+                            batch_index
+                        }
                     } else {
-                        let batch_index = batches.len();
-                        *slot = Some(batch_index);
-                        batches.push(RenderBatch {
-                            mesh: self.primitive_meshes[part.shape.index()],
-                            textures: default_textures,
-                            filters: default_filters,
-                            visibility_mask,
-                            instances: Vec::new(),
-                            instance_start: 0,
-                        });
-                        batch_index
+                        let key = (mesh, default_textures, default_filters, visibility_mask);
+                        if let Some(&batch_index) = batch_indices.get(&key) {
+                            batch_index
+                        } else {
+                            let batch_index = batches.len();
+                            batch_indices.insert(key, batch_index);
+                            batches.push(RenderBatch {
+                                mesh,
+                                textures: default_textures,
+                                filters: default_filters,
+                                visibility_mask,
+                                instances: Vec::new(),
+                                instance_start: 0,
+                            });
+                            batch_index
+                        }
                     }
                 };
                 let model = Mat4::from_cols(
@@ -2113,6 +2357,18 @@ impl Renderer {
             for (cascade, planes) in light_planes.iter().enumerate() {
                 if sphere_visible(planes, center, radius) {
                     visibility_mask |= 1 << (cascade + 1);
+                }
+            }
+            for (layer, planes) in local_shadows
+                .planes
+                .iter()
+                .take(self.local_shadow_layer_count)
+                .enumerate()
+            {
+                if local_shadows.excluded_casters[layer] != Some(meshpart.id())
+                    && sphere_visible(planes, center, radius)
+                {
+                    visibility_mask |= 1 << (LOCAL_SHADOW_VISIBILITY_OFFSET + layer);
                 }
             }
             if visibility_mask == 0 {
@@ -2263,7 +2519,7 @@ impl Renderer {
         camera_bind_group: &wgpu::BindGroup,
         dynamic_offsets: &[wgpu::DynamicOffset],
         use_materials: bool,
-        visibility_bit: u8,
+        visibility_bit: u16,
     ) {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera_bind_group, dynamic_offsets);
@@ -2469,29 +2725,64 @@ impl Renderer {
                     binding: 5,
                     resource: wgpu::BindingResource::Sampler(&self.skybox_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: self.local_lights_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&self.local_shadow_view),
+                },
             ],
         });
         self.camera_bind_group = camera_bind_group;
     }
 
-    fn draw_shadow_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>, cascade: usize) {
+    fn draw_shadow_scene<'a>(
+        &self,
+        pass: &mut wgpu::RenderPass<'a>,
+        uniform_index: usize,
+        visibility_bit: u16,
+    ) {
         self.draw_batches(
             pass,
             &self.shadow_pipeline,
             &self.shadow_camera_bind_group,
-            &[cascade as u32 * self.shadow_camera_stride],
+            &[uniform_index as u32 * self.shadow_camera_stride],
             false,
-            1 << (cascade + 1),
+            visibility_bit,
         );
     }
 
     fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
-        if !self.shadow_pass_enabled {
-            return;
+        if self.shadow_pass_enabled {
+            for (cascade, view) in self.shadow_layer_views.iter().enumerate() {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("directional shadow cascade pass"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                self.draw_shadow_scene(&mut pass, cascade, 1 << (cascade + 1));
+            }
         }
-        for (cascade, view) in self.shadow_layer_views.iter().enumerate() {
+        for (layer, view) in self
+            .local_shadow_layer_views
+            .iter()
+            .take(self.local_shadow_layer_count)
+            .enumerate()
+        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("directional shadow cascade pass"),
+                label: Some("local light shadow pass"),
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view,
@@ -2505,7 +2796,11 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.draw_shadow_scene(&mut pass, cascade);
+            self.draw_shadow_scene(
+                &mut pass,
+                SHADOW_CASCADE_COUNT + layer,
+                1 << (LOCAL_SHADOW_VISIBILITY_OFFSET + layer),
+            );
         }
     }
 
@@ -2967,6 +3262,390 @@ fn linear_to_srgb_byte(value: u8) -> u8 {
     })[value as usize]
 }
 
+fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Option<LightParent> {
+    let mut parent_id = light.parent();
+    while let Some(id) = parent_id {
+        let parent = workspace.instance(id)?;
+        if let Some(part) = parent.downcast_ref::<Part>() {
+            return Some(LightParent {
+                id,
+                pivot: part.pivot(),
+                size: part.size.abs(),
+            });
+        }
+        #[cfg(feature = "meshpart")]
+        if let Some(part) = parent.downcast_ref::<MeshPart>() {
+            return Some(LightParent {
+                id,
+                pivot: part.pivot(),
+                size: part.size.abs(),
+            });
+        }
+        if let Some(part) = parent.downcast_ref::<BasePart>() {
+            return Some(LightParent {
+                id,
+                pivot: part.pivot(),
+                size: part.size.abs(),
+            });
+        }
+        parent_id = parent.parent();
+    }
+    None
+}
+
+fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, Vec4) {
+    let (normal, normal_extent, axis_u, half_width, axis_v, half_height) = match face {
+        LightFace::Top => (
+            Vec3::Y,
+            parent.size.y * 0.5,
+            Vec3::X,
+            parent.size.x * 0.5,
+            Vec3::Z,
+            parent.size.z * 0.5,
+        ),
+        LightFace::Bottom => (
+            Vec3::NEG_Y,
+            parent.size.y * 0.5,
+            Vec3::X,
+            parent.size.x * 0.5,
+            Vec3::Z,
+            parent.size.z * 0.5,
+        ),
+        LightFace::Front => (
+            Vec3::Z,
+            parent.size.z * 0.5,
+            Vec3::X,
+            parent.size.x * 0.5,
+            Vec3::Y,
+            parent.size.y * 0.5,
+        ),
+        LightFace::Back => (
+            Vec3::NEG_Z,
+            parent.size.z * 0.5,
+            Vec3::X,
+            parent.size.x * 0.5,
+            Vec3::Y,
+            parent.size.y * 0.5,
+        ),
+        LightFace::Left => (
+            Vec3::NEG_X,
+            parent.size.x * 0.5,
+            Vec3::Z,
+            parent.size.z * 0.5,
+            Vec3::Y,
+            parent.size.y * 0.5,
+        ),
+        LightFace::Right => (
+            Vec3::X,
+            parent.size.x * 0.5,
+            Vec3::Z,
+            parent.size.z * 0.5,
+            Vec3::Y,
+            parent.size.y * 0.5,
+        ),
+    };
+    let direction = parent.pivot.transform_vector3(normal).normalize_or_zero();
+    let position = parent.pivot.w_axis.truncate() + direction * normal_extent;
+    let axis_u = parent
+        .pivot
+        .transform_vector3(axis_u)
+        .normalize_or_zero()
+        .extend(half_width);
+    let axis_v = parent
+        .pivot
+        .transform_vector3(axis_v)
+        .normalize_or_zero()
+        .extend(half_height);
+    (position, direction, axis_u, axis_v)
+}
+
+fn local_light_color(color: Color3, brightness: f32) -> Option<([f32; 4], f32)> {
+    let brightness = finite_nonnegative(brightness);
+    let color = lighting_color(color);
+    let color_strength = color[0].max(color[1]).max(color[2]);
+    (brightness > 0.0 && color_strength > 0.0).then_some((color, brightness))
+}
+
+fn local_light_score(
+    position: Vec3,
+    range: f32,
+    source_radius: f32,
+    color: [f32; 4],
+    brightness: f32,
+    camera_position: Vec3,
+) -> f32 {
+    let distance = (position.distance(camera_position) - source_radius).max(0.0);
+    let attenuation = if distance < range {
+        let normalized_distance = distance / range;
+        let range_falloff = (1.0 - normalized_distance.powi(4)).max(0.0);
+        range_falloff.powi(2) / distance.powi(2).max(1.0)
+    } else {
+        0.25 / (distance - range + 1.0).powi(2)
+    };
+    color[0].max(color[1]).max(color[2]) * brightness * attenuation
+}
+
+fn directional_light_relevance(
+    camera: &Camera,
+    position: Vec3,
+    direction: Vec3,
+    angle: f32,
+    range: f32,
+) -> f32 {
+    let view = camera.pivot().inverse();
+    let view_position = view.transform_point3(position);
+    let view_direction = view.transform_vector3(direction);
+    let source_depth = -view_position.z;
+    let tan_half_fovy = (camera.fovy * 0.5).tan();
+    let outer_cosine = (angle * 0.5).to_radians().cos();
+    let inner_cosine = outer_cosine + (1.0 - outer_cosine) * 0.15;
+    let mut relevance: f32 = 0.0;
+
+    let mut evaluate_probe = |probe: Vec3| {
+        let probe = camera.pivot().transform_point3(probe);
+        let Some(to_probe) = (probe - position).try_normalize() else {
+            return;
+        };
+        let cosine = direction.dot(to_probe);
+        let amount =
+            ((cosine - outer_cosine) / (inner_cosine - outer_cosine).max(1e-5)).clamp(0.0, 1.0);
+        let smooth_amount = amount * amount * (3.0 - 2.0 * amount);
+        relevance = relevance.max(smooth_amount);
+    };
+
+    for depth in [
+        camera.znear,
+        camera.zfar,
+        source_depth,
+        source_depth + range * 0.5,
+        source_depth + range,
+    ] {
+        let depth = depth.clamp(camera.znear, camera.zfar);
+        let half_height = depth * tan_half_fovy;
+        let half_width = half_height * camera.aspect;
+        let closest_x = view_position.x.clamp(-half_width, half_width);
+        let closest_y = view_position.y.clamp(-half_height, half_height);
+        for [x, y] in [
+            [closest_x, closest_y],
+            [0.0, 0.0],
+            [-half_width, -half_height],
+            [-half_width, half_height],
+            [half_width, -half_height],
+            [half_width, half_height],
+            [closest_x, -half_height],
+            [closest_x, half_height],
+            [-half_width, closest_y],
+            [half_width, closest_y],
+        ] {
+            evaluate_probe(Vec3::new(x, y, -depth));
+        }
+
+        if view_direction.z.abs() > 1e-6 {
+            let distance = (-depth - view_position.z) / view_direction.z;
+            if distance >= 0.0 {
+                let axis_point = view_position + view_direction * distance;
+                if axis_point.x.abs() <= half_width && axis_point.y.abs() <= half_height {
+                    evaluate_probe(axis_point);
+                }
+            }
+        } else if (depth - source_depth).abs() <= 1e-4 {
+            if view_direction.x.abs() > 1e-6 {
+                for x in [-half_width, half_width] {
+                    let distance = (x - view_position.x) / view_direction.x;
+                    let y = view_position.y + view_direction.y * distance;
+                    if distance >= 0.0 && y.abs() <= half_height {
+                        evaluate_probe(Vec3::new(x, y, -depth));
+                    }
+                }
+            }
+            if view_direction.y.abs() > 1e-6 {
+                for y in [-half_height, half_height] {
+                    let distance = (y - view_position.y) / view_direction.y;
+                    let x = view_position.x + view_direction.x * distance;
+                    if distance >= 0.0 && x.abs() <= half_width {
+                        evaluate_probe(Vec3::new(x, y, -depth));
+                    }
+                }
+            }
+        }
+    }
+
+    relevance
+}
+
+fn point_light_candidate(
+    workspace: &Workspace,
+    light: &PointLight,
+    camera: &Camera,
+    camera_planes: &[Vec4; 6],
+) -> Option<LocalLightCandidate> {
+    let parent = light_parent(workspace, light)?;
+    let (color, brightness) = local_light_color(light.color, light.brightness)?;
+    let range = finite_nonnegative(light.range).min(10_000.0);
+    if range <= 0.0 {
+        return None;
+    }
+    let position = parent.pivot.w_axis.truncate();
+    if !sphere_visible(camera_planes, position, range) {
+        return None;
+    }
+    let shadow_view_projections = if light.shadows {
+        point_shadow_view_projections(position, 0.03, range)
+    } else {
+        [Mat4::IDENTITY; 6]
+    };
+    Some(LocalLightCandidate {
+        raw: LocalLightRaw {
+            position_range: position.extend(range).to_array(),
+            color_brightness: [color[0], color[1], color[2], brightness],
+            direction_type: [0.0, 0.0, 0.0, 0.0],
+            axis_u_half_width: [0.0; 4],
+            axis_v_half_height: [0.0; 4],
+            params: [0.0, -1.0, 0.0, 0.0],
+        },
+        shadow_view_projections,
+        shadow_layer_count: if light.shadows { 6 } else { 0 },
+        shadow_excluded_caster: parent.id,
+        score: local_light_score(position, range, 0.0, color, brightness, camera.position()),
+    })
+}
+
+fn spot_light_candidate(
+    workspace: &Workspace,
+    light: &SpotLight,
+    camera: &Camera,
+    camera_planes: &[Vec4; 6],
+) -> Option<LocalLightCandidate> {
+    directional_light_candidate(
+        workspace,
+        light,
+        light.face,
+        light.angle,
+        light.color,
+        light.brightness,
+        light.shadows,
+        false,
+        camera,
+        camera_planes,
+    )
+}
+
+fn surface_light_candidate(
+    workspace: &Workspace,
+    light: &SurfaceLight,
+    camera: &Camera,
+    camera_planes: &[Vec4; 6],
+) -> Option<LocalLightCandidate> {
+    directional_light_candidate(
+        workspace,
+        light,
+        light.face,
+        light.angle,
+        light.color,
+        light.brightness,
+        light.shadows,
+        true,
+        camera,
+        camera_planes,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn directional_light_candidate(
+    workspace: &Workspace,
+    light: &dyn Instance,
+    face: LightFace,
+    angle: f32,
+    color: Color3,
+    brightness: f32,
+    shadows: bool,
+    surface: bool,
+    camera: &Camera,
+    camera_planes: &[Vec4; 6],
+) -> Option<LocalLightCandidate> {
+    let parent = light_parent(workspace, light)?;
+    let (color, brightness) = local_light_color(color, brightness)?;
+    let angle = finite_or(angle, 0.0).clamp(0.0, 180.0);
+    if angle <= 0.0 {
+        return None;
+    }
+    let range = (brightness.sqrt() * LOCAL_LIGHT_DERIVED_RANGE).clamp(0.03, LOCAL_LIGHT_MAX_RANGE);
+    let (face_position, direction, axis_u, axis_v) = light_face_frame(parent, face);
+    let position = face_position + direction * 0.01;
+    let source_radius = if surface {
+        axis_u.w.hypot(axis_v.w)
+    } else {
+        0.0
+    };
+    if direction == Vec3::ZERO || !sphere_visible(camera_planes, position, range + source_radius) {
+        return None;
+    }
+    let shadow_view_projections = if shadows {
+        let mut matrices = [Mat4::IDENTITY; 6];
+        matrices[0] = cone_shadow_view_projection(position, direction, angle, range);
+        matrices
+    } else {
+        [Mat4::IDENTITY; 6]
+    };
+    Some(LocalLightCandidate {
+        raw: LocalLightRaw {
+            position_range: position.extend(range).to_array(),
+            color_brightness: [color[0], color[1], color[2], brightness],
+            direction_type: direction.extend(if surface { 2.0 } else { 1.0 }).to_array(),
+            axis_u_half_width: if surface { axis_u.to_array() } else { [0.0; 4] },
+            axis_v_half_height: if surface { axis_v.to_array() } else { [0.0; 4] },
+            params: [(angle * 0.5).to_radians().cos(), -1.0, 0.0, 0.0],
+        },
+        shadow_view_projections,
+        shadow_layer_count: usize::from(shadows),
+        shadow_excluded_caster: parent.id,
+        score: local_light_score(
+            position,
+            range,
+            source_radius,
+            color,
+            brightness,
+            camera.position(),
+        ) * directional_light_relevance(camera, position, direction, angle, range),
+    })
+}
+
+fn cone_shadow_view_projection(position: Vec3, direction: Vec3, angle: f32, range: f32) -> Mat4 {
+    let up = if direction.dot(Vec3::Y).abs() > 0.98 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let view = crate::glam::camera::rh::view::look_at_mat4(position, position + direction, up);
+    let projection = crate::glam::camera::rh::proj::directx::perspective(
+        angle.clamp(1.0, 179.0).to_radians(),
+        1.0,
+        0.03,
+        range.max(0.031),
+    );
+    projection * view
+}
+
+fn point_shadow_view_projections(position: Vec3, near: f32, far: f32) -> [Mat4; 6] {
+    let directions = [
+        (Vec3::X, Vec3::NEG_Y),
+        (Vec3::NEG_X, Vec3::NEG_Y),
+        (Vec3::Y, Vec3::Z),
+        (Vec3::NEG_Y, Vec3::NEG_Z),
+        (Vec3::Z, Vec3::NEG_Y),
+        (Vec3::NEG_Z, Vec3::NEG_Y),
+    ];
+    let projection = crate::glam::camera::rh::proj::directx::perspective(
+        std::f32::consts::FRAC_PI_2,
+        1.0,
+        near,
+        far.max(near + 0.001),
+    );
+    directions.map(|(direction, up)| {
+        projection * crate::glam::camera::rh::view::look_at_mat4(position, position + direction, up)
+    })
+}
+
 fn light_view_projections(
     camera: &Camera,
     light_direction: Vec3,
@@ -3211,6 +3890,45 @@ fn create_shadow_texture(
             label: Some("directional shadow map cascade"),
             dimension: Some(wgpu::TextureViewDimension::D2),
             base_array_layer: cascade as u32,
+            array_layer_count: Some(1),
+            ..Default::default()
+        })
+    });
+    (texture, view, layer_views)
+}
+
+fn create_local_shadow_texture(
+    device: &wgpu::Device,
+    size: u32,
+) -> (
+    wgpu::Texture,
+    wgpu::TextureView,
+    [wgpu::TextureView; MAX_LOCAL_SHADOW_LAYERS],
+) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("local light shadow map"),
+        size: wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: MAX_LOCAL_SHADOW_LAYERS as u32,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: SHADOW_DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor {
+        label: Some("local light shadow map array"),
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        ..Default::default()
+    });
+    let layer_views = std::array::from_fn(|layer| {
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("local light shadow map layer"),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: layer as u32,
             array_layer_count: Some(1),
             ..Default::default()
         })

@@ -28,6 +28,29 @@ struct ShadowCamera {
     light_view_projection: mat4x4<f32>,
 };
 
+struct LocalLight {
+    // xyz: source position, w: finite influence range.
+    position_range: vec4<f32>,
+    // rgb: color, w: brightness.
+    color_brightness: vec4<f32>,
+    // xyz: emission direction, w: 0 point, 1 spot, 2 surface.
+    direction_type: vec4<f32>,
+    // xyz: surface axis, w: half width.
+    axis_u_half_width: vec4<f32>,
+    // xyz: surface axis, w: half height.
+    axis_v_half_height: vec4<f32>,
+    // x: outer cone cosine, y: first shadow layer (-1 if disabled),
+    // z: shadow layer count.
+    params: vec4<f32>,
+};
+
+struct LocalLights {
+    // x: active local light count.
+    params: vec4<u32>,
+    lights: array<LocalLight, 64>,
+    shadow_view_projections: array<mat4x4<f32>, 8>,
+};
+
 override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
 override SHADOW_MAP_SIZE: f32 = 3072.0;
 
@@ -52,6 +75,12 @@ var environment_map: texture_cube<f32>;
 
 @group(0) @binding(5)
 var environment_sampler: sampler;
+
+@group(0) @binding(6)
+var<uniform> local_lights: LocalLights;
+
+@group(0) @binding(7)
+var local_shadow_map: texture_depth_2d_array;
 
 @group(1) @binding(0)
 var material_texture_0: texture_2d_array<f32>;
@@ -351,6 +380,135 @@ fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
     return visibility / 16.0;
 }
 
+fn point_shadow_face(direction: vec3<f32>) -> u32 {
+    let absolute = abs(direction);
+    if absolute.x >= absolute.y && absolute.x >= absolute.z {
+        return select(1u, 0u, direction.x >= 0.0);
+    }
+    if absolute.y >= absolute.z {
+        return select(3u, 2u, direction.y >= 0.0);
+    }
+    return select(5u, 4u, direction.z >= 0.0);
+}
+
+fn sample_local_shadow(
+    world_position: vec3<f32>,
+    world_normal: vec3<f32>,
+    light: LocalLight,
+) -> f32 {
+    if light.params.y < 0.0 || light.params.z < 0.5 {
+        return 1.0;
+    }
+    var layer = u32(light.params.y + 0.5);
+    if light.direction_type.w < 0.5 {
+        layer += point_shadow_face(world_position - light.position_range.xyz);
+    }
+    let light_distance = distance(world_position, light.position_range.xyz);
+    let normal_bias = max(light_distance * 0.001, 0.002);
+    let shadow_position = local_lights.shadow_view_projections[layer]
+        * vec4<f32>(world_position + world_normal * normal_bias, 1.0);
+    let inverse_w = 1.0 / max(shadow_position.w, 0.0001);
+    let projected = shadow_position.xyz * inverse_w;
+    let shadow_uv = projected.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+    if projected.z <= 0.0 || projected.z >= 1.0
+        || any(shadow_uv <= vec2<f32>(0.0))
+        || any(shadow_uv >= vec2<f32>(1.0)) {
+        return 1.0;
+    }
+
+    var visibility = 0.0;
+    let texel_size = 1.0 / 1024.0;
+    for (var x = 0u; x < 3u; x = x + 1u) {
+        for (var y = 0u; y < 3u; y = y + 1u) {
+            let weight = SHADOW_FILTER_WEIGHTS[x] * SHADOW_FILTER_WEIGHTS[y];
+            let offset = vec2<f32>(SHADOW_FILTER_OFFSETS[x], SHADOW_FILTER_OFFSETS[y])
+                * texel_size;
+            visibility += textureSampleCompareLevel(
+                local_shadow_map,
+                shadow_sampler,
+                shadow_uv + offset,
+                i32(layer),
+                projected.z - 0.0001,
+            ) * weight;
+        }
+    }
+    return visibility / 16.0;
+}
+
+fn evaluate_local_light(
+    world_position: vec3<f32>,
+    world_normal: vec3<f32>,
+    mapped_normal: vec3<f32>,
+    view_direction: vec3<f32>,
+    normal_dot_view: f32,
+    base_color: vec3<f32>,
+    base_reflectance: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+    light: LocalLight,
+) -> vec3<f32> {
+    var source_position = light.position_range.xyz;
+    if light.direction_type.w > 1.5 {
+        let from_center = world_position - source_position;
+        let axis_u = light.axis_u_half_width.xyz;
+        let axis_v = light.axis_v_half_height.xyz;
+        source_position += axis_u * clamp(
+            dot(from_center, axis_u),
+            -light.axis_u_half_width.w,
+            light.axis_u_half_width.w,
+        );
+        source_position += axis_v * clamp(
+            dot(from_center, axis_v),
+            -light.axis_v_half_height.w,
+            light.axis_v_half_height.w,
+        );
+    }
+
+    let to_light = source_position - world_position;
+    let distance_squared = max(dot(to_light, to_light), 0.0001);
+    let light_distance = sqrt(distance_squared);
+    let range = light.position_range.w;
+    if light_distance >= range {
+        return vec3<f32>(0.0);
+    }
+    let light_direction = to_light / light_distance;
+    let normal_dot_light = max(dot(mapped_normal, light_direction), 0.0);
+    if normal_dot_light <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+
+    var cone = 1.0;
+    if light.direction_type.w > 0.5 {
+        let from_light = normalize(world_position - light.position_range.xyz);
+        let direction_cosine = dot(light.direction_type.xyz, from_light);
+        let inner_cosine = mix(light.params.x, 1.0, 0.15);
+        cone = smoothstep(light.params.x, inner_cosine, direction_cosine);
+        if cone <= 0.0 {
+            return vec3<f32>(0.0);
+        }
+    }
+
+    let normalized_distance = light_distance / range;
+    let range_falloff = max(1.0 - pow(normalized_distance, 4.0), 0.0);
+    let attenuation = range_falloff * range_falloff / max(distance_squared, 1.0);
+    let half_direction = normalize(view_direction + light_direction);
+    let normal_dot_half = max(dot(mapped_normal, half_direction), 0.0);
+    let view_dot_half = max(dot(view_direction, half_direction), 0.0);
+    let fresnel = fresnel_schlick(view_dot_half, base_reflectance);
+    let normal_distribution = distribution_ggx(normal_dot_half, roughness);
+    let geometry = geometry_smith(normal_dot_view, normal_dot_light, roughness);
+    let specular = normal_distribution * geometry * fresnel
+        / max(4.0 * normal_dot_view * normal_dot_light, 0.0001);
+    let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) / 3.14159265;
+    let shadow_visibility = sample_local_shadow(world_position, world_normal, light);
+    let radiance = light.color_brightness.rgb
+        * light.color_brightness.w
+        * attenuation
+        * cone
+        * shadow_visibility;
+    return (diffuse * base_color + specular) * radiance * normal_dot_light;
+}
+
 fn shadow_cascade_split(cascade: u32) -> f32 {
     if cascade < 4u {
         return camera.shadow_cascade_splits[0][cascade];
@@ -504,7 +662,23 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let ambient = base_color.rgb * (camera.ambient_color.rgb + outdoor_ambient) * (1.0 - metallic);
     let top_shift = max(mapped_normal.y, 0.0) * camera.color_shift_top.rgb;
     let bottom_shift = max(-mapped_normal.y, 0.0) * camera.color_shift_bottom.rgb;
-    var color = ambient + direct + slot_emissive_roughness.rgb * emissive_sample.rgb
+    var local_direct = vec3<f32>(0.0);
+    for (var light_index = 0u; light_index < local_lights.params.x; light_index += 1u) {
+        local_direct += evaluate_local_light(
+            vertex.world_position,
+            world_normal,
+            mapped_normal,
+            view_direction,
+            normal_dot_view,
+            base_color.rgb,
+            base_reflectance,
+            metallic,
+            roughness,
+            local_lights.lights[light_index],
+        );
+    }
+    var color = ambient + direct + local_direct
+        + slot_emissive_roughness.rgb * emissive_sample.rgb
         + image_based + base_color.rgb * (top_shift + bottom_shift);
     let fog_amount = smoothstep(
         camera.fog_params.x,

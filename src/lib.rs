@@ -5,6 +5,7 @@ mod camera;
 mod color3;
 mod engine;
 mod instance;
+mod light;
 mod lighting;
 mod material;
 #[cfg(feature = "meshpart")]
@@ -23,6 +24,7 @@ pub use eframe::{self, egui, egui_wgpu, wgpu};
 pub use engine::*;
 pub use glam;
 pub use instance::*;
+pub use light::*;
 pub use lighting::*;
 pub use material::*;
 #[cfg(feature = "meshpart")]
