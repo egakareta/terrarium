@@ -270,11 +270,13 @@ impl Engine {
         let egui_wants_pointer_input = context.egui_wants_pointer_input();
         let egui_wants_keyboard_input = context.egui_wants_keyboard_input();
         context.input(|input| {
-            self.workspace.process_eframe_input_with_capture(
-                input,
-                egui_wants_pointer_input,
-                egui_wants_keyboard_input,
-            )
+            self.workspace
+                .camera_controller_mut()
+                .process_eframe_input_with_capture(
+                    input,
+                    egui_wants_pointer_input,
+                    egui_wants_keyboard_input,
+                )
         });
         self.workspace.update(delta);
         context.request_repaint();

@@ -253,39 +253,6 @@ impl Workspace {
     pub fn camera_controller_mut(&mut self) -> &mut CameraController {
         &mut self.camera_controller
     }
-
-    /// Forwards a raw device event to the active camera controller.
-    pub fn process_device_event(&mut self, event: &winit::event::DeviceEvent) {
-        self.camera_controller.process_device_event(event);
-    }
-
-    /// Forwards a window event to the active camera controller.
-    pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) {
-        self.camera_controller.process_window_event(event);
-    }
-
-    /// Forwards eframe input to the active camera controller.
-    pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
-        self.camera_controller.process_eframe_input(input);
-    }
-
-    /// Forwards eframe input to the active camera controller while respecting
-    /// egui's pointer and keyboard capture state.
-    ///
-    /// The egui capture flags should come from the matching [`crate::egui::Context`]
-    /// methods so camera input is ignored while an egui widget owns it.
-    pub fn process_eframe_input_with_capture(
-        &mut self,
-        input: &crate::egui::InputState,
-        egui_wants_pointer_input: bool,
-        egui_wants_keyboard_input: bool,
-    ) {
-        self.camera_controller.process_eframe_input_with_capture(
-            input,
-            egui_wants_pointer_input,
-            egui_wants_keyboard_input,
-        );
-    }
 }
 
 impl Clone for Workspace {

@@ -554,9 +554,11 @@ mod tests {
 
     #[test]
     fn egui_keyboard_capture_clears_camera_movement() {
-        let mut controller = CameraController::default();
-        controller.forward = true;
-        controller.sprint = true;
+        let mut controller = CameraController {
+            forward: true,
+            sprint: true,
+            ..Default::default()
+        };
         let mut input = crate::egui::InputState::default();
         input.focused = true;
 
@@ -568,8 +570,10 @@ mod tests {
 
     #[test]
     fn egui_pointer_capture_clears_camera_look_delta() {
-        let mut controller = CameraController::default();
-        controller.mouse_delta = (4.0, -2.0);
+        let mut controller = CameraController {
+            mouse_delta: (4.0, -2.0),
+            ..Default::default()
+        };
         let mut input = crate::egui::InputState::default();
         input.focused = true;
 
