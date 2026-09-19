@@ -10,10 +10,8 @@ use web_time::Instant;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, Color3, DEPTH_FORMAT, Face, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT,
-    Material, Mesh, MeshMaterialSlots, Part, PartShape, PointLight, Skybox, SkyboxError, SpotLight,
-    SurfaceLight, Texture, TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex,
-    Workspace,
+    BasePart, Camera, Color3, Face, Instance, InstanceId, Mesh, Part, PartShape, PointLight,
+    Skybox, SkyboxError, SpotLight, SurfaceLight, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
@@ -21,12 +19,14 @@ mod frame;
 mod helpers;
 mod init;
 mod lighting;
+mod material;
 mod mesh;
 mod scene;
 mod skybox;
 mod texture;
 use helpers::*;
 use lighting::*;
+pub use material::*;
 #[cfg(test)]
 mod tests;
 
@@ -277,13 +277,11 @@ impl MaterialSetKey {
 
     fn from_materials(material_slots: &MeshMaterialSlots) -> Self {
         if material_slots.slots.is_empty() {
-            return Self::uniform(Self::base_bits(&crate::material::DEFAULT_MATERIAL));
+            return Self::uniform(Self::base_bits(&DEFAULT_MATERIAL));
         }
         let mut slots = [[0u32; 9]; MATERIAL_SLOT_COUNT];
         for (index, slot) in Face::ALL.into_iter().enumerate() {
-            let material = material_slots
-                .get(slot)
-                .unwrap_or(&crate::material::DEFAULT_MATERIAL);
+            let material = material_slots.get(slot).unwrap_or(&DEFAULT_MATERIAL);
             slots[index] = Self::base_bits(material);
         }
         Self(slots)

@@ -66,7 +66,7 @@ impl Renderer {
         // Fast path: no overrides means every face uses the default material,
         // so only the 9 default words need comparing.
         if material_slots.slots.is_empty() {
-            let default = MaterialSetKey::base_bits(&crate::material::DEFAULT_MATERIAL);
+            let default = MaterialSetKey::base_bits(&DEFAULT_MATERIAL);
             if let Some((last_default, index)) = self.material_factor_last_uniform
                 && last_default == default
             {
