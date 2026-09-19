@@ -1,6 +1,7 @@
 use terrarium::{
-    App, Color3, Easing, Engine, Instance, Material, MaterialSlot, Part, PartShape, RendererError,
-    Repeat, Terrarium, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui, glam::Vec3,
+    App, Color3, Easing, Engine, Instance, LightFace, Material, MaterialSlot, Part, PartShape,
+    PointLight, RendererError, Repeat, SpotLight, Terrarium, Texture, TextureColorSpace,
+    TextureFilter, Tween, eframe, egui, glam::Vec3,
 };
 
 struct SceneApp;
@@ -34,6 +35,8 @@ impl App for SceneApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
+    engine.lighting.set_clock_time(18.0);
+
     let dirt = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
         TextureColorSpace::Srgb,
@@ -91,6 +94,12 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
         part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
         part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
+        part.add_child_with(SpotLight::new("TowerSpotLight"), |light| {
+            light.color = Color3::new(0.18, 0.45, 1.0);
+            light.brightness = 4.0;
+            light.face = LightFace::Back;
+            light.angle = 55.0;
+        });
     });
 
     engine.add_child_with(Part::new("GrassBlock"), |part| {
@@ -131,6 +140,12 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.color = Color3::new(0.95, 0.72, 0.22);
         part.material.roughness = 0.18;
         part.can_collide = false;
+        part.add_child_with(PointLight::unnamed(), |light| {
+            light.color = Color3::new(1.0, 0.35, 0.08);
+            light.brightness = 3.5;
+            light.range = 8.0;
+            light.shadows = true;
+        });
     });
 
     engine.add_child_with(Part::unnamed(), |part| {
