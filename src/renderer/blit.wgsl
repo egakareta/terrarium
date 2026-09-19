@@ -167,8 +167,8 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 
     let dimensions = vec2<i32>(textureDimensions(outline_mask));
     let pixel = vec2<i32>(vertex.uv * vec2<f32>(dimensions));
-    let toon_step = i32(clamp(outline.toon_params.x + 0.5, 1.0, 4.0));
-    let silhouette_step = i32(clamp(outline.silhouette_params.x + 0.5, 1.0, 4.0));
+    let toon_step = i32(max(outline.toon_params.x + 0.5, 1.0));
+    let silhouette_step = i32(max(outline.silhouette_params.x + 0.5, 1.0));
     let toon_mask = mask_at(pixel, 0u);
     let silhouette_mask = mask_at(pixel, 1u);
     let toon_boundary = mask_edge(pixel, toon_step, 0u);

@@ -52,7 +52,7 @@ fn outline_color(color: Color3) -> [f32; 4] {
 fn outline_params(spec: Option<OutlineSpec>) -> [f32; 4] {
     spec.map_or([0.0; 4], |spec| {
         [
-            finite_or(spec.width, 1.0).clamp(1.0, 4.0),
+            finite_or(spec.width, 1.0).max(1.0),
             finite_or(spec.threshold, 0.08).clamp(0.0, 1.0),
             0.0,
             0.0,
