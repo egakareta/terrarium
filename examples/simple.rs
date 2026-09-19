@@ -2,7 +2,7 @@
 //!
 //! If you cloned the repo, you can run this in:
 //! - your native platform. `cargo run --example simple`
-//! - a browser. `trunk serve --example simple`
+//! - a browser at http://localhost:8080. `trunk serve --example simple`
 //!
 //! By default, Terrarium gives you a camera, a skybox and shadows.
 //! Use WASD and left click drag to move the camera.
