@@ -635,13 +635,13 @@ mod tests {
 
     #[test]
     fn workspace_defaults_to_the_embedded_skybox() {
-        use crate::{CubemapFace, Image, Skybox};
+        use crate::{Face, Image, Skybox};
 
         let workspace = Workspace::new();
         let skybox = workspace.skybox().expect("default skybox is set");
         assert!(workspace.lighting.skybox().is_some());
         assert_eq!(skybox.face_size(), 512);
-        assert!(skybox.face(CubemapFace::Front).pixels().len() == 512 * 512 * 4);
+        assert!(skybox.face(Face::Front).pixels().len() == 512 * 512 * 4);
 
         let mut workspace = workspace;
         let revision = workspace.skybox_revision();
@@ -650,7 +650,7 @@ mod tests {
         assert_ne!(workspace.skybox_revision(), revision);
 
         let pixels = vec![1, 2, 3, 255];
-        let faces = CubemapFace::ALL
+        let faces = Face::ALL_CUBEMAP
             .map(|_| Image::from_rgba8(1, 1, pixels.clone()).expect("1x1 test face is valid"));
         workspace
             .lighting

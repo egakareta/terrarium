@@ -1,27 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{Color3, InstanceData};
-
-/// A face of a part from which a directional local light emits.
-///
-/// Faces use the same local-space convention as directional material slots:
-/// front is `+Z`, right is `+X`, and top is `+Y`.
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub enum LightFace {
-    /// The top face toward local `+Y`.
-    Top,
-    /// The bottom face toward local `-Y`.
-    Bottom,
-    /// The front face toward local `+Z`.
-    #[default]
-    Front,
-    /// The back face toward local `-Z`.
-    Back,
-    /// The left face toward local `-X`.
-    Left,
-    /// The right face toward local `+X`.
-    Right,
-}
+use crate::{Color3, Face, InstanceData};
 
 /// Properties shared by all local light types.
 ///
@@ -108,7 +87,7 @@ crate::impl_instance!(PointLight, class_name = "PointLight", data = light.instan
 pub struct SpotLight {
     light: LightProperties,
     /// Part face from which the cone emits.
-    pub face: LightFace,
+    pub face: Face,
     /// Full cone angle in degrees, clamped to `0..=180` while rendering.
     pub angle: f32,
 }
@@ -119,7 +98,7 @@ impl SpotLight {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             light: LightProperties::new(name),
-            face: LightFace::Front,
+            face: Face::Front,
             angle: 90.0,
         }
     }
@@ -160,7 +139,7 @@ crate::impl_instance!(SpotLight, class_name = "SpotLight", data = light.instance
 pub struct SurfaceLight {
     light: LightProperties,
     /// Part face that acts as the emitting surface.
-    pub face: LightFace,
+    pub face: Face,
     /// Full emission angle in degrees, clamped to `0..=180` while rendering.
     pub angle: f32,
 }
@@ -171,7 +150,7 @@ impl SurfaceLight {
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             light: LightProperties::new(name),
-            face: LightFace::Front,
+            face: Face::Front,
             angle: 90.0,
         }
     }
@@ -240,9 +219,9 @@ mod tests {
         let spot = SpotLight::default();
         let surface = SurfaceLight::default();
 
-        assert_eq!(spot.face, LightFace::Front);
+        assert_eq!(spot.face, Face::Front);
         assert_eq!(spot.angle, 90.0);
-        assert_eq!(surface.face, LightFace::Front);
+        assert_eq!(surface.face, Face::Front);
         assert_eq!(surface.angle, 90.0);
     }
 }

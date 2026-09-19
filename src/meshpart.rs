@@ -7,7 +7,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    BasePart, MATERIAL_SLOT_COUNT, Material, MaterialSlot, Mesh, MeshMaterialSlots, Texture,
+    BasePart, Face, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots, Texture,
     TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec2, Vec3},
 };
@@ -213,7 +213,7 @@ impl MeshPart {
         }
 
         let mut material_slots = MeshMaterialSlots::default();
-        for (slot, material) in MaterialSlot::ALL_DIRECTIONS.into_iter().zip(materials) {
+        for (slot, material) in Face::ALL.into_iter().zip(materials) {
             material_slots.set(slot, material);
         }
         Ok(MeshHandle::from_parts(
@@ -241,13 +241,13 @@ impl MeshPart {
 
     /// Assigns the same material to all six directional slots.
     pub fn set_material(&mut self, material: Material) {
-        for slot in MaterialSlot::ALL_DIRECTIONS {
+        for slot in Face::ALL {
             self.set_material_slot(slot, material);
         }
     }
 
     /// Assigns a material to a mesh-selected directional slot.
-    pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
+    pub fn set_material_slot(&mut self, slot: Face, material: Material) {
         self.material_slots.set(slot, material);
     }
 
@@ -255,8 +255,8 @@ impl MeshPart {
     ///
     /// Unassigned slots use [`Material::default()`] when compared.
     pub fn material(&self) -> Option<&Material> {
-        let material = self.material_slot(MaterialSlot::ALL_DIRECTIONS[0]);
-        if MaterialSlot::ALL_DIRECTIONS
+        let material = self.material_slot(Face::ALL[0]);
+        if Face::ALL
             .into_iter()
             .skip(1)
             .all(|slot| self.material_slot(slot) == material)
@@ -268,7 +268,7 @@ impl MeshPart {
     }
 
     /// Returns the effective material for a mesh slot.
-    pub fn material_slot(&self, slot: MaterialSlot) -> &Material {
+    pub fn material_slot(&self, slot: Face) -> &Material {
         self.material_slots
             .get(slot)
             .unwrap_or(&crate::material::DEFAULT_MATERIAL)
@@ -773,7 +773,7 @@ mod tests {
         meshpart.set_material(material);
         assert_eq!(meshpart.material(), Some(&material));
 
-        meshpart.set_material_slot(MaterialSlot::Top, Material::default());
+        meshpart.set_material_slot(Face::Top, Material::default());
         assert_eq!(meshpart.material(), None);
     }
 
@@ -815,7 +815,7 @@ mod tests {
                 assert!((vertex.material_slot as usize) < MATERIAL_SLOT_COUNT);
             }
 
-            let texture_handles = MaterialSlot::ALL_DIRECTIONS
+            let texture_handles = Face::ALL
                 .into_iter()
                 .flat_map(|slot| {
                     let textures = meshpart.material_slot(slot).textures;

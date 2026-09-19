@@ -4,6 +4,7 @@
 mod camera;
 mod color3;
 mod engine;
+mod face;
 mod instance;
 mod light;
 mod lighting;
@@ -22,6 +23,7 @@ pub use camera::*;
 pub use color3::*;
 pub use eframe::{self, egui, egui_wgpu, wgpu};
 pub use engine::*;
+pub use face::*;
 pub use glam;
 pub use instance::*;
 pub use light::*;

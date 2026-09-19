@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    Color3, InstanceData, Material, MaterialSlot, MeshMaterialSlots, PVInstance, PartShape,
+    Color3, Face, InstanceData, Material, MeshMaterialSlots, PVInstance, PartShape,
     glam::{Mat4, Vec3},
 };
 
@@ -118,7 +118,7 @@ impl Part {
 
     /// Assigns the same material to all six directional slots.
     pub fn set_material(&mut self, material: Material) {
-        for slot in MaterialSlot::ALL_DIRECTIONS {
+        for slot in Face::ALL {
             self.set_material_slot(slot, material);
         }
     }
@@ -126,9 +126,9 @@ impl Part {
     /// Assigns a material to a mesh-selected directional slot.
     ///
     /// Slots are directional, so they work for any [`PartShape`]: setting
-    /// [`MaterialSlot::Top`] affects the top-facing triangles of a block,
+    /// [`Face::Top`] affects the top-facing triangles of a block,
     /// cylinder cap, wedge slope, sphere pole, or custom mesh alike.
-    pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
+    pub fn set_material_slot(&mut self, slot: Face, material: Material) {
         self.material_slots.set(slot, material);
     }
 
@@ -136,8 +136,8 @@ impl Part {
     ///
     /// Unassigned slots use [`Material::default()`] when compared.
     pub fn material(&self) -> Option<&Material> {
-        let material = self.material_slot(MaterialSlot::ALL_DIRECTIONS[0]);
-        if MaterialSlot::ALL_DIRECTIONS
+        let material = self.material_slot(Face::ALL[0]);
+        if Face::ALL
             .into_iter()
             .skip(1)
             .all(|slot| self.material_slot(slot) == material)
@@ -151,7 +151,7 @@ impl Part {
     /// Returns the effective material for a slot.
     ///
     /// An unassigned slot uses [`Material::default()`].
-    pub fn material_slot(&self, slot: MaterialSlot) -> &Material {
+    pub fn material_slot(&self, slot: Face) -> &Material {
         self.material_slots
             .get(slot)
             .unwrap_or(&crate::material::DEFAULT_MATERIAL)
@@ -201,17 +201,14 @@ mod tests {
     #[test]
     fn material_slot_falls_back_to_the_default_material_until_overridden() {
         let mut part = Part::new("part");
-        assert_eq!(part.material_slot(MaterialSlot::Top), &Material::default());
+        assert_eq!(part.material_slot(Face::Top), &Material::default());
         assert_eq!(part.material(), Some(&Material::default()));
 
         let top = Material::from_color(Color3::new(1.0, 0.0, 0.0));
-        part.set_material_slot(MaterialSlot::Top, top);
-        assert_eq!(part.material_slot(MaterialSlot::Top), &top);
+        part.set_material_slot(Face::Top, top);
+        assert_eq!(part.material_slot(Face::Top), &top);
         assert_eq!(part.material(), None);
-        assert_eq!(
-            part.material_slot(MaterialSlot::Bottom),
-            &Material::default()
-        );
+        assert_eq!(part.material_slot(Face::Bottom), &Material::default());
     }
 
     #[test]
@@ -221,7 +218,7 @@ mod tests {
 
         part.set_material(material);
 
-        for slot in MaterialSlot::ALL_DIRECTIONS {
+        for slot in Face::ALL {
             assert_eq!(part.material_slot(slot), &material);
         }
         assert_eq!(part.material(), Some(&material));

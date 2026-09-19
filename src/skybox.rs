@@ -2,52 +2,7 @@ use std::f32::consts::PI;
 
 use thiserror::Error;
 
-use crate::Image;
-
-/// A face of a cubemap skybox, in WebGPU cube-layer order.
-///
-/// The variants map to world axes as follows:
-/// [`Right`](Self::Right) looks toward `+X`,
-/// [`Left`](Self::Left) toward `-X`,
-/// [`Top`](Self::Top) toward `+Y`,
-/// [`Bottom`](Self::Bottom) toward `-Y`,
-/// [`Front`](Self::Front) toward `+Z`, and
-/// [`Back`](Self::Back) toward `-Z`.
-/// This matches [`MaterialSlot`](crate::MaterialSlot) directions,
-/// so the skybox front (`+Z`) agrees with the front material slot.
-#[repr(u32)]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum CubemapFace {
-    /// The face looking toward `+X` (cube layer 0).
-    Right = 0,
-    /// The face looking toward `-X` (cube layer 1).
-    Left = 1,
-    /// The face looking toward `+Y` (cube layer 2).
-    Top = 2,
-    /// The face looking toward `-Y` (cube layer 3).
-    Bottom = 3,
-    /// The face looking toward `+Z` (cube layer 4).
-    Front = 4,
-    /// The face looking toward `-Z` (cube layer 5).
-    Back = 5,
-}
-
-impl CubemapFace {
-    /// All faces in GPU cube-layer order.
-    pub const ALL: [Self; 6] = [
-        Self::Right,
-        Self::Left,
-        Self::Top,
-        Self::Bottom,
-        Self::Front,
-        Self::Back,
-    ];
-
-    /// Returns the zero-based GPU cube-layer index.
-    pub const fn index(self) -> usize {
-        self as usize
-    }
-}
+use crate::{Face, Image};
 
 /// Errors produced while building a [`Skybox`] from image data.
 #[derive(Debug, Error)]
@@ -56,7 +11,7 @@ pub enum SkyboxError {
     #[error("cubemap face {face:?} is {width}x{height}, expected {expected}x{expected}")]
     FaceSizeMismatch {
         /// The face whose dimensions differed.
-        face: CubemapFace,
+        face: Face,
         /// The face width in pixels.
         width: u32,
         /// The face height in pixels.
@@ -68,7 +23,7 @@ pub enum SkyboxError {
     #[error("cubemap face {face:?} is {width}x{height}, faces must be square")]
     NonSquareFace {
         /// The non-square face.
-        face: CubemapFace,
+        face: Face,
         /// The face width in pixels.
         width: u32,
         /// The face height in pixels.
@@ -96,7 +51,7 @@ pub enum SkyboxError {
     },
 }
 
-/// A cubemap skybox stored as six square faces in [`CubemapFace::ALL`] order.
+/// A cubemap skybox stored as six square faces in [`Face::ALL_CUBEMAP`] order.
 ///
 /// A skybox can be built from six individual face images
 /// ([`from_faces`](Self::from_faces)), from a single cross-layout image
@@ -117,18 +72,18 @@ impl Skybox {
     /// Builds a skybox from six square face images of equal size.
     ///
     /// Faces are ordered as `[Right, Left, Top, Bottom, Front, Back]`
-    /// (see [`CubemapFace::ALL`]); use [`CubemapFace::index`] to place each
+    /// (see [`Face::ALL_CUBEMAP`]); use [`Face::cubemap_index`] to place each
     /// image. Every face must be square and share the first face's size.
     pub fn from_faces(faces: [Image; 6]) -> Result<Self, SkyboxError> {
         let expected = faces[0].width;
         if faces[0].width != faces[0].height {
             return Err(SkyboxError::NonSquareFace {
-                face: CubemapFace::ALL[0],
+                face: Face::ALL_CUBEMAP[0],
                 width: faces[0].width,
                 height: faces[0].height,
             });
         }
-        for (face, image) in CubemapFace::ALL.iter().zip(faces.iter()).skip(1) {
+        for (face, image) in Face::ALL_CUBEMAP.iter().zip(faces.iter()).skip(1) {
             if image.width != expected || image.height != expected {
                 return Err(SkyboxError::FaceSizeMismatch {
                     face: *face,
@@ -202,7 +157,7 @@ impl Skybox {
     /// Builds a skybox by converting a 2:1 equirectangular panorama.
     ///
     /// Each generated face is `height / 2` pixels square. The panorama's
-    /// horizontal center (`u = 0.5`) looks toward [`CubemapFace::Front`]
+    /// horizontal center (`u = 0.5`) looks toward [`Face::Front`]
     /// (`+Z`), `u` increases through Right (`+X`), Back (`-Z`), and Left
     /// (`-X`), and the top/bottom rows map to the zenith/nadir.
     pub fn from_equirectangular(panorama: Image) -> Result<Self, SkyboxError> {
@@ -211,7 +166,7 @@ impl Skybox {
             return Err(SkyboxError::InvalidPanoramaDimensions { width, height });
         }
         let face_size = height / 2;
-        let faces = CubemapFace::ALL.map(|face| {
+        let faces = Face::ALL_CUBEMAP.map(|face| {
             let mut pixels = vec![0u8; face_size as usize * face_size as usize * 4];
             for y in 0..face_size {
                 // tc in [-1, 1], top row (-1) to bottom row (+1).
@@ -232,11 +187,11 @@ impl Skybox {
     }
 
     /// Returns the face image looking in `face`'s direction.
-    pub fn face(&self, face: CubemapFace) -> &Image {
-        &self.faces[face.index()]
+    pub fn face(&self, face: Face) -> &Image {
+        &self.faces[face.cubemap_index()]
     }
 
-    /// Returns all six face images in [`CubemapFace::ALL`] order.
+    /// Returns all six face images in [`Face::ALL_CUBEMAP`] order.
     pub fn faces(&self) -> &[Image; 6] {
         &self.faces
     }
@@ -277,14 +232,14 @@ fn extract_tile(image: &Image, tile: (u32, u32), face_size: u32) -> Image {
 /// renderer, so faces converted from panoramas line up with faces split from
 /// cross layouts: side faces store `+Y` in their top row, the top face stores
 /// `-Z` in its top row, and the bottom face stores `+Z` in its top row.
-fn face_texel_direction(face: CubemapFace, sc: f32, tc: f32) -> [f32; 3] {
+fn face_texel_direction(face: Face, sc: f32, tc: f32) -> [f32; 3] {
     match face {
-        CubemapFace::Right => [1.0, -tc, -sc],
-        CubemapFace::Left => [-1.0, -tc, sc],
-        CubemapFace::Top => [sc, 1.0, tc],
-        CubemapFace::Bottom => [sc, -1.0, -tc],
-        CubemapFace::Front => [sc, -tc, 1.0],
-        CubemapFace::Back => [-sc, -tc, -1.0],
+        Face::Right => [1.0, -tc, -sc],
+        Face::Left => [-1.0, -tc, sc],
+        Face::Top => [sc, 1.0, tc],
+        Face::Bottom => [sc, -1.0, -tc],
+        Face::Front => [sc, -tc, 1.0],
+        Face::Back => [-sc, -tc, -1.0],
     }
 }
 
@@ -351,19 +306,16 @@ mod tests {
         ];
         let skybox = Skybox::from_faces(faces).unwrap();
         assert_eq!(skybox.face_size(), 4);
-        assert_eq!(
-            skybox.face(CubemapFace::Front).pixel(0, 0),
-            [0, 255, 255, 255]
-        );
+        assert_eq!(skybox.face(Face::Front).pixel(0, 0), [0, 255, 255, 255]);
 
-        let mut mismatched = CubemapFace::ALL.map(|_| solid_face([1, 2, 3, 255], 4));
-        mismatched[CubemapFace::Top.index()] = solid_face([1, 2, 3, 255], 8);
+        let mut mismatched = Face::ALL_CUBEMAP.map(|_| solid_face([1, 2, 3, 255], 4));
+        mismatched[Face::Top.cubemap_index()] = solid_face([1, 2, 3, 255], 8);
         assert!(matches!(
             Skybox::from_faces(mismatched),
             Err(SkyboxError::FaceSizeMismatch { .. })
         ));
 
-        let mut non_square = CubemapFace::ALL.map(|_| solid_face([1, 2, 3, 255], 4));
+        let mut non_square = Face::ALL_CUBEMAP.map(|_| solid_face([1, 2, 3, 255], 4));
         non_square[0] = Image::from_rgba8(4, 2, vec![0; 32]).unwrap();
         assert!(matches!(
             Skybox::from_faces(non_square),
@@ -403,15 +355,12 @@ mod tests {
         let image = Image::from_rgba8(columns * face_size, rows * face_size, pixels).unwrap();
         let skybox = Skybox::from_cross(image).unwrap();
 
-        assert_eq!(skybox.face(CubemapFace::Top).pixel(0, 0), [10, 0, 0, 255]);
-        assert_eq!(skybox.face(CubemapFace::Left).pixel(0, 0), [0, 20, 0, 255]);
-        assert_eq!(skybox.face(CubemapFace::Front).pixel(0, 0), [0, 0, 30, 255]);
-        assert_eq!(skybox.face(CubemapFace::Right).pixel(0, 0), [40, 0, 0, 255]);
-        assert_eq!(skybox.face(CubemapFace::Back).pixel(0, 0), [0, 50, 0, 255]);
-        assert_eq!(
-            skybox.face(CubemapFace::Bottom).pixel(0, 0),
-            [0, 0, 60, 255]
-        );
+        assert_eq!(skybox.face(Face::Top).pixel(0, 0), [10, 0, 0, 255]);
+        assert_eq!(skybox.face(Face::Left).pixel(0, 0), [0, 20, 0, 255]);
+        assert_eq!(skybox.face(Face::Front).pixel(0, 0), [0, 0, 30, 255]);
+        assert_eq!(skybox.face(Face::Right).pixel(0, 0), [40, 0, 0, 255]);
+        assert_eq!(skybox.face(Face::Back).pixel(0, 0), [0, 50, 0, 255]);
+        assert_eq!(skybox.face(Face::Bottom).pixel(0, 0), [0, 0, 60, 255]);
     }
 
     #[test]
@@ -445,13 +394,10 @@ mod tests {
         let image = Image::from_rgba8(columns * face_size, rows * face_size, pixels).unwrap();
         let skybox = Skybox::from_cross(image).unwrap();
 
-        assert_eq!(skybox.face(CubemapFace::Top).pixel(0, 0), [10, 0, 0, 255]);
-        assert_eq!(skybox.face(CubemapFace::Front).pixel(0, 0), [0, 0, 30, 255]);
-        assert_eq!(skybox.face(CubemapFace::Back).pixel(0, 0), [0, 50, 0, 255]);
-        assert_eq!(
-            skybox.face(CubemapFace::Bottom).pixel(0, 0),
-            [0, 0, 60, 255]
-        );
+        assert_eq!(skybox.face(Face::Top).pixel(0, 0), [10, 0, 0, 255]);
+        assert_eq!(skybox.face(Face::Front).pixel(0, 0), [0, 0, 30, 255]);
+        assert_eq!(skybox.face(Face::Back).pixel(0, 0), [0, 50, 0, 255]);
+        assert_eq!(skybox.face(Face::Bottom).pixel(0, 0), [0, 0, 60, 255]);
     }
 
     #[test]
@@ -496,12 +442,12 @@ mod tests {
         assert_eq!(skybox.face_size(), 16);
 
         let center = |face| skybox.face(face).pixel(8, 8);
-        assert_eq!(center(CubemapFace::Front), [0, 0, 255, 255]);
-        assert_eq!(center(CubemapFace::Right), [0, 255, 0, 255]);
-        assert_eq!(center(CubemapFace::Back), [255, 255, 0, 255]);
-        assert_eq!(center(CubemapFace::Left), [255, 0, 0, 255]);
-        assert_eq!(center(CubemapFace::Top), [255, 255, 255, 255]);
-        assert_eq!(center(CubemapFace::Bottom), [0, 0, 0, 255]);
+        assert_eq!(center(Face::Front), [0, 0, 255, 255]);
+        assert_eq!(center(Face::Right), [0, 255, 0, 255]);
+        assert_eq!(center(Face::Back), [255, 255, 0, 255]);
+        assert_eq!(center(Face::Left), [255, 0, 0, 255]);
+        assert_eq!(center(Face::Top), [255, 255, 255, 255]);
+        assert_eq!(center(Face::Bottom), [0, 0, 0, 255]);
     }
 
     #[test]
@@ -518,7 +464,7 @@ mod tests {
         let skybox = Skybox::default();
         assert_eq!(skybox.face_size(), 512);
         // The embedded cross is photographic, so no face is a flat color.
-        for face in CubemapFace::ALL {
+        for face in Face::ALL_CUBEMAP {
             let image = skybox.face(face);
             assert!(image.pixels().iter().any(|&byte| byte != 0));
         }

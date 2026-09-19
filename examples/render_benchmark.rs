@@ -6,7 +6,7 @@ use std::{
 };
 
 use terrarium::{
-    App, Camera, Color3, Engine, Instance, InstanceId, Material, MaterialSlot, Part, PartShape,
+    App, Camera, Color3, Engine, Face, Instance, InstanceId, Material, Part, PartShape,
     RendererError, Terrarium, Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
@@ -243,8 +243,7 @@ impl Benchmark {
                 0.44 + self.random_f32() * 0.22,
             );
             if self.random_f32() < 1.0 / TEXTURED_PART_DIVISOR as f32 {
-                let slot = MaterialSlot::ALL_DIRECTIONS
-                    [(self.next_random() % MaterialSlot::ALL_DIRECTIONS.len() as u64) as usize];
+                let slot = Face::ALL[(self.next_random() % Face::ALL.len() as u64) as usize];
                 let material_index =
                     (self.next_random() % self.benchmark_materials.len() as u64) as usize;
                 let material = self.benchmark_materials[material_index];
@@ -353,7 +352,7 @@ fn create_benchmark_workspace(
             0.40 + (index % 4) as f32 * 0.11,
         );
         if index.is_multiple_of(TEXTURED_PART_DIVISOR) {
-            let slot = MaterialSlot::ALL_DIRECTIONS[index % MaterialSlot::ALL_DIRECTIONS.len()];
+            let slot = Face::ALL[index % Face::ALL.len()];
             let material =
                 benchmark_materials[(index / TEXTURED_PART_DIVISOR) % benchmark_materials.len()];
             part.set_material_slot(slot, material);

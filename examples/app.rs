@@ -1,7 +1,7 @@
 use terrarium::{
-    App, Color3, Easing, Engine, Instance, LightFace, Material, MaterialSlot, Part, PartShape,
-    PointLight, RendererError, Repeat, SpotLight, Terrarium, Texture, TextureColorSpace,
-    TextureFilter, Tween, eframe, egui, glam::Vec3,
+    App, Color3, Easing, Engine, Face, Instance, Material, Part, PartShape, PointLight,
+    RendererError, Repeat, SpotLight, Terrarium, Texture, TextureColorSpace, TextureFilter, Tween,
+    eframe, egui, glam::Vec3,
 };
 
 struct SceneApp;
@@ -93,13 +93,13 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             ..Material::default()
         });
         part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
-        part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
-        part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
-        part.set_material_slot(MaterialSlot::Bottom, Material::textured(dirt));
+        part.set_material_slot(Face::Top, Material::textured(grass_top));
+        part.set_material_slot(Face::Right, Material::textured(grass_side));
+        part.set_material_slot(Face::Bottom, Material::textured(dirt));
         part.add_child_with(SpotLight::new("TowerSpotLight"), |light| {
             light.color = Color3::new(0.18, 0.45, 1.0);
             light.brightness = 4.0;
-            light.face = LightFace::Back;
+            light.face = Face::Back;
             light.angle = 55.0;
         });
     });
@@ -118,12 +118,12 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         let mut dirt = Material::textured(dirt).with_filter(TextureFilter::Nearest);
         dirt.roughness = 0.9;
         part.set_material(grass_side);
-        part.set_material_slot(MaterialSlot::Top, grass_top);
-        part.set_material_slot(MaterialSlot::Bottom, dirt);
-        part.set_material_slot(MaterialSlot::Front, grass_side);
-        part.set_material_slot(MaterialSlot::Back, grass_side);
-        part.set_material_slot(MaterialSlot::Left, grass_side);
-        part.set_material_slot(MaterialSlot::Right, grass_side);
+        part.set_material_slot(Face::Top, grass_top);
+        part.set_material_slot(Face::Bottom, dirt);
+        part.set_material_slot(Face::Front, grass_side);
+        part.set_material_slot(Face::Back, grass_side);
+        part.set_material_slot(Face::Left, grass_side);
+        part.set_material_slot(Face::Right, grass_side);
     });
 
     let platform = engine.add_child_with(Part::unnamed(), |part| {

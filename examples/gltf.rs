@@ -22,9 +22,11 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
         .unwrap();
     let meshpart = engine.get_all::<MeshPart>().next().unwrap();
     assert!(
-        terrarium::MaterialSlot::ALL_DIRECTIONS
-            .into_iter()
-            .any(|slot| meshpart.material_slot(slot).textures.emissive.is_some())
+        terrarium::Face::ALL.into_iter().any(|slot| meshpart
+            .material_slot(slot)
+            .textures
+            .emissive
+            .is_some())
     );
     let pixels = engine.renderer().read_pixels()?;
     let rendered_pixels = pixels

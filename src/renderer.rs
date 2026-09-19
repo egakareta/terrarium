@@ -10,10 +10,10 @@ use web_time::Instant;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, Color3, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, LightFace,
-    MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots, Part, PartShape, PointLight, Skybox,
-    SkyboxError, SpotLight, SurfaceLight, Texture, TextureColorSpace, TextureError, TextureFilter,
-    TextureHandle, Vertex, Workspace,
+    BasePart, Camera, Color3, DEPTH_FORMAT, Face, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT,
+    Material, Mesh, MeshMaterialSlots, Part, PartShape, PointLight, Skybox, SkyboxError, SpotLight,
+    SurfaceLight, Texture, TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex,
+    Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
@@ -268,7 +268,7 @@ impl MaterialSetKey {
             return Self::uniform(Self::base_bits(&crate::material::DEFAULT_MATERIAL));
         }
         let mut slots = [[0u32; 9]; MATERIAL_SLOT_COUNT];
-        for (index, slot) in crate::MaterialSlot::ALL_DIRECTIONS.into_iter().enumerate() {
+        for (index, slot) in Face::ALL.into_iter().enumerate() {
             let material = material_slots
                 .get(slot)
                 .unwrap_or(&crate::material::DEFAULT_MATERIAL);
@@ -2573,7 +2573,7 @@ impl Renderer {
         };
         let face_size = skybox.face_size();
         let first = Texture::from_image(
-            skybox.face(CubemapFace::ALL[0]).clone(),
+            skybox.face(Face::ALL_CUBEMAP[0]).clone(),
             TextureColorSpace::Srgb,
         )?;
         let mip_levels = first.mip_levels()?;
@@ -2582,7 +2582,7 @@ impl Renderer {
             size: wgpu::Extent3d {
                 width: face_size,
                 height: face_size,
-                depth_or_array_layers: CubemapFace::ALL.len() as u32,
+                depth_or_array_layers: Face::ALL_CUBEMAP.len() as u32,
             },
             mip_level_count: mip_levels.len() as u32,
             sample_count: 1,
@@ -2591,7 +2591,7 @@ impl Renderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        for (layer, face) in CubemapFace::ALL.into_iter().enumerate() {
+        for (layer, face) in Face::ALL_CUBEMAP.into_iter().enumerate() {
             let face_texture = if layer == 0 {
                 first.clone()
             } else {
@@ -2626,7 +2626,7 @@ impl Renderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("skybox cubemap view"),
             dimension: Some(wgpu::TextureViewDimension::Cube),
-            array_layer_count: Some(CubemapFace::ALL.len() as u32),
+            array_layer_count: Some(Face::ALL_CUBEMAP.len() as u32),
             ..Default::default()
         });
         let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -3253,9 +3253,9 @@ fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Option<LightPare
     None
 }
 
-fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, Vec4) {
+fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, Vec4, Vec4) {
     let (normal, normal_extent, axis_u, half_width, axis_v, half_height) = match face {
-        LightFace::Top => (
+        Face::Top => (
             Vec3::Y,
             parent.size.y * 0.5,
             Vec3::X,
@@ -3263,7 +3263,7 @@ fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, 
             Vec3::Z,
             parent.size.z * 0.5,
         ),
-        LightFace::Bottom => (
+        Face::Bottom => (
             Vec3::NEG_Y,
             parent.size.y * 0.5,
             Vec3::X,
@@ -3271,7 +3271,7 @@ fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, 
             Vec3::Z,
             parent.size.z * 0.5,
         ),
-        LightFace::Front => (
+        Face::Front => (
             Vec3::Z,
             parent.size.z * 0.5,
             Vec3::X,
@@ -3279,7 +3279,7 @@ fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, 
             Vec3::Y,
             parent.size.y * 0.5,
         ),
-        LightFace::Back => (
+        Face::Back => (
             Vec3::NEG_Z,
             parent.size.z * 0.5,
             Vec3::X,
@@ -3287,7 +3287,7 @@ fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, 
             Vec3::Y,
             parent.size.y * 0.5,
         ),
-        LightFace::Left => (
+        Face::Left => (
             Vec3::NEG_X,
             parent.size.x * 0.5,
             Vec3::Z,
@@ -3295,7 +3295,7 @@ fn light_face_frame(parent: LightParent, face: LightFace) -> (Vec3, Vec3, Vec4, 
             Vec3::Y,
             parent.size.y * 0.5,
         ),
-        LightFace::Right => (
+        Face::Right => (
             Vec3::X,
             parent.size.x * 0.5,
             Vec3::Z,
@@ -3514,7 +3514,7 @@ fn surface_light_candidate(
 fn directional_light_candidate(
     workspace: &Workspace,
     light: &dyn Instance,
-    face: LightFace,
+    face: Face,
     angle: f32,
     color: Color3,
     brightness: f32,
@@ -3975,7 +3975,7 @@ mod tests {
 
     #[test]
     fn material_set_keys_resolve_unset_slots_to_the_default_material() {
-        use crate::{MaterialSlot, Part};
+        use crate::{Face, Part};
 
         let mut part = Part::new("part");
         let top = Material {
@@ -3985,7 +3985,7 @@ mod tests {
             emissive: [0.0, 0.0, 0.0],
             ..Material::default()
         };
-        part.set_material_slot(MaterialSlot::Top, top);
+        part.set_material_slot(Face::Top, top);
 
         let vec4s = MaterialSetKey::from_materials(&part.material_slots).vec4s();
         // The Top override carries its own factors.
@@ -4000,7 +4000,7 @@ mod tests {
 
     #[test]
     fn material_set_keys_distinguish_per_face_factors() {
-        use crate::{MaterialSlot, Part};
+        use crate::{Face, Part};
 
         let mut copper = Part::new("copper");
         copper.set_material(Material {
@@ -4013,7 +4013,7 @@ mod tests {
             ..Material::default()
         });
         copper_top_metal.set_material_slot(
-            MaterialSlot::Top,
+            Face::Top,
             Material {
                 metallic: 0.1,
                 ..Material::default()

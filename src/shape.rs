@@ -1,6 +1,6 @@
 use crate::{
-    MaterialSlot, Vertex, glam::Vec3, push_quad_with_material_slot,
-    push_quad_with_uv_and_material_slot, push_triangle_with_uv_and_material_slot, triangle_normal,
+    Face, Vertex, glam::Vec3, push_quad_with_material_slot, push_quad_with_uv_and_material_slot,
+    push_triangle_with_uv_and_material_slot, triangle_normal,
 };
 
 /// The primitive geometry available to a [`crate::Part`].
@@ -86,17 +86,17 @@ impl Mesh {
         Self { vertices, indices }
     }
 
-    /// Tags every vertex with the directional [`MaterialSlot`] matching its
+    /// Tags every vertex with the directional [`Face`] matching its
     /// normal, so per-face materials work on any arbitrary mesh.
     ///
-    /// This is how the built-in primitives support [`MaterialSlot::Top`] and
+    /// This is how the built-in primitives support [`Face::Top`] and
     /// friends on every shape: run it on a custom mesh after setting normals,
     /// then assign per-face materials through
     /// [`crate::Part::set_material_slot`]. Vertices with a zero normal use
-    /// [`MaterialSlot::Top`].
+    /// [`Face::Top`].
     pub fn assign_directional_slots(&mut self) {
         for vertex in &mut self.vertices {
-            vertex.material_slot = MaterialSlot::from_normal(vertex.normal) as u32;
+            vertex.material_slot = Face::from_normal(vertex.normal).material_index() as u32;
         }
     }
 
@@ -110,7 +110,7 @@ impl Mesh {
     /// Creates a box centered at the origin.
     ///
     /// The generated mesh labels each face with its corresponding directional
-    /// [`MaterialSlot`].
+    /// [`Face`].
     pub fn block(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         let faces = [
@@ -125,12 +125,12 @@ impl Mesh {
         let mut vertices = Vec::with_capacity(24);
         let mut indices = Vec::with_capacity(36);
         let material_slots = [
-            MaterialSlot::Front,
-            MaterialSlot::Back,
-            MaterialSlot::Top,
-            MaterialSlot::Bottom,
-            MaterialSlot::Right,
-            MaterialSlot::Left,
+            Face::Front,
+            Face::Back,
+            Face::Top,
+            Face::Bottom,
+            Face::Right,
+            Face::Left,
         ];
         for ((a, b, c, d), material_slot) in faces.into_iter().zip(material_slots) {
             push_quad_with_material_slot(
@@ -151,9 +151,9 @@ impl Mesh {
     /// 2 and 3 respectively. Higher values produce smoother geometry and more
     /// vertices. The sphere's radius is applied directly to its positions.
     ///
-    /// Each vertex is tagged with the directional [`MaterialSlot`] matching
-    /// its normal, so polar caps respond to [`MaterialSlot::Top`] and
-    /// [`MaterialSlot::Bottom`] while equatorial bands respond to the side
+    /// Each vertex is tagged with the directional [`Face`] matching
+    /// its normal, so polar caps respond to [`Face::Top`] and
+    /// [`Face::Bottom`] while equatorial bands respond to the side
     /// slots.
     pub fn ball(
         radius: f32,
@@ -181,7 +181,7 @@ impl Mesh {
                     [u, v],
                     [tangent.x, tangent.y, tangent.z, 1.0],
                     color,
-                    MaterialSlot::from_normal(normal.to_array()),
+                    Face::from_normal(normal.to_array()),
                 ));
             }
         }
@@ -212,9 +212,9 @@ impl Mesh {
     /// i.e. The top face points toward `+Y` and the bottom face toward `-Y`.
     /// `segments` is clamped to at least 3.
     ///
-    /// Side quads are tagged with the directional [`MaterialSlot`] matching
-    /// their outward normal while the caps use [`MaterialSlot::Top`] and
-    /// [`MaterialSlot::Bottom`].
+    /// Side quads are tagged with the directional [`Face`] matching
+    /// their outward normal while the caps use [`Face::Top`] and
+    /// [`Face::Bottom`].
     pub fn cylinder(radius: f32, height: f32, segments: usize, color: [f32; 4]) -> Self {
         let segments = segments.max(3);
         let half_height = height * 0.5;
@@ -247,7 +247,7 @@ impl Mesh {
                 side_positions,
                 [[u, 0.0], [u, 1.0], [next_u, 1.0], [next_u, 0.0]],
                 color,
-                MaterialSlot::from_normal(triangle_normal([
+                Face::from_normal(triangle_normal([
                     side_positions[0],
                     side_positions[1],
                     side_positions[2],
@@ -272,7 +272,7 @@ impl Mesh {
                     [0.5 + angle.cos() * 0.5, 0.5 + angle.sin() * 0.5],
                 ],
                 color,
-                MaterialSlot::Top,
+                Face::Top,
             );
             push_triangle_with_uv_and_material_slot(
                 &mut vertices,
@@ -292,7 +292,7 @@ impl Mesh {
                     [0.5 + next_angle.cos() * 0.5, 0.5 + next_angle.sin() * 0.5],
                 ],
                 color,
-                MaterialSlot::Bottom,
+                Face::Bottom,
             );
         }
 
@@ -307,7 +307,7 @@ impl Mesh {
     /// The geometry occupies a unit cube centered at the origin and is meant
     /// to be scaled through [`crate::BasePart::size`].
     ///
-    /// Each face is tagged with the directional [`MaterialSlot`] matching its
+    /// Each face is tagged with the directional [`Face`] matching its
     /// outward normal, so per-face materials work just like on a block.
     pub fn wedge(color: [f32; 4]) -> Self {
         let h = 0.5;
@@ -327,7 +327,7 @@ impl Mesh {
             back_face,
             [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0]],
             color,
-            MaterialSlot::from_normal(triangle_normal(back_face)),
+            Face::from_normal(triangle_normal(back_face)),
         );
         let front_face = [back_bottom_left, back_bottom_right, back_top_right];
         push_triangle_with_uv_and_material_slot(
@@ -336,7 +336,7 @@ impl Mesh {
             front_face,
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
             color,
-            MaterialSlot::from_normal(triangle_normal(front_face)),
+            Face::from_normal(triangle_normal(front_face)),
         );
         let bottom_face = [
             front_bottom_left,
@@ -350,7 +350,7 @@ impl Mesh {
             bottom_face,
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             color,
-            MaterialSlot::from_normal(triangle_normal([
+            Face::from_normal(triangle_normal([
                 bottom_face[0],
                 bottom_face[1],
                 bottom_face[2],
@@ -368,7 +368,7 @@ impl Mesh {
             right_face,
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             color,
-            MaterialSlot::from_normal(triangle_normal([
+            Face::from_normal(triangle_normal([
                 right_face[0],
                 right_face[1],
                 right_face[2],
@@ -386,7 +386,7 @@ impl Mesh {
             slope_face,
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             color,
-            MaterialSlot::from_normal(triangle_normal([
+            Face::from_normal(triangle_normal([
                 slope_face[0],
                 slope_face[1],
                 slope_face[2],
@@ -403,7 +403,7 @@ impl Mesh {
     /// The geometry occupies a unit cube centered at the origin and is meant
     /// to be scaled through [`crate::BasePart::size`].
     ///
-    /// Each face is tagged with the directional [`MaterialSlot`] matching its
+    /// Each face is tagged with the directional [`Face`] matching its
     /// outward normal, so per-face materials work just like on a block.
     pub fn corner_wedge(color: [f32; 4]) -> Self {
         let h = 0.5;
@@ -418,7 +418,7 @@ impl Mesh {
             [corners[0], corners[1], corners[2], corners[3]],
             [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
             color,
-            MaterialSlot::Bottom,
+            Face::Bottom,
         );
         for (index, next) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
             let face = [corners[index], apex, corners[next]];
@@ -428,7 +428,7 @@ impl Mesh {
                 face,
                 [[0.0, 0.0], [0.0, 1.0], [1.0, 0.0]],
                 color,
-                MaterialSlot::from_normal(triangle_normal(face)),
+                Face::from_normal(triangle_normal(face)),
             );
         }
 
@@ -438,7 +438,7 @@ impl Mesh {
     /// Creates a square on the XZ plane, centered at the origin.
     ///
     /// The plane's normal points toward `+Y`, so its vertices use
-    /// [`MaterialSlot::Top`].
+    /// [`Face::Top`].
     pub fn plane(size: f32, color: [f32; 4]) -> Self {
         let h = size * 0.5;
         Self {
@@ -449,7 +449,7 @@ impl Mesh {
                     [0.0, 0.0],
                     [1.0, 0.0, 0.0, 1.0],
                     color,
-                    MaterialSlot::Top,
+                    Face::Top,
                 ),
                 Vertex::with_material_slot(
                     [h, 0.0, -h],
@@ -457,7 +457,7 @@ impl Mesh {
                     [1.0, 0.0],
                     [1.0, 0.0, 0.0, 1.0],
                     color,
-                    MaterialSlot::Top,
+                    Face::Top,
                 ),
                 Vertex::with_material_slot(
                     [h, 0.0, h],
@@ -465,7 +465,7 @@ impl Mesh {
                     [1.0, 1.0],
                     [1.0, 0.0, 0.0, 1.0],
                     color,
-                    MaterialSlot::Top,
+                    Face::Top,
                 ),
                 Vertex::with_material_slot(
                     [-h, 0.0, h],
@@ -473,7 +473,7 @@ impl Mesh {
                     [0.0, 1.0],
                     [1.0, 0.0, 0.0, 1.0],
                     color,
-                    MaterialSlot::Top,
+                    Face::Top,
                 ),
             ],
             indices: vec![0, 1, 2, 2, 3, 0],
@@ -486,7 +486,7 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
-    use crate::MaterialSlot;
+    use crate::Face;
 
     fn assert_face_normal(vertices: &[Vertex], expected: Vec3) {
         let expected = expected.normalize();
@@ -528,19 +528,19 @@ mod tests {
     fn block_mesh_uses_named_material_slots() {
         let mesh = Mesh::block(1.0, [1.0; 4]);
         let expected_slots = [
-            MaterialSlot::Front,
-            MaterialSlot::Back,
-            MaterialSlot::Top,
-            MaterialSlot::Bottom,
-            MaterialSlot::Right,
-            MaterialSlot::Left,
+            Face::Front,
+            Face::Back,
+            Face::Top,
+            Face::Bottom,
+            Face::Right,
+            Face::Left,
         ];
 
         for (vertices, slot) in mesh.vertices.chunks_exact(4).zip(expected_slots) {
             assert!(
                 vertices
                     .iter()
-                    .all(|vertex| vertex.material_slot == slot as u32)
+                    .all(|vertex| vertex.material_slot == slot.material_index() as u32)
             );
         }
     }
@@ -634,7 +634,8 @@ mod tests {
             for vertex in &mesh.vertices {
                 let slot = vertex.material_slot;
                 assert!(
-                    (MaterialSlot::Top as u32..=MaterialSlot::Right as u32).contains(&slot),
+                    (Face::Top.material_index() as u32..=Face::Right.material_index() as u32)
+                        .contains(&slot),
                     "expected a directional slot, got {slot}"
                 );
             }
@@ -649,17 +650,17 @@ mod tests {
             assert!(
                 segment[0..4]
                     .iter()
-                    .all(|vertex| vertex.material_slot != MaterialSlot::Top as u32)
+                    .all(|vertex| vertex.material_slot != Face::Top.material_index() as u32)
             );
             assert!(
                 segment[4..7]
                     .iter()
-                    .all(|vertex| vertex.material_slot == MaterialSlot::Top as u32)
+                    .all(|vertex| vertex.material_slot == Face::Top.material_index() as u32)
             );
             assert!(
                 segment[7..10]
                     .iter()
-                    .all(|vertex| vertex.material_slot == MaterialSlot::Bottom as u32)
+                    .all(|vertex| vertex.material_slot == Face::Bottom.material_index() as u32)
             );
         }
     }
@@ -667,30 +668,30 @@ mod tests {
     #[test]
     fn cylinder_side_slots_cover_horizontal_quarters() {
         let mesh = Mesh::cylinder(1.0, 1.0, 24, [1.0; 4]);
-        let mut counts = [0usize; MaterialSlot::ALL_DIRECTIONS.len()];
+        let mut counts = [0usize; Face::ALL.len()];
 
         for segment in mesh.vertices.chunks_exact(10) {
             let slot = segment[0].material_slot as usize;
-            if slot >= MaterialSlot::Front as usize {
+            if slot >= Face::Front.material_index() {
                 counts[slot] += 1;
             }
         }
 
-        assert_eq!(counts[MaterialSlot::Front as usize], 6);
-        assert_eq!(counts[MaterialSlot::Back as usize], 6);
-        assert_eq!(counts[MaterialSlot::Left as usize], 6);
-        assert_eq!(counts[MaterialSlot::Right as usize], 6);
+        assert_eq!(counts[Face::Front.material_index()], 6);
+        assert_eq!(counts[Face::Back.material_index()], 6);
+        assert_eq!(counts[Face::Left.material_index()], 6);
+        assert_eq!(counts[Face::Right.material_index()], 6);
     }
 
     #[test]
     fn wedge_faces_use_directional_slots_matching_their_normals() {
         let mesh = Mesh::wedge([1.0; 4]);
         let expected_slots = [
-            MaterialSlot::Back,
-            MaterialSlot::Front,
-            MaterialSlot::Bottom,
-            MaterialSlot::Right,
-            MaterialSlot::Top,
+            Face::Back,
+            Face::Front,
+            Face::Bottom,
+            Face::Right,
+            Face::Top,
         ];
         let face_ranges = [0..3, 3..6, 6..10, 10..14, 14..18];
 
@@ -698,7 +699,7 @@ mod tests {
             assert!(
                 mesh.vertices[range]
                     .iter()
-                    .all(|vertex| vertex.material_slot == slot as u32),
+                    .all(|vertex| vertex.material_slot == slot.material_index() as u32),
                 "expected {slot:?} for face"
             );
         }
@@ -711,12 +712,12 @@ mod tests {
         assert!(
             mesh.vertices[..row]
                 .iter()
-                .all(|vertex| vertex.material_slot == MaterialSlot::Top as u32)
+                .all(|vertex| vertex.material_slot == Face::Top.material_index() as u32)
         );
         assert!(
             mesh.vertices[mesh.vertices.len() - row..]
                 .iter()
-                .all(|vertex| vertex.material_slot == MaterialSlot::Bottom as u32)
+                .all(|vertex| vertex.material_slot == Face::Bottom.material_index() as u32)
         );
     }
 
@@ -724,23 +725,23 @@ mod tests {
     fn assign_directional_slots_tags_a_custom_mesh_by_normal() {
         let mut mesh = Mesh::block(1.0, [1.0; 4]);
         for vertex in &mut mesh.vertices {
-            vertex.material_slot = MaterialSlot::Top as u32;
+            vertex.material_slot = Face::Top.material_index() as u32;
         }
         mesh.assign_directional_slots();
 
         let expected_slots = [
-            MaterialSlot::Front,
-            MaterialSlot::Back,
-            MaterialSlot::Top,
-            MaterialSlot::Bottom,
-            MaterialSlot::Right,
-            MaterialSlot::Left,
+            Face::Front,
+            Face::Back,
+            Face::Top,
+            Face::Bottom,
+            Face::Right,
+            Face::Left,
         ];
         for (vertices, slot) in mesh.vertices.chunks_exact(4).zip(expected_slots) {
             assert!(
                 vertices
                     .iter()
-                    .all(|vertex| vertex.material_slot == slot as u32)
+                    .all(|vertex| vertex.material_slot == slot.material_index() as u32)
             );
         }
     }

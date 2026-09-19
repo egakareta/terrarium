@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 
-use crate::{MaterialSlot, glam::Vec3};
+use crate::{Face, glam::Vec3};
 
 /// A vertex consumed by the built-in PBR pipeline.
 ///
@@ -38,7 +38,7 @@ impl Vertex {
             uv,
             tangent,
             color,
-            MaterialSlot::from_normal(normal),
+            Face::from_normal(normal),
         )
     }
 
@@ -49,7 +49,7 @@ impl Vertex {
         uv: [f32; 2],
         tangent: [f32; 4],
         color: [f32; 4],
-        material_slot: MaterialSlot,
+        material_slot: Face,
     ) -> Self {
         Self {
             position,
@@ -57,7 +57,7 @@ impl Vertex {
             uv,
             tangent,
             color,
-            material_slot: material_slot as u32,
+            material_slot: material_slot.material_index() as u32,
         }
     }
 
@@ -114,7 +114,7 @@ pub fn push_triangle_with_uv(
         positions,
         uvs,
         color,
-        MaterialSlot::from_normal(triangle_normal(positions)),
+        Face::from_normal(triangle_normal(positions)),
     );
 }
 
@@ -125,7 +125,7 @@ pub fn push_triangle_with_uv_and_material_slot(
     positions: [[f32; 3]; 3],
     uvs: [[f32; 2]; 3],
     color: [f32; 4],
-    material_slot: MaterialSlot,
+    material_slot: Face,
 ) {
     let normal = triangle_normal(positions);
     let tangent = tangent_from_uv(positions, uvs, normal);
@@ -168,7 +168,7 @@ pub fn push_quad_with_uv(
         positions,
         uvs,
         color,
-        MaterialSlot::from_normal(triangle_normal([positions[0], positions[1], positions[2]])),
+        Face::from_normal(triangle_normal([positions[0], positions[1], positions[2]])),
     );
 }
 
@@ -178,7 +178,7 @@ pub fn push_quad_with_material_slot(
     indices: &mut Vec<u16>,
     positions: [[f32; 3]; 4],
     color: [f32; 4],
-    material_slot: MaterialSlot,
+    material_slot: Face,
 ) {
     push_quad_with_uv_and_material_slot(
         vertices,
@@ -197,7 +197,7 @@ pub fn push_quad_with_uv_and_material_slot(
     positions: [[f32; 3]; 4],
     uvs: [[f32; 2]; 4],
     color: [f32; 4],
-    material_slot: MaterialSlot,
+    material_slot: Face,
 ) {
     let normal = triangle_normal([positions[0], positions[1], positions[2]]);
     let tangent = tangent_from_uv(
