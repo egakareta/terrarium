@@ -84,8 +84,7 @@ fn default_headless_render_state(
 
     match cached {
         Ok(render_state) => Ok(render_state.clone()),
-        Err(error) => Err(eframe::Error::AppCreation(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        Err(error) => Err(eframe::Error::AppCreation(Box::new(std::io::Error::other(
             error.clone(),
         )))),
     }
