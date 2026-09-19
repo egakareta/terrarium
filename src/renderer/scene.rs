@@ -1,9 +1,109 @@
 use super::*;
-use crate::{HasBasePart, HasPVInstance, HasPart};
+use crate::{HasBasePart, HasPVInstance, HasPart, Instance, Outline};
+
+fn collect_outline_targets(
+    workspace: &Workspace,
+) -> (
+    [HashMap<InstanceId, OutlineSpec>; 3],
+    [Option<OutlineSpec>; 3],
+) {
+    let mut targets = std::array::from_fn(|_| HashMap::new());
+    let mut specs = [None; 3];
+    for outline in workspace.get_all::<Outline>() {
+        let Some(parent_id) = outline.parent() else {
+            continue;
+        };
+        let Some(parent) = workspace.instance(parent_id) else {
+            continue;
+        };
+        let Some(container_id) = parent.parent() else {
+            continue;
+        };
+        let mode = outline.mode().index();
+        let spec = OutlineSpec {
+            color: outline.color(),
+            width: outline.width(),
+            threshold: outline.threshold(),
+        };
+        specs[mode].get_or_insert(spec);
+        targets[mode].insert(parent_id, spec);
+        if container_id == workspace.id() {
+            for sibling in workspace.children() {
+                targets[mode].insert(sibling.id(), spec);
+            }
+        } else if let Some(container) = workspace.instance(container_id) {
+            for sibling in container.children() {
+                targets[mode].insert(sibling.id(), spec);
+            }
+        }
+    }
+    (targets, specs)
+}
+
+fn outline_color(color: Color3) -> [f32; 4] {
+    [
+        color_channel(color.r),
+        color_channel(color.g),
+        color_channel(color.b),
+        1.0,
+    ]
+}
+
+fn outline_params(spec: Option<OutlineSpec>) -> [f32; 4] {
+    spec.map_or([0.0; 4], |spec| {
+        [
+            finite_or(spec.width, 1.0).clamp(1.0, 4.0),
+            finite_or(spec.threshold, 0.08).clamp(0.0, 1.0),
+            0.0,
+            0.0,
+        ]
+    })
+}
+
+fn append_outline_instance(
+    batches: &mut [Vec<OutlineRenderBatch>; 3],
+    targets: &[HashMap<InstanceId, OutlineSpec>; 3],
+    id: InstanceId,
+    mesh: GpuMeshHandle,
+    instance: InstanceRaw,
+) {
+    for mode in 0..3 {
+        if !targets[mode].contains_key(&id) {
+            continue;
+        }
+        if let Some(batch) = batches[mode].iter_mut().find(|batch| batch.mesh == mesh) {
+            batch.instances.push(instance);
+        } else {
+            batches[mode].push(OutlineRenderBatch {
+                mesh,
+                instances: vec![instance],
+                instance_start: 0,
+            });
+        }
+    }
+}
 
 impl Renderer {
     pub(super) fn prepare_scene(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
         self.prepared_batches.clear();
+        let (outline_targets, outline_specs) = collect_outline_targets(workspace);
+        self.queue.write_buffer(
+            &self.outline_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&OutlineUniform {
+                toon_params: outline_params(outline_specs[0]),
+                toon_color: outline_specs[0].map_or([0.0; 4], |spec| outline_color(spec.color)),
+                silhouette_params: outline_params(outline_specs[1]),
+                silhouette_color: outline_specs[1]
+                    .map_or([0.0; 4], |spec| outline_color(spec.color)),
+                stencil_params: outline_params(outline_specs[2]),
+                stencil_color: outline_specs[2].map_or([0.0; 4], |spec| outline_color(spec.color)),
+            }),
+        );
+        let mut outline_batches = std::mem::take(&mut self.outline_batches);
+        for batches in &mut outline_batches {
+            batches.clear();
+        }
         let camera_vp = workspace.current_camera.view_projection_matrix();
         let camera_planes = frustum_planes(camera_vp);
         let local_shadows = self.prepare_local_lights(workspace, &camera_planes);
@@ -329,7 +429,7 @@ impl Renderer {
                 } else {
                     ([0.0; 3], [0.0; 4], 0)
                 };
-                batches[batch_index].instances.push(InstanceRaw {
+                let instance = InstanceRaw {
                     model: [
                         model.x_axis.truncate().to_array(),
                         model.y_axis.truncate().to_array(),
@@ -339,7 +439,17 @@ impl Renderer {
                     normal_scales,
                     tint,
                     material_set,
-                });
+                };
+                batches[batch_index].instances.push(instance);
+                if visibility_mask & 1 != 0 {
+                    append_outline_instance(
+                        &mut outline_batches,
+                        &outline_targets,
+                        part.id(),
+                        batches[batch_index].mesh,
+                        instance,
+                    );
+                }
             }
         }
 
@@ -427,7 +537,7 @@ impl Renderer {
             } else {
                 ([0.0; 3], [0.0; 4], 0)
             };
-            batches[batch_index].instances.push(InstanceRaw {
+            let instance = InstanceRaw {
                 model: [
                     model.x_axis.truncate().to_array(),
                     model.y_axis.truncate().to_array(),
@@ -437,7 +547,17 @@ impl Renderer {
                 normal_scales,
                 tint,
                 material_set,
-            });
+            };
+            batches[batch_index].instances.push(instance);
+            if visibility_mask & 1 != 0 {
+                append_outline_instance(
+                    &mut outline_batches,
+                    &outline_targets,
+                    meshpart.id(),
+                    mesh,
+                    instance,
+                );
+            }
         }
 
         let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
@@ -499,6 +619,23 @@ impl Renderer {
                 instance_count: batch.instances.len() as u32,
             });
         }
+        for (mode, mode_batches) in outline_batches.iter_mut().enumerate() {
+            mode_batches.sort_unstable_by_key(|batch| batch.mesh.0);
+            let mut instance_start = 0;
+            for batch in mode_batches.iter_mut() {
+                batch.instance_start = instance_start;
+                instance_start += batch.instances.len();
+            }
+            self.ensure_outline_instance_capacity(mode, instance_start);
+            for batch in mode_batches {
+                self.queue.write_buffer(
+                    &self.outline_instance_buffers[mode],
+                    batch.instance_start as u64 * std::mem::size_of::<InstanceRaw>() as u64,
+                    bytemuck::cast_slice(&batch.instances),
+                );
+            }
+        }
+        self.outline_batches = outline_batches;
         self.batch_scratch = batches;
         self.batch_indices_scratch = batch_indices;
         // Keep scratch capacities warm for the next frame's batch count.

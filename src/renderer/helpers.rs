@@ -44,7 +44,7 @@ impl EframeSceneTarget {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("eframe scene composite shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(include_str!("copy.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("eframe scene composite pipeline layout"),
@@ -145,6 +145,61 @@ pub(super) fn create_eframe_scene_texture(
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
+    })
+}
+
+pub(super) fn create_outline_mask_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("outline mask texture"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+pub(super) fn create_outline_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    scene_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    mask_view: &wgpu::TextureView,
+    uniform_buffer: &wgpu::Buffer,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("outline composite bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(scene_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(mask_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+        ],
     })
 }
 

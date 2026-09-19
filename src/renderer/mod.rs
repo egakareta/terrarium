@@ -10,8 +10,8 @@ use web_time::Instant;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, Color3, Face, Instance, InstanceId, Mesh, Part, PartShape, PointLight,
-    Skybox, SkyboxError, SpotLight, SurfaceLight, Vertex, Workspace,
+    BasePart, Camera, Color3, Face, Instance, InstanceId, Mesh, OutlineMode, Part, PartShape,
+    PointLight, Skybox, SkyboxError, SpotLight, SurfaceLight, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
@@ -166,6 +166,19 @@ struct PreparedRenderBatch {
     visibility_mask: u16,
     instance_start: usize,
     instance_count: u32,
+}
+
+#[derive(Clone, Copy)]
+struct OutlineSpec {
+    color: Color3,
+    width: f32,
+    threshold: f32,
+}
+
+struct OutlineRenderBatch {
+    mesh: GpuMeshHandle,
+    instances: Vec<InstanceRaw>,
+    instance_start: usize,
 }
 
 struct PartCandidate<'a> {
@@ -348,6 +361,17 @@ struct SkyboxCameraUniform {
     exposure: [f32; 4],
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct OutlineUniform {
+    toon_params: [f32; 4],
+    toon_color: [f32; 4],
+    silhouette_params: [f32; 4],
+    silhouette_color: [f32; 4],
+    stencil_params: [f32; 4],
+    stencil_color: [f32; 4],
+}
+
 /// Unit-cube corners shared by the skybox vertex buffer.
 const SKYBOX_VERTICES: [[f32; 3]; 8] = [
     [-1.0, -1.0, -1.0],
@@ -389,6 +413,10 @@ pub struct Renderer {
     height: u32,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
+    scene_texture: wgpu::Texture,
+    scene_view: wgpu::TextureView,
+    outline_mask_texture: wgpu::Texture,
+    outline_mask_view: wgpu::TextureView,
     _shadow_texture: wgpu::Texture,
     shadow_layer_views: [wgpu::TextureView; SHADOW_CASCADE_COUNT],
     _local_shadow_texture: wgpu::Texture,
@@ -397,6 +425,11 @@ pub struct Renderer {
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
+    outline_composite_pipeline: wgpu::RenderPipeline,
+    toon_mask_pipeline: wgpu::RenderPipeline,
+    silhouette_mask_pipeline: wgpu::RenderPipeline,
+    stencil_mask_pipeline: wgpu::RenderPipeline,
+    stencil_outline_pipeline: wgpu::RenderPipeline,
     eframe_scene: EframeSceneTarget,
     skybox_pipeline: wgpu::RenderPipeline,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
@@ -410,8 +443,12 @@ pub struct Renderer {
     skybox_revision: Option<u64>,
     camera_buffer: wgpu::Buffer,
     local_lights_buffer: wgpu::Buffer,
+    outline_uniform_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_bind_group_layout: wgpu::BindGroupLayout,
+    outline_bind_group_layout: wgpu::BindGroupLayout,
+    outline_bind_group: wgpu::BindGroup,
+    outline_geometry_bind_group: wgpu::BindGroup,
     shadow_view: wgpu::TextureView,
     _fallback_environment_texture: wgpu::Texture,
     fallback_environment_view: wgpu::TextureView,
@@ -439,6 +476,7 @@ pub struct Renderer {
     packed_material_textures: HashMap<MaterialTextures, PackedMaterialTextures>,
     gpu_material_textures: Vec<GpuMaterialTexture>,
     instance_buffer: wgpu::Buffer,
+    outline_instance_buffers: [wgpu::Buffer; 3],
     meshes: Vec<GpuMesh>,
     primitive_meshes: [GpuMeshHandle; PartShape::COUNT],
     #[cfg(feature = "meshpart")]
@@ -453,6 +491,7 @@ pub struct Renderer {
     frame_count: u32,
     fps: f32,
     prepared_batches: Vec<PreparedRenderBatch>,
+    outline_batches: [Vec<OutlineRenderBatch>; 3],
     local_light_scratch: Vec<LocalLightCandidate>,
     batch_scratch: Vec<RenderBatch>,
     batch_indices_scratch: HashMap<

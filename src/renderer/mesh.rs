@@ -88,6 +88,21 @@ impl Renderer {
             mapped_at_creation: false,
         });
     }
+
+    pub(super) fn ensure_outline_instance_capacity(&mut self, mode: usize, instance_count: usize) {
+        let required_size =
+            std::mem::size_of::<InstanceRaw>() as u64 * instance_count.max(1) as u64;
+        if self.outline_instance_buffers[mode].size() >= required_size {
+            return;
+        }
+
+        self.outline_instance_buffers[mode] = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("outline instance buffer"),
+            size: required_size,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+    }
     pub(super) fn draw_batches<'a>(
         &self,
         pass: &mut wgpu::RenderPass<'a>,
@@ -156,6 +171,43 @@ impl Renderer {
     pub(super) fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
         self.draw_skybox(pass);
         self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, &[], true, 1);
+    }
+
+    pub(super) fn draw_outline_batches<'a>(
+        &self,
+        pass: &mut wgpu::RenderPass<'a>,
+        mode: OutlineMode,
+        pipeline: &wgpu::RenderPipeline,
+        use_outline_uniform: bool,
+    ) {
+        let mode = mode.index();
+        let batches = &self.outline_batches[mode];
+        if batches.is_empty() {
+            return;
+        }
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &self.camera_bind_group, &[]);
+        if use_outline_uniform {
+            pass.set_bind_group(1, &self.outline_geometry_bind_group, &[]);
+        }
+        let instance_buffer = &self.outline_instance_buffers[mode];
+        let mut bound_mesh = None;
+        for batch in batches {
+            let Some(mesh) = self.meshes.get(batch.mesh.0) else {
+                continue;
+            };
+            if bound_mesh != Some(batch.mesh) {
+                pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+                pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                bound_mesh = Some(batch.mesh);
+            }
+            let instance_start =
+                batch.instance_start as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+            let instance_end = instance_start
+                + batch.instances.len() as u64 * std::mem::size_of::<InstanceRaw>() as u64;
+            pass.set_vertex_buffer(1, instance_buffer.slice(instance_start..instance_end));
+            pass.draw_indexed(0..mesh.index_count, 0, 0..batch.instances.len() as u32);
+        }
     }
 
     pub(super) fn draw_skybox<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {

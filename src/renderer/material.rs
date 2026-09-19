@@ -4,8 +4,8 @@ use thiserror::Error;
 
 use crate::{Color3, Face};
 
-/// Depth format used by the built-in renderer.
-pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// Depth-stencil format used by the built-in renderer.
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 /// Number of directional material slots available to a mesh.
 pub const MATERIAL_SLOT_COUNT: usize = Face::ALL.len();
 

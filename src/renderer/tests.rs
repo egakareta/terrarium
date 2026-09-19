@@ -52,6 +52,21 @@ fn eframe_composite_shader_validates() {
 }
 
 #[test]
+fn outline_shaders_validate() {
+    for source in [include_str!("outline.wgsl"), include_str!("copy.wgsl")] {
+        let module =
+            wgpu::naga::front::wgsl::parse_str(source).expect("outline shader should parse");
+        let mut validator = wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        );
+        validator
+            .validate(&module)
+            .expect("outline shader should validate");
+    }
+}
+
+#[test]
 fn material_set_keys_resolve_unset_slots_to_the_default_material() {
     use crate::{Face, HasMaterials as _, Instance as _, Part};
 

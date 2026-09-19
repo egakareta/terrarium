@@ -75,3 +75,45 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
     assert!(rendered_pixel_count > 0);
     Ok(())
 }
+
+#[test]
+fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
+    for mode in [
+        OutlineMode::Toon,
+        OutlineMode::Silhouette,
+        OutlineMode::Stencil,
+    ] {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.lighting.clear_skybox();
+                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                let part_id = engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::ZERO)
+                        .with_size(Vec3::splat(2.0)),
+                );
+                engine
+                    .get_mut::<Part>(part_id)
+                    .expect("outline target should be in the workspace")
+                    .add_child_ref(
+                        Outline::new(mode)
+                            .with_color(Color3::new(1.0, 0.0, 0.0))
+                            .with_width(2.0),
+                    );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+        let pixels = engine.renderer().read_pixels()?;
+        let red_pixels = pixels
+            .iter()
+            .filter(|pixel| pixel[0] > 180 && pixel[1] < 80 && pixel[2] < 80)
+            .count();
+        assert!(
+            red_pixels > 0,
+            "{mode:?} outline should contribute its configured color"
+        );
+    }
+    Ok(())
+}

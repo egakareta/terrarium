@@ -138,6 +138,23 @@ impl Renderer {
         let (depth_texture, depth_view) = create_depth_texture(&self.device, width, height);
         self.depth_texture = depth_texture;
         self.depth_view = depth_view;
+        self.scene_texture =
+            create_eframe_scene_texture(&self.device, self.eframe_scene.format, width, height);
+        self.scene_view = self
+            .scene_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let (outline_mask_texture, outline_mask_view) =
+            create_outline_mask_texture(&self.device, width, height);
+        self.outline_mask_texture = outline_mask_texture;
+        self.outline_mask_view = outline_mask_view;
+        self.outline_bind_group = create_outline_bind_group(
+            &self.device,
+            &self.outline_bind_group_layout,
+            &self.scene_view,
+            &self.eframe_scene.sampler,
+            &self.outline_mask_view,
+            &self.outline_uniform_buffer,
+        );
         self.eframe_scene.resize(&self.device, width, height);
     }
 
@@ -236,7 +253,10 @@ impl Renderer {
                 load: wgpu::LoadOp::Clear(1.0),
                 store: wgpu::StoreOp::Store,
             }),
-            stencil_ops: None,
+            stencil_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(0),
+                store: wgpu::StoreOp::Store,
+            }),
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene render pass"),
@@ -249,6 +269,136 @@ impl Renderer {
         self.draw_scene(&mut pass);
     }
 
+    pub(super) fn encode_outline_mask_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+        if self.outline_batches[OutlineMode::Toon.index()].is_empty()
+            && self.outline_batches[OutlineMode::Silhouette.index()].is_empty()
+        {
+            return;
+        }
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("screen-space outline mask pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.outline_mask_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_view,
+                depth_ops: None,
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        self.draw_outline_batches(
+            &mut pass,
+            OutlineMode::Toon,
+            &self.toon_mask_pipeline,
+            false,
+        );
+        self.draw_outline_batches(
+            &mut pass,
+            OutlineMode::Silhouette,
+            &self.silhouette_mask_pipeline,
+            false,
+        );
+    }
+
+    pub(super) fn encode_stencil_outline_passes(&self, encoder: &mut wgpu::CommandEncoder) {
+        if self.outline_batches[OutlineMode::Stencil.index()].is_empty() {
+            return;
+        }
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("stencil outline mask pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self.scene_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: None,
+                    stencil_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_stencil_reference(1);
+            self.draw_outline_batches(
+                &mut pass,
+                OutlineMode::Stencil,
+                &self.stencil_mask_pipeline,
+                false,
+            );
+        }
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("stencil outline geometry pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.scene_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &self.depth_view,
+                depth_ops: None,
+                stencil_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_stencil_reference(1);
+        self.draw_outline_batches(
+            &mut pass,
+            OutlineMode::Stencil,
+            &self.stencil_outline_pipeline,
+            true,
+        );
+    }
+
+    pub(super) fn encode_outline_composite_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("outline composite pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &self.eframe_scene.view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(self.clear_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(&self.outline_composite_pipeline);
+        pass.set_bind_group(0, &self.outline_bind_group, &[]);
+        pass.draw(0..3, 0..1);
+    }
+
     pub(super) fn submit_scene(&self) {
         let mut encoder = self
             .device
@@ -256,7 +406,10 @@ impl Renderer {
                 label: Some("eframe scene command encoder"),
             });
         self.encode_shadow_pass(&mut encoder);
-        self.encode_scene_pass(&mut encoder, &self.eframe_scene.view, &self.depth_view);
+        self.encode_scene_pass(&mut encoder, &self.scene_view, &self.depth_view);
+        self.encode_outline_mask_pass(&mut encoder);
+        self.encode_stencil_outline_passes(&mut encoder);
+        self.encode_outline_composite_pass(&mut encoder);
         self.queue.submit(Some(encoder.finish()));
     }
 

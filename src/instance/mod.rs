@@ -17,12 +17,14 @@ mod camera;
 mod light;
 #[cfg(feature = "meshpart")]
 mod meshpart;
+mod outline;
 mod part;
 mod workspace;
 pub use camera::*;
 pub use light::*;
 #[cfg(feature = "meshpart")]
 pub use meshpart::*;
+pub use outline::*;
 pub use part::*;
 pub use workspace::*;
 
