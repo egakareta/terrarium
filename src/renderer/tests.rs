@@ -1,4 +1,5 @@
 use super::*;
+use crate::HasCamera;
 
 #[test]
 fn surface_packing_preserves_normal_xy_and_material_channels() {
@@ -52,17 +53,15 @@ fn eframe_composite_shader_validates() {
 
 #[test]
 fn material_set_keys_resolve_unset_slots_to_the_default_material() {
-    use crate::{Face, Instance as _, Part};
+    use crate::{Face, HasMaterials as _, Instance as _, Part};
 
-    let mut part = Part::new().named("part");
-    let top = Material {
-        base_color: [0.1, 0.4, 0.2, 1.0],
-        metallic: 0.1,
-        roughness: 0.9,
-        emissive: [0.0, 0.0, 0.0],
-        ..Material::default()
-    };
-    part.set_material_slot(Face::Top, top);
+    let part = Part::new().named("part");
+    let top = Material::default()
+        .with_base_color([0.1, 0.4, 0.2, 1.0])
+        .with_metallic(0.1)
+        .with_roughness(0.9)
+        .with_emissive([0.0, 0.0, 0.0]);
+    let part = part.with_material_slot(Face::Top, top);
 
     let vec4s = MaterialSetKey::from_materials(&part.material_slots).vec4s();
     // The Top override carries its own factors.
@@ -77,30 +76,18 @@ fn material_set_keys_resolve_unset_slots_to_the_default_material() {
 
 #[test]
 fn material_set_keys_distinguish_per_face_factors() {
-    use crate::{Face, Instance as _, Part};
+    use crate::{Face, HasMaterials as _, Instance as _, Part};
 
-    let mut copper = Part::new().named("copper");
-    copper.set_material(Material {
-        metallic: 0.82,
-        ..Material::default()
-    });
-    let mut copper_top_metal = Part::new().named("copper-top-metal");
-    copper_top_metal.set_material(Material {
-        metallic: 0.82,
-        ..Material::default()
-    });
-    copper_top_metal.set_material_slot(
-        Face::Top,
-        Material {
-            metallic: 0.1,
-            ..Material::default()
-        },
-    );
-    let mut copper_clone = Part::new().named("copper-clone");
-    copper_clone.set_material(Material {
-        metallic: 0.82,
-        ..Material::default()
-    });
+    let copper = Part::new()
+        .named("copper")
+        .with_material(Material::default().with_metallic(0.82));
+    let copper_top_metal = Part::new()
+        .named("copper-top-metal")
+        .with_material(Material::default().with_metallic(0.82))
+        .with_material_slot(Face::Top, Material::default().with_metallic(0.1));
+    let copper_clone = Part::new()
+        .named("copper-clone")
+        .with_material(Material::default().with_metallic(0.82));
 
     assert_eq!(
         MaterialSetKey::from_materials(&copper.material_slots),
@@ -139,7 +126,7 @@ fn compact_normal_scales_match_inverse_transpose_for_trs() {
 
 #[test]
 fn frustum_culling_keeps_visible_and_rejects_outside() {
-    use crate::Camera;
+    use crate::{Camera, HasPVInstance as _};
     let camera = Camera::new(Vec3::new(0.0, 2.0, 6.0), Vec3::ZERO, 16.0 / 9.0);
     let planes = frustum_planes(camera.view_projection_matrix());
     assert!(sphere_visible(&planes, Vec3::ZERO, 0.5));
@@ -158,7 +145,7 @@ fn shadow_cascades_cover_their_camera_frustum_slices() {
     let camera = Camera::new(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
     let (matrices, splits, texel_sizes) =
         light_view_projections(&camera, Vec3::new(-0.45, 0.85, 0.35));
-    let mut near = camera.znear;
+    let mut near = camera.znear();
 
     for cascade in 0..SHADOW_CASCADE_COUNT {
         assert!(splits[cascade] > near);

@@ -1,14 +1,11 @@
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use thiserror::Error;
 
 use crate::{
-    BasePart, DEFAULT_MATERIAL, Face, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
-    Texture, TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
+    BasePart, Face, HasBasePart, HasMaterials, HasPVInstance, MATERIAL_SLOT_COUNT, Material, Mesh,
+    MeshMaterialSlots, PVInstance, Texture, TextureColorSpace, TextureError, TextureFilter,
+    TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec2, Vec3},
 };
 
@@ -77,8 +74,10 @@ pub enum GltfError {
 
 /// A visible scene object backed by caller-provided or imported mesh data.
 ///
-/// `MeshPart` dereferences to [`BasePart`], so its hierarchy, transform, size,
-/// tint, and collision metadata use the same API as [`crate::Part`].
+/// `MeshPart` exposes [`BasePart`] behavior through [`HasBasePart`] and
+/// [`PVInstance`] behavior through [`HasPVInstance`], so its hierarchy,
+/// transform, size, tint, and collision metadata use the same API as
+/// [`crate::Part`].
 #[derive(Clone, Debug)]
 pub struct MeshPart {
     basepart: BasePart,
@@ -233,43 +232,11 @@ impl MeshPart {
     }
 
     /// Replaces the geometry and schedules it for upload before the next frame.
-    pub fn set_mesh(&mut self, mesh: Mesh) {
+    pub fn with_mesh(mut self, mesh: Mesh) -> Self {
         self.bounding_radius = mesh_bounding_radius(&mesh);
         self.mesh = MeshHandle::from_parts(mesh, self.material_slots.clone());
         self.mesh_revision = self.mesh_revision.wrapping_add(1);
-    }
-
-    /// Assigns the same material to all six directional slots.
-    pub fn set_material(&mut self, material: Material) {
-        for slot in Face::ALL {
-            self.set_material_slot(slot, material);
-        }
-    }
-
-    /// Assigns a material to a mesh-selected directional slot.
-    pub fn set_material_slot(&mut self, slot: Face, material: Material) {
-        self.material_slots.set(slot, material);
-    }
-
-    /// Returns the material if all directional slots have the same effective material.
-    ///
-    /// Unassigned slots use [`Material::default()`] when compared.
-    pub fn material(&self) -> Option<&Material> {
-        let material = self.material_slot(Face::ALL[0]);
-        if Face::ALL
-            .into_iter()
-            .skip(1)
-            .all(|slot| self.material_slot(slot) == material)
-        {
-            Some(material)
-        } else {
-            None
-        }
-    }
-
-    /// Returns the effective material for a mesh slot.
-    pub fn material_slot(&self, slot: Face) -> &Material {
-        self.material_slots.get(slot).unwrap_or(&DEFAULT_MATERIAL)
+        self
     }
 
     pub(crate) fn mesh_revision(&self) -> u64 {
@@ -283,17 +250,33 @@ impl MeshPart {
 
 crate::impl_instance!(MeshPart, class_name = "MeshPart", data = basepart.instance,);
 
-impl Deref for MeshPart {
-    type Target = BasePart;
+impl HasPVInstance for MeshPart {
+    fn pv(&self) -> &PVInstance {
+        self.basepart.pv()
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.basepart
+    fn pv_mut(&mut self) -> &mut PVInstance {
+        self.basepart.pv_mut()
     }
 }
 
-impl DerefMut for MeshPart {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+impl HasBasePart for MeshPart {
+    fn base_part(&self) -> &BasePart {
+        &self.basepart
+    }
+
+    fn base_part_mut(&mut self) -> &mut BasePart {
         &mut self.basepart
+    }
+}
+
+impl HasMaterials for MeshPart {
+    fn material_slots(&self) -> &MeshMaterialSlots {
+        &self.material_slots
+    }
+
+    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
+        &mut self.material_slots
     }
 }
 
@@ -582,28 +565,26 @@ fn import_material(
         return Ok(Material::default());
     };
     let pbr = source.pbr_metallic_roughness();
-    let mut material = Material {
-        base_color: pbr.base_color_factor(),
-        metallic: pbr.metallic_factor(),
-        roughness: pbr.roughness_factor(),
-        emissive: source.emissive_factor(),
-        ..Material::default()
-    };
+    let mut material = Material::default()
+        .with_base_color(pbr.base_color_factor())
+        .with_metallic(pbr.metallic_factor())
+        .with_roughness(pbr.roughness_factor())
+        .with_emissive(source.emissive_factor());
 
     if let Some(info) = pbr.base_color_texture() {
         require_tex_coord_zero(info.tex_coord())?;
-        material.textures.base_color = Some(import_texture(
+        material = material.with_base_color_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Srgb,
             images,
             workspace,
             texture_cache,
         )?);
-        material.filter = import_filter(info.texture().sampler());
+        material = material.with_filter(import_filter(info.texture().sampler()));
     }
     if let Some(info) = source.normal_texture() {
         require_tex_coord_zero(info.tex_coord())?;
-        material.textures.normal = Some(import_texture(
+        material = material.with_normal_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Linear,
             images,
@@ -611,12 +592,12 @@ fn import_material(
             texture_cache,
         )?);
         if pbr.base_color_texture().is_none() {
-            material.filter = import_filter(info.texture().sampler());
+            material = material.with_filter(import_filter(info.texture().sampler()));
         }
     }
     if let Some(info) = pbr.metallic_roughness_texture() {
         require_tex_coord_zero(info.tex_coord())?;
-        material.textures.metallic_roughness = Some(import_texture(
+        material = material.with_metallic_roughness_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Linear,
             images,
@@ -624,12 +605,12 @@ fn import_material(
             texture_cache,
         )?);
         if pbr.base_color_texture().is_none() && source.normal_texture().is_none() {
-            material.filter = import_filter(info.texture().sampler());
+            material = material.with_filter(import_filter(info.texture().sampler()));
         }
     }
     if let Some(info) = source.emissive_texture() {
         require_tex_coord_zero(info.tex_coord())?;
-        material.textures.emissive = Some(import_texture(
+        material = material.with_emissive_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Srgb,
             images,
@@ -640,7 +621,7 @@ fn import_material(
             && source.normal_texture().is_none()
             && pbr.metallic_roughness_texture().is_none()
         {
-            material.filter = import_filter(info.texture().sampler());
+            material = material.with_filter(import_filter(info.texture().sampler()));
         }
     }
     Ok(material)
@@ -764,14 +745,14 @@ mod tests {
 
     #[test]
     fn material_returns_only_uniform_effective_slots() {
-        let mut meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).named("part");
+        let meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).named("part");
         assert_eq!(meshpart.material(), Some(&Material::default()));
 
         let material = Material::from_color(crate::Color3::new(1.0, 0.0, 0.0));
-        meshpart.set_material(material);
+        let meshpart = meshpart.with_material(material);
         assert_eq!(meshpart.material(), Some(&material));
 
-        meshpart.set_material_slot(Face::Top, Material::default());
+        let meshpart = meshpart.with_material_slot(Face::Top, Material::default());
         assert_eq!(meshpart.material(), None);
     }
 
@@ -816,7 +797,7 @@ mod tests {
             let texture_handles = Face::ALL
                 .into_iter()
                 .flat_map(|slot| {
-                    let textures = meshpart.material_slot(slot).textures;
+                    let textures = meshpart.material_slot(slot).textures();
                     [
                         textures.base_color,
                         textures.normal,

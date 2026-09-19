@@ -2,8 +2,10 @@ use super::*;
 
 impl Renderer {
     /// Sets the color used to clear the color attachment before each frame.
-    pub fn set_clear_color(&mut self, color: wgpu::Color) {
+    ///
+    pub fn set_clear_color(&mut self, color: wgpu::Color) -> &mut Self {
         self.clear_color = color;
+        self
     }
 
     /// Returns the average number of successfully rendered frames per second over the last

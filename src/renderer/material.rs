@@ -34,24 +34,19 @@ pub struct TextureSet {
 /// The metallic-roughness map follows the glTF convention: metallic is read
 /// from the blue channel and roughness from the green channel. Scalar factors
 /// are resolved per face, so each directional [`Face`] renders its own
-/// base color, metallic, roughness, and emissive values; the part tint
-/// ([`crate::BasePart::color`]) still multiplies every face.
+/// base color, metallic, roughness, and emissive values.
+///
+/// Note that [`crate::HasBasePart::color`] still multiplies every face.
 ///
 /// Texture sampling for each slot uses that slot's [`Material::filter`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
-    /// RGBA multiplier for the base color. Values are not clamped on assignment.
-    pub base_color: [f32; 4],
-    /// Metallic factor, clamped to `0.0..=1.0` during rendering.
-    pub metallic: f32,
-    /// Roughness factor, clamped to `0.04..=1.0` during rendering.
-    pub roughness: f32,
-    /// RGB emissive contribution added after direct and ambient lighting.
-    pub emissive: [f32; 3],
-    /// Optional texture maps multiplied by the scalar factors.
-    pub textures: TextureSet,
-    /// Texture sampling filter used for this material's texture maps.
-    pub filter: TextureFilter,
+    base_color: [f32; 4],
+    metallic: f32,
+    roughness: f32,
+    emissive: [f32; 3],
+    textures: TextureSet,
+    filter: TextureFilter,
 }
 
 impl Default for Material {
@@ -75,6 +70,66 @@ pub(crate) const DEFAULT_MATERIAL: Material = Material {
 };
 
 impl Material {
+    /// RGBA multiplier for the base color. Values are not clamped on assignment.
+    pub fn base_color(&self) -> [f32; 4] {
+        self.base_color
+    }
+
+    /// Metallic factor, clamped to `0.0..=1.0` during rendering.
+    pub fn metallic(&self) -> f32 {
+        self.metallic
+    }
+
+    /// Roughness factor, clamped to `0.04..=1.0` during rendering.
+    pub fn roughness(&self) -> f32 {
+        self.roughness
+    }
+
+    /// RGB emissive contribution added after direct and ambient lighting.
+    pub fn emissive(&self) -> [f32; 3] {
+        self.emissive
+    }
+
+    /// Optional texture maps multiplied by the scalar factors.
+    pub fn textures(&self) -> TextureSet {
+        self.textures
+    }
+
+    /// Texture sampling filter used for this material's texture maps.
+    pub fn filter(&self) -> TextureFilter {
+        self.filter
+    }
+
+    /// Sets the RGBA multiplier for the base color. Values are not clamped on assignment.
+    pub fn with_base_color(mut self, base_color: [f32; 4]) -> Self {
+        self.base_color = base_color;
+        self
+    }
+
+    /// Sets the metallic factor, clamped to `0.0..=1.0` during rendering.
+    pub fn with_metallic(mut self, metallic: f32) -> Self {
+        self.metallic = metallic;
+        self
+    }
+
+    /// Sets the roughness factor, clamped to `0.04..=1.0` during rendering.
+    pub fn with_roughness(mut self, roughness: f32) -> Self {
+        self.roughness = roughness;
+        self
+    }
+
+    /// Sets the RGB emissive contribution added after direct and ambient lighting.
+    pub fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
+        self.emissive = emissive;
+        self
+    }
+
+    /// Sets texture maps multiplied by the scalar factors.
+    pub fn with_textures(mut self, textures: TextureSet) -> Self {
+        self.textures = textures;
+        self
+    }
+
     /// Creates a material using a texture as its base-color map.
     pub fn textured(texture: TextureHandle) -> Self {
         Self::default().with_base_color_texture(texture)
@@ -129,13 +184,6 @@ impl Material {
 /// remaining slots in [`Face::ALL`] order. Entries are
 /// `Some` only for slots assigned through [`MeshMaterialSlots::set`]; skipped
 /// slots stay `None` and fall back to [`Material::default()`] at render time.
-///
-/// Slots are directional (see [`Face`]), so the same slot names work
-/// for every shape: setting [`Face::Top`] affects the top-facing
-/// triangles of a [`crate::PartShape::Block`], [`crate::PartShape::Cylinder`],
-/// [`crate::PartShape::Wedge`], or any custom [`crate::Mesh`] whose vertices
-/// are tagged by orientation. Unset slots fall back to the default material at
-/// render time, including its scalar PBR factors.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshMaterialSlots {
     /// Materials stored by directional slot order.
@@ -261,7 +309,7 @@ impl Image {
     /// # Panics
     ///
     /// Panics if (`x`, `y`) is outside the image dimensions.
-    pub fn set_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
+    pub fn with_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
         let start = pixel_index(self.width, self.height, x, y);
         self.pixels[start..start + 4].copy_from_slice(&pixel);
         self
@@ -818,13 +866,37 @@ mod tests {
         assert_eq!(texture.color_space, TextureColorSpace::Linear);
 
         let material = Material::default();
-        assert_eq!(material.base_color, [1.0, 1.0, 1.0, 1.0]);
-        assert_eq!(material.metallic, 0.0);
-        assert_eq!(material.roughness, 0.5);
-        assert!(material.textures.base_color.is_none());
-        assert!(material.textures.normal.is_none());
-        assert!(material.textures.metallic_roughness.is_none());
-        assert!(material.textures.emissive.is_none());
+        assert_eq!(material.base_color(), [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(material.metallic(), 0.0);
+        assert_eq!(material.roughness(), 0.5);
+        assert!(material.textures().base_color.is_none());
+        assert!(material.textures().normal.is_none());
+        assert!(material.textures().metallic_roughness.is_none());
+        assert!(material.textures().emissive.is_none());
+    }
+
+    #[test]
+    fn material_builders_round_trip_all_fields_through_getters() {
+        let textures = TextureSet {
+            base_color: Some(TextureHandle(1)),
+            normal: Some(TextureHandle(2)),
+            metallic_roughness: Some(TextureHandle(3)),
+            emissive: Some(TextureHandle(4)),
+        };
+        let material = Material::default()
+            .with_base_color([0.1, 0.2, 0.3, 0.4])
+            .with_metallic(0.6)
+            .with_roughness(0.7)
+            .with_emissive([0.8, 0.9, 1.0])
+            .with_textures(textures)
+            .with_filter(TextureFilter::Nearest);
+
+        assert_eq!(material.base_color(), [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(material.metallic(), 0.6);
+        assert_eq!(material.roughness(), 0.7);
+        assert_eq!(material.emissive(), [0.8, 0.9, 1.0]);
+        assert_eq!(material.textures(), textures);
+        assert_eq!(material.filter(), TextureFilter::Nearest);
     }
 
     #[test]
@@ -836,7 +908,7 @@ mod tests {
             .with_emissive_texture(TextureHandle(10));
 
         assert_eq!(
-            material.textures,
+            material.textures(),
             TextureSet {
                 base_color: Some(texture),
                 normal: Some(TextureHandle(8)),
@@ -1026,7 +1098,7 @@ mod tests {
     fn image_transforms_mirror_the_texture_api() {
         let mut image = Image::from_rgba8(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
         assert_eq!(image.pixel(1, 0), [5, 6, 7, 8]);
-        image.set_pixel(0, 0, [9, 9, 9, 9]);
+        image.with_pixel(0, 0, [9, 9, 9, 9]);
         assert_eq!(image.pixel(0, 0), [9, 9, 9, 9]);
 
         image = image.flip_horizontal().flip_vertical();

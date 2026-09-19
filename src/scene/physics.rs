@@ -8,16 +8,16 @@ use rapier3d::prelude::{
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Instance, InstanceId, Part, PartShape,
+    BasePart, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId, Part, PartShape,
     glam::{Mat4, Quat, Vec3},
 };
 
 /// A Rapier-backed physics simulation synchronized with workspace parts.
 ///
 /// [`Workspace`](crate::Workspace) creates one automatically when the `physics` feature is
-/// enabled. Parts with [`BasePart::anchored`] set to `false` are simulated as dynamic rigid
-/// bodies; anchored parts are fixed rigid bodies. Use [`Self::rapier_mut`] for forces, impulses,
-/// joints, and other advanced Rapier operations.
+/// enabled. Parts with [`HasBasePart::anchored`](crate::HasBasePart::anchored) set to `false`
+/// are simulated as dynamic rigid bodies; anchored parts are fixed rigid bodies.
+/// Use [`Self::rapier_mut`] for forces, impulses, joints, and other advanced Rapier operations.
 pub struct PhysicsWorld {
     world: RapierPhysicsWorld,
     bodies: HashMap<InstanceId, BodyEntry>,
@@ -62,8 +62,10 @@ impl PhysicsWorld {
     }
 
     /// Sets the gravity applied to dynamic bodies, in world units per second squared.
-    pub fn set_gravity(&mut self, gravity: Vec3) {
+    ///
+    pub fn with_gravity(&mut self, gravity: Vec3) -> &mut Self {
         self.world.gravity = rapier_vector(gravity);
+        self
     }
 
     /// Returns Rapier's integration parameters.
@@ -261,18 +263,22 @@ impl fmt::Debug for PhysicsWorld {
 impl PhysicsInstance {
     pub(crate) fn from_instance(instance: &dyn Instance) -> Option<Self> {
         if let Some(part) = instance.downcast_ref::<Part>() {
-            return Some(Self::from_base_part(part.id(), part, part.shape));
+            return Some(Self::from_traits(part.id(), part, part.shape()));
         }
         #[cfg(feature = "meshpart")]
         if let Some(part) = instance.downcast_ref::<MeshPart>() {
-            return Some(Self::from_base_part(part.id(), part, PartShape::Block));
+            return Some(Self::from_traits(part.id(), part, PartShape::Block));
         }
         instance
             .downcast_ref::<BasePart>()
-            .map(|part| Self::from_base_part(part.id(), part, PartShape::Block))
+            .map(|part| Self::from_traits(part.id(), part, PartShape::Block))
     }
 
-    fn from_base_part(id: InstanceId, part: &BasePart, shape: PartShape) -> Self {
+    fn from_traits<T: HasBasePart + HasPVInstance>(
+        id: InstanceId,
+        part: &T,
+        shape: PartShape,
+    ) -> Self {
         Self {
             id,
             transform: part.pivot(),
@@ -288,16 +294,16 @@ impl PhysicsInstance {
 
 pub(crate) fn apply_transform(instance: &mut dyn Instance, transform: Mat4) {
     if let Some(part) = instance.downcast_mut::<Part>() {
-        part.pivot_to(transform);
+        part.with_pivot(transform);
         return;
     }
     #[cfg(feature = "meshpart")]
     if let Some(part) = instance.downcast_mut::<MeshPart>() {
-        part.pivot_to(transform);
+        part.with_pivot(transform);
         return;
     }
     if let Some(part) = instance.downcast_mut::<BasePart>() {
-        part.pivot_to(transform);
+        part.with_pivot(transform);
     }
 }
 
@@ -372,21 +378,21 @@ fn matrices_approximately_equal(left: Mat4, right: Mat4) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Workspace;
+    use crate::{HasPVInstance, HasPart, Workspace};
 
     #[test]
     fn dynamic_parts_fall_and_rest_on_anchored_parts() {
         let mut workspace = Workspace::new();
 
-        let mut floor = Part::new();
-        floor.set_size(Vec3::new(10.0, 1.0, 10.0));
-        floor.set_position(Vec3::new(0.0, -0.5, 0.0));
+        let floor = Part::new()
+            .with_size(Vec3::new(10.0, 1.0, 10.0))
+            .with_position(Vec3::new(0.0, -0.5, 0.0));
         floor.set_parent(&mut workspace);
 
-        let mut ball = Part::new();
-        ball.shape = PartShape::Ball;
-        ball.set_anchored(false);
-        ball.set_position(Vec3::new(0.0, 3.0, 0.0));
+        let ball = Part::new()
+            .with_shape(PartShape::Ball)
+            .with_anchored(false)
+            .with_position(Vec3::new(0.0, 3.0, 0.0));
         let ball_id = ball.set_parent(&mut workspace);
 
         for _ in 0..120 {

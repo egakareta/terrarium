@@ -33,14 +33,14 @@ impl Renderer {
             .filter_map(|(index, material)| material.as_ref().map(|material| (index, material)))
         {
             let slot = index;
-            textures.base_color[slot] = resolve(self, material.textures.base_color, base_color)?;
-            textures.normal[slot] = resolve(self, material.textures.normal, normal)?;
+            textures.base_color[slot] = resolve(self, material.textures().base_color, base_color)?;
+            textures.normal[slot] = resolve(self, material.textures().normal, normal)?;
             textures.metallic_roughness[slot] = resolve(
                 self,
-                material.textures.metallic_roughness,
+                material.textures().metallic_roughness,
                 metallic_roughness,
             )?;
-            textures.emissive[slot] = resolve(self, material.textures.emissive, emissive)?;
+            textures.emissive[slot] = resolve(self, material.textures().emissive, emissive)?;
         }
         Ok(textures)
     }
@@ -56,7 +56,7 @@ impl Renderer {
             .enumerate()
         {
             if let Some(material) = material {
-                filters[index] = material.filter;
+                filters[index] = material.filter();
             }
         }
         filters

@@ -1,6 +1,6 @@
 use terrarium::{
-    Instance, Material, Part, PartShape, RendererError, Terrarium, Texture, TextureColorSpace,
-    glam::Vec3,
+    HasBasePart, HasMaterials, HasPVInstance, HasPart, Instance, Material, Part, PartShape,
+    RendererError, Terrarium, Texture, TextureColorSpace, glam::Vec3,
 };
 
 #[test]
@@ -16,12 +16,14 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
                 TextureColorSpace::Srgb,
             )?)?;
 
-            engine.add_child_with(Part::new().named("Lantern"), |part| {
-                part.shape = PartShape::Block;
-                part.set_position(Vec3::new(0.0, 1.0, 0.0));
-                part.set_size(Vec3::new(2.0, 2.0, 2.0));
-                part.set_material(Material::textured(lantern));
-            });
+            engine.add_child(
+                Part::new()
+                    .named("Lantern")
+                    .with_shape(PartShape::Block)
+                    .with_position(Vec3::new(0.0, 1.0, 0.0))
+                    .with_size(Vec3::new(2.0, 2.0, 2.0))
+                    .with_material(Material::textured(lantern)),
+            );
             Ok::<(), RendererError>(())
         })
         .unwrap()

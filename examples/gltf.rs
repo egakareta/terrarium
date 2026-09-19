@@ -1,10 +1,11 @@
-use terrarium::{Engine, GltfError, Instance, MeshPart, Terrarium, glam::Vec3};
+use terrarium::{Engine, GltfError, HasPVInstance as _, Instance, MeshPart, Terrarium, glam::Vec3};
 
 fn initialize(engine: &mut Engine) -> Result<(), GltfError> {
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     let helmet_mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
-    let mut helmet = MeshPart::new(helmet_mesh).named("DamagedHelmet");
-    helmet.set_position(Vec3::new(0.0, 0.75, 0.0));
+    let helmet = MeshPart::new(helmet_mesh)
+        .named("DamagedHelmet")
+        .with_position(Vec3::new(0.0, 0.75, 0.0));
     engine.add_child(helmet);
     Ok(())
 }
@@ -15,6 +16,7 @@ fn main() {
 
 #[test]
 fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
+    use terrarium::HasMaterials as _;
     let engine = Terrarium::new()
         .with_size([128, 128])
         .with_headless(Some(1))
@@ -24,7 +26,7 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
     assert!(
         terrarium::Face::ALL.into_iter().any(|slot| meshpart
             .material_slot(slot)
-            .textures
+            .textures()
             .emissive
             .is_some())
     );

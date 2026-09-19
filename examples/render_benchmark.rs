@@ -6,8 +6,9 @@ use std::{
 };
 
 use terrarium::{
-    App, Camera, Color3, Engine, Face, Instance, InstanceId, Material, Part, PartShape,
-    RendererError, Terrarium, Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
+    App, Camera, Color3, Engine, Face, HasBasePart, HasCamera, HasMaterials, HasPVInstance,
+    HasPart, Instance, InstanceId, Material, Part, PartShape, RendererError, Terrarium, Texture,
+    TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
 };
@@ -167,12 +168,10 @@ impl Benchmark {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        engine
-            .current_camera
-            .pivot_to(Mat4::from_rotation_translation(
-                camera_rotation,
-                camera_position * camera_scale,
-            ));
+        (&mut engine.current_camera).with_pivot(Mat4::from_rotation_translation(
+            camera_rotation,
+            camera_position * camera_scale,
+        ));
 
         for offset in 0..animated_count {
             let index = (self.animation_pool_start + offset) % part_count;
@@ -198,15 +197,15 @@ impl Benchmark {
                         (motion.cos() * 18.0).to_radians(),
                         ((motion * 0.7).sin() * 10.0).to_radians(),
                     );
-                part.pivot_to(Mat4::from_rotation_translation(rotation, position));
-                part.set_size(
-                    base.size() * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35),
-                );
-                part.set_color(Color3::new(
-                    (base.color().r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
-                    (base.color().g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
-                    (base.color().b + (color_shift + 4.2).sin() * 0.18).clamp(0.0, 1.0),
-                ));
+                part.with_pivot(Mat4::from_rotation_translation(rotation, position))
+                    .with_size(
+                        base.size() * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35),
+                    )
+                    .with_color(Color3::new(
+                        (base.color().r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
+                        (base.color().g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
+                        (base.color().b + (color_shift + 4.2).sin() * 0.18).clamp(0.0, 1.0),
+                    ));
             }
         }
         self.animation_frame += 1;
@@ -227,28 +226,28 @@ impl Benchmark {
         self.upper_layer_ids.reserve(block_count);
 
         for _ in 0..block_count {
-            let mut block = Part::new();
-            block.shape = PartShape::Block;
-            block.pivot_to(Mat4::from_rotation_translation(
-                Quat::from_rotation_y(self.random_f32() * std::f32::consts::TAU),
-                Vec3::new(
-                    (self.random_f32() - 0.5) * self.upper_layer_extent,
-                    DYNAMIC_LAYER_HEIGHT + self.random_f32() * 0.1,
-                    (self.random_f32() - 0.5) * self.upper_layer_extent,
-                ),
-            ));
-            block.set_size(Vec3::splat(0.82));
-            block.set_color(Color3::new(
+            let rotation = Quat::from_rotation_y(self.random_f32() * std::f32::consts::TAU);
+            let position = Vec3::new(
+                (self.random_f32() - 0.5) * self.upper_layer_extent,
+                DYNAMIC_LAYER_HEIGHT + self.random_f32() * 0.1,
+                (self.random_f32() - 0.5) * self.upper_layer_extent,
+            );
+            let color = Color3::new(
                 0.30 + self.random_f32() * 0.22,
                 0.34 + self.random_f32() * 0.22,
                 0.44 + self.random_f32() * 0.22,
-            ));
+            );
+            let mut block = Part::new()
+                .with_shape(PartShape::Block)
+                .with_pivot(Mat4::from_rotation_translation(rotation, position))
+                .with_size(Vec3::splat(0.82))
+                .with_color(color);
             if self.random_f32() < 1.0 / TEXTURED_PART_DIVISOR as f32 {
                 let slot = Face::ALL[(self.next_random() % Face::ALL.len() as u64) as usize];
                 let material_index =
                     (self.next_random() % self.benchmark_materials.len() as u64) as usize;
                 let material = self.benchmark_materials[material_index];
-                block.set_material_slot(slot, material);
+                block = block.with_material_slot(slot, material);
             }
             self.upper_layer_ids
                 .push(block.set_parent(&mut engine.workspace));
@@ -270,9 +269,9 @@ impl Benchmark {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
         if let Some(part) = engine.get_mut::<Part>(id) {
-            part.pivot_to(base.pivot());
-            part.set_size(base.size());
-            part.set_color(base.color());
+            part.with_pivot(base.pivot())
+                .with_size(base.size())
+                .with_color(base.color());
         }
     }
 }
@@ -324,51 +323,51 @@ fn create_benchmark_workspace(
         Vec3::ZERO,
         width as f32 / height.max(1) as f32,
     );
-    workspace.current_camera.zfar = camera_distance * 4.0 + extent;
+    (&mut workspace.current_camera).with_zfar(camera_distance * 4.0 + extent);
     let mut part_ids = Vec::with_capacity(part_count);
 
     for index in 0..part_count {
         let column = index % side;
         let row = index / side;
-        let mut part = Part::new();
-        part.shape = match index % 5 {
-            0 => PartShape::Block,
-            1 => PartShape::Ball,
-            2 => PartShape::Cylinder,
-            3 => PartShape::Wedge,
-            _ => PartShape::CornerWedge,
-        };
-        part.pivot_to(Mat4::from_rotation_translation(
-            Quat::from_rotation_y(((index % 360) as f32).to_radians()),
-            Vec3::new(
-                (column as f32 - side as f32 * 0.5) * spacing,
-                0.35 + (index % 7) as f32 * 0.06,
-                (row as f32 - side as f32 * 0.5) * spacing,
-            ),
-        ));
-        part.set_size(Vec3::splat(0.82));
-        part.set_color(Color3::new(
-            0.24 + (index % 5) as f32 * 0.12,
-            0.32 + (index % 3) as f32 * 0.16,
-            0.40 + (index % 4) as f32 * 0.11,
-        ));
+        let mut part = Part::new()
+            .with_shape(match index % 5 {
+                0 => PartShape::Block,
+                1 => PartShape::Ball,
+                2 => PartShape::Cylinder,
+                3 => PartShape::Wedge,
+                _ => PartShape::CornerWedge,
+            })
+            .with_pivot(Mat4::from_rotation_translation(
+                Quat::from_rotation_y(((index % 360) as f32).to_radians()),
+                Vec3::new(
+                    (column as f32 - side as f32 * 0.5) * spacing,
+                    0.35 + (index % 7) as f32 * 0.06,
+                    (row as f32 - side as f32 * 0.5) * spacing,
+                ),
+            ))
+            .with_size(Vec3::splat(0.82))
+            .with_color(Color3::new(
+                0.24 + (index % 5) as f32 * 0.12,
+                0.32 + (index % 3) as f32 * 0.16,
+                0.40 + (index % 4) as f32 * 0.11,
+            ));
         if index.is_multiple_of(TEXTURED_PART_DIVISOR) {
             let slot = Face::ALL[index % Face::ALL.len()];
             let material =
                 benchmark_materials[(index / TEXTURED_PART_DIVISOR) % benchmark_materials.len()];
-            part.set_material_slot(slot, material);
+            part = part.with_material_slot(slot, material);
         }
         part_ids.push(part.set_parent(workspace));
     }
 
-    let mut floor = Part::new();
-    floor.pivot_to(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)));
-    floor.set_size(Vec3::new(
-        extent + spacing * 2.0,
-        0.1,
-        extent + spacing * 2.0,
-    ));
-    floor.set_color(Color3::new(0.08, 0.10, 0.14));
+    let floor = Part::new()
+        .with_pivot(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)))
+        .with_size(Vec3::new(
+            extent + spacing * 2.0,
+            0.1,
+            extent + spacing * 2.0,
+        ))
+        .with_color(Color3::new(0.08, 0.10, 0.14));
     floor.set_parent(workspace);
 
     Ok((part_ids, extent, benchmark_materials))
@@ -403,26 +402,25 @@ fn load_benchmark_materials(workspace: &mut Workspace) -> Result<Vec<Material>, 
         TextureColorSpace::Srgb,
     )?)?;
 
-    let mut cobblestone_material = Material::textured(cobblestone);
-    cobblestone_material.roughness = 0.82;
+    let cobblestone_material = Material::textured(cobblestone).with_roughness(0.82);
 
-    let mut dirt_material = Material::textured(dirt);
-    dirt_material.roughness = 0.9;
+    let dirt_material = Material::textured(dirt).with_roughness(0.9);
 
-    let mut grass_top_material = Material::textured(grass_top).with_filter(TextureFilter::Nearest);
-    grass_top_material.roughness = 0.82;
+    let grass_top_material = Material::textured(grass_top)
+        .with_filter(TextureFilter::Nearest)
+        .with_roughness(0.82);
 
-    let mut grass_side_material =
-        Material::textured(grass_side).with_filter(TextureFilter::Nearest);
-    grass_side_material.roughness = 0.82;
+    let grass_side_material = Material::textured(grass_side)
+        .with_filter(TextureFilter::Nearest)
+        .with_roughness(0.82);
 
-    let mut castle_brick_material = Material::textured(castle_brick);
-    castle_brick_material.roughness = 0.75;
-    castle_brick_material.metallic = 0.05;
+    let castle_brick_material = Material::textured(castle_brick)
+        .with_roughness(0.75)
+        .with_metallic(0.05);
 
-    let mut lantern_material = Material::textured(festival_lantern);
-    lantern_material.roughness = 0.6;
-    lantern_material.emissive = [0.55, 0.32, 0.12];
+    let lantern_material = Material::textured(festival_lantern)
+        .with_roughness(0.6)
+        .with_emissive([0.55, 0.32, 0.12]);
 
     Ok(vec![
         cobblestone_material,

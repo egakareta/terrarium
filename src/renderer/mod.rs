@@ -256,16 +256,18 @@ struct MaterialSetKey([[u32; 9]; MATERIAL_SLOT_COUNT]);
 
 impl MaterialSetKey {
     fn base_bits(material: &Material) -> [u32; 9] {
+        let base_color = material.base_color();
+        let emissive = material.emissive();
         [
-            material.base_color[0].to_bits(),
-            material.base_color[1].to_bits(),
-            material.base_color[2].to_bits(),
-            material.base_color[3].to_bits(),
-            material.metallic.to_bits(),
-            material.roughness.to_bits(),
-            material.emissive[0].to_bits(),
-            material.emissive[1].to_bits(),
-            material.emissive[2].to_bits(),
+            base_color[0].to_bits(),
+            base_color[1].to_bits(),
+            base_color[2].to_bits(),
+            base_color[3].to_bits(),
+            material.metallic().to_bits(),
+            material.roughness().to_bits(),
+            emissive[0].to_bits(),
+            emissive[1].to_bits(),
+            emissive[2].to_bits(),
         ]
     }
 

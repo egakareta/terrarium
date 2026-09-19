@@ -1,6 +1,7 @@
 use terrarium::{
-    App, Color3, Engine, Instance, InstanceId, Material, Part, PartShape, PointLight,
-    RendererError, Terrarium, eframe, egui,
+    App, Color3, Engine, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart,
+    HasPointLight, Instance, InstanceId, Material, Part, PartShape, PointLight, RendererError,
+    Terrarium, eframe, egui,
     glam::{Mat4, Vec3},
 };
 
@@ -13,7 +14,7 @@ impl PhysicsApp {
     fn reset(&self, engine: &mut Engine) {
         for &(id, transform) in &self.initial_transforms {
             if let Some(part) = engine.get_mut::<Part>(id) {
-                part.pivot_to(transform);
+                part.with_pivot(transform);
             }
         }
     }
@@ -56,46 +57,49 @@ impl App for PhysicsApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
-    engine.lighting.set_clock_time(16.5);
+    engine.with_clock_time(16.5);
     engine.current_camera = terrarium::Camera::new(
         Vec3::new(10.0, 7.5, 13.0),
         Vec3::new(0.0, 2.2, 0.0),
         16.0 / 9.0,
-    );
-    engine.current_camera.zfar = 100.0;
+    )
+    .with_zfar(100.0);
 
-    let floor_material = Material {
-        roughness: 0.88,
-        ..Material::from_color(Color3::new(0.12, 0.16, 0.22))
-    };
-    engine.add_child_with(Part::new().named("Floor"), |part| {
-        part.set_size(Vec3::new(18.0, 0.5, 18.0));
-        part.set_position(Vec3::new(0.0, -0.25, 0.0));
-        part.set_material(floor_material);
-    });
+    let floor_material = Material::from_color(Color3::new(0.12, 0.16, 0.22)).with_roughness(0.88);
+    engine.add_child(
+        Part::new()
+            .named("Floor")
+            .with_size(Vec3::new(18.0, 0.5, 18.0))
+            .with_position(Vec3::new(0.0, -0.25, 0.0))
+            .with_material(floor_material),
+    );
 
     for (position, size) in [
         (Vec3::new(-4.0, 0.8, -1.5), Vec3::new(3.0, 1.6, 3.0)),
         (Vec3::new(4.0, 1.2, 1.0), Vec3::new(3.0, 2.4, 3.0)),
     ] {
-        engine.add_child_with(Part::new(), |part| {
-            part.set_size(size);
-            part.set_position(position);
-            part.set_color(Color3::new(0.18, 0.25, 0.34));
-        });
+        engine.add_child(
+            Part::new()
+                .with_size(size)
+                .with_position(position)
+                .with_color(Color3::new(0.18, 0.25, 0.34)),
+        );
     }
 
-    let light_anchor = engine.add_child_with_ref(Part::new().named("LightAnchor"), |part| {
-        part.set_can_collide(false);
-        part.set_size(Vec3::splat(0.1));
-        part.set_position(Vec3::new(0.0, 5.0, 2.0));
-    });
-    light_anchor.add_child_with(PointLight::new(), |light| {
-        light.color = Color3::new(1.0, 0.78, 0.55);
-        light.brightness = 8.0;
-        light.range = 18.0;
-        light.shadows = true;
-    });
+    let light_anchor = engine.add_child_ref(
+        Part::new()
+            .with_can_collide(false)
+            .with_size(Vec3::splat(0.1))
+            .with_position(Vec3::new(0.0, 5.0, 2.0))
+            .named("LightAnchor"),
+    );
+    light_anchor.add_child(
+        PointLight::new()
+            .with_color(Color3::new(1.0, 0.78, 0.55))
+            .with_brightness(8.0)
+            .with_shadows(true)
+            .with_range(18.0),
+    );
 
     let mut dynamic_parts = Vec::new();
     let mut initial_transforms = Vec::new();
@@ -111,26 +115,23 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
                 _ => PartShape::Cylinder,
             };
             let transform = Mat4::from_translation(position);
-            let id = engine.add_child_with(Part::new(), |part| {
-                part.shape = shape;
-                part.set_anchored(false);
-                part.set_size(if shape == PartShape::Ball {
-                    Vec3::splat(0.9)
-                } else {
-                    Vec3::new(0.95, 0.95, 0.95)
-                });
-                part.set_color(Color3::new(
-                    0.24 + (index % 3) as f32 * 0.18,
-                    0.42 + (index % 2) as f32 * 0.18,
-                    0.72 - (index % 4) as f32 * 0.08,
-                ));
-                part.set_position(position);
-                part.set_material(Material {
-                    metallic: 0.12,
-                    roughness: 0.3,
-                    ..Material::default()
-                });
-            });
+            let id = engine.add_child(
+                Part::new()
+                    .with_shape(shape)
+                    .with_anchored(false)
+                    .with_size(if shape == PartShape::Ball {
+                        Vec3::splat(0.9)
+                    } else {
+                        Vec3::new(0.95, 0.95, 0.95)
+                    })
+                    .with_color(Color3::new(
+                        0.24 + (index % 3) as f32 * 0.18,
+                        0.42 + (index % 2) as f32 * 0.18,
+                        0.72 - (index % 4) as f32 * 0.08,
+                    ))
+                    .with_position(position)
+                    .with_material(Material::default().with_metallic(0.12).with_roughness(0.3)),
+            );
             dynamic_parts.push(id);
             initial_transforms.push((id, transform));
         }

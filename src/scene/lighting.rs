@@ -118,9 +118,11 @@ impl Lighting {
     }
 
     /// Replaces the lighting skybox.
-    pub fn set_skybox(&mut self, skybox: Skybox) {
+    ///
+    pub fn with_skybox(&mut self, skybox: Skybox) -> &mut Self {
         self.skybox = Some(skybox);
         self.skybox_revision = self.skybox_revision.wrapping_add(1);
+        self
     }
 
     /// Removes the lighting skybox.
@@ -140,19 +142,22 @@ impl Lighting {
     }
 
     /// Sets the time of day in hours and moves the sun along its path.
-    pub fn set_clock_time(&mut self, hours: f32) {
+    ///
+    pub fn with_clock_time(&mut self, hours: f32) -> &mut Self {
         self.clock_time = wrap_clock_time(hours);
         self.direction_override = None;
+        self
     }
 
     /// Advances the time of day by `hours_per_second` for the elapsed real time.
     ///
     /// Non-finite inputs are ignored. Positive rates move time forward and
     /// negative rates move it backward.
-    pub fn advance_clock_time(&mut self, delta_seconds: f32, hours_per_second: f32) {
+    pub fn advance_clock_time(&mut self, delta_seconds: f32, hours_per_second: f32) -> &mut Self {
         if delta_seconds.is_finite() && hours_per_second.is_finite() {
-            self.set_clock_time(self.clock_time + delta_seconds * hours_per_second);
+            self.with_clock_time(self.clock_time + delta_seconds * hours_per_second);
         }
+        self
     }
 
     /// Returns the time as a `HH:MM:SS` string.
@@ -165,7 +170,8 @@ impl Lighting {
     }
 
     /// Parses and sets a `HH:MM:SS` time.
-    pub fn set_time_of_day(&mut self, time: &str) -> Result<(), TimeOfDayError> {
+    ///
+    pub fn with_time_of_day(&mut self, time: &str) -> Result<&mut Self, TimeOfDayError> {
         let mut components = time.split(':');
         let hours = components
             .next()
@@ -186,12 +192,12 @@ impl Lighting {
         {
             return Err(TimeOfDayError::InvalidFormat);
         }
-        self.set_clock_time(
+        self.with_clock_time(
             hours.unwrap() as f32
                 + minutes.unwrap() as f32 / 60.0
                 + seconds.unwrap() as f32 / 3600.0,
         );
-        Ok(())
+        Ok(self)
     }
 
     /// Returns minutes elapsed since midnight.
@@ -200,8 +206,10 @@ impl Lighting {
     }
 
     /// Sets the time using minutes elapsed since midnight.
-    pub fn set_minutes_after_midnight(&mut self, minutes: f32) {
-        self.set_clock_time(minutes / 60.0);
+    ///
+    pub fn with_minutes_after_midnight(&mut self, minutes: f32) -> &mut Self {
+        self.with_clock_time(minutes / 60.0);
+        self
     }
 
     /// Returns the unit vector pointing from the scene toward the sun.
@@ -217,10 +225,12 @@ impl Lighting {
 
     /// Sets an explicit sun direction and updates `ClockTime` to its nearest
     /// matching hour.
-    pub fn set_sun_direction(&mut self, direction: Vec3) {
+    ///
+    pub fn with_sun_direction(&mut self, direction: Vec3) -> &mut Self {
         let direction = sanitize_direction(direction);
         self.direction_override = Some(direction);
         self.clock_time = nearest_clock_time(direction);
+        self
     }
 
     /// Returns the direction of the moon, opposite the sun direction.
@@ -328,19 +338,19 @@ mod tests {
         let mut lighting = Lighting::default();
         assert_eq!(lighting.time_of_day(), "12:00:00");
 
-        lighting.set_time_of_day("23:15:30").unwrap();
+        lighting.with_time_of_day("23:15:30").unwrap();
         assert!((lighting.clock_time() - 23.258333).abs() < 0.00001);
         assert!((lighting.get_minutes_after_midnight() - 1395.5).abs() < 0.0001);
         assert_eq!(lighting.time_of_day(), "23:15:30");
 
-        lighting.set_minutes_after_midnight(90.0);
+        lighting.with_minutes_after_midnight(90.0);
         assert_eq!(lighting.time_of_day(), "01:30:00");
         assert_eq!(
-            lighting.set_time_of_day("not-a-time"),
+            lighting.with_time_of_day("not-a-time").map(|_| ()),
             Err(TimeOfDayError::InvalidFormat)
         );
 
-        lighting.set_clock_time(23.5);
+        lighting.with_clock_time(23.5);
         lighting.advance_clock_time(4.0, 0.25);
         assert!((lighting.clock_time() - 0.5).abs() < f32::EPSILON);
     }
@@ -348,16 +358,16 @@ mod tests {
     #[test]
     fn night_removes_direct_sunlight_and_latitude_tilts_the_path() {
         let mut lighting = Lighting::default();
-        lighting.set_clock_time(0.0);
+        lighting.with_clock_time(0.0);
         assert_eq!(lighting.daylight_factor(), 0.0);
         assert!(lighting.sun_direction().y < 0.0);
 
-        lighting.set_clock_time(12.0);
+        lighting.with_clock_time(12.0);
         let equator_noon = lighting.sun_direction();
         assert!(lighting.daylight_factor() > 0.99);
 
         lighting.geographic_latitude = 45.0;
-        lighting.set_clock_time(12.0);
+        lighting.with_clock_time(12.0);
         assert!((lighting.sun_direction() - equator_noon).length() > 0.01);
     }
 }

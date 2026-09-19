@@ -1,5 +1,7 @@
+#[cfg(feature = "meshpart")]
+use crate::MeshPart;
 use crate::{
-    BasePart, Color3, InstanceId, Part, Workspace,
+    BasePart, Color3, HasBasePart, HasPVInstance, InstanceId, Part, Workspace,
     glam::{Vec2, Vec3, Vec4},
 };
 
@@ -387,19 +389,27 @@ impl TweenTrack {
         match self {
             Self::Position { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| part.set_position(value));
+                with_base_part(workspace, *target, |part| {
+                    part.with_position(value);
+                });
             }
             Self::Orientation { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| part.set_orientation(value));
+                with_base_part(workspace, *target, |part| {
+                    part.with_orientation(value);
+                });
             }
             Self::Size { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| part.set_size(value));
+                with_base_part(workspace, *target, |part| {
+                    part.with_size(value);
+                });
             }
             Self::Color { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| part.set_color(value));
+                with_base_part(workspace, *target, |part| {
+                    part.with_color(value);
+                });
             }
         }
     }
@@ -420,9 +430,14 @@ fn with_base_part(
     apply: impl FnOnce(&mut BasePart),
 ) {
     if let Some(part) = workspace.get_mut::<Part>(target) {
-        apply(part);
+        apply(part.base_part_mut());
     } else if let Some(part) = workspace.get_mut::<BasePart>(target) {
         apply(part);
+    } else {
+        #[cfg(feature = "meshpart")]
+        if let Some(part) = workspace.get_mut::<MeshPart>(target) {
+            apply(part.base_part_mut());
+        }
     }
 }
 
@@ -510,7 +525,7 @@ impl TweenManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Instance, Part};
+    use crate::{HasPVInstance, Instance, Part};
 
     #[test]
     fn tween_interpolates_and_finishes() {

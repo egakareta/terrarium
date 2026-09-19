@@ -131,8 +131,9 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.name()
             }
 
-            fn set_name(&mut self, name: String) {
+            fn with_name(&mut self, name: String) -> &mut dyn $crate::Instance {
                 self.$data $(.$data_tail)*.set_name(name);
+                self
             }
 
             fn id(&self) -> $crate::InstanceId {
@@ -174,8 +175,13 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.set_sibling_index(index);
             }
 
-            fn set_attribute(&mut self, name: String, value: serde_json::Value) {
+            fn with_attribute(
+                &mut self,
+                name: String,
+                value: serde_json::Value,
+            ) -> &mut dyn $crate::Instance {
                 self.$data $(.$data_tail)*.set_attribute(name, value);
+                self
             }
 
             fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
@@ -400,16 +406,14 @@ pub trait Instance: Any + Debug + InstanceClone {
     fn name(&self) -> &str;
 
     /// Changes the display name of this instance.
-    fn set_name(&mut self, name: String);
+    fn with_name(&mut self, name: String) -> &mut dyn Instance;
 
     /// Returns this instance with its display name set.
-    ///
-    /// Builder-style alternative to [`set_name`](Self::set_name).
     fn named(mut self, name: impl Into<String>) -> Self
     where
         Self: Sized,
     {
-        self.set_name(name.into());
+        self.with_name(name.into());
         self
     }
 
@@ -421,17 +425,26 @@ pub trait Instance: Any + Debug + InstanceClone {
     ///
     /// This is arbitrary per-instance data that the engine itself ignores. Any
     /// JSON value works, so nested objects and arrays are supported. Prefer
-    /// [`InstanceAttributes::set_typed_attribute`] to store a serializable
+    /// [`InstanceAttributes::with_typed_attribute`] to store a serializable
     /// Rust value without building the JSON by hand.
     ///
     /// ```
     /// use terrarium::{Instance, Part};
     ///
     /// let mut part = Part::new().named("crate");
-    /// part.set_attribute("health".to_owned(), serde_json::json!(100));
+    /// part.with_attribute("health".to_owned(), serde_json::json!(100));
     /// assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(100)));
     /// ```
-    fn set_attribute(&mut self, name: String, value: serde_json::Value);
+    fn with_attribute(&mut self, name: String, value: serde_json::Value) -> &mut dyn Instance;
+
+    /// Returns this instance with custom metadata stored under `name`.
+    fn attributed(mut self, name: String, value: serde_json::Value) -> Self
+    where
+        Self: Sized,
+    {
+        self.with_attribute(name, value);
+        self
+    }
 
     /// Returns the custom metadata stored under `name`, if any.
     fn get_attribute(&self, name: &str) -> Option<&serde_json::Value>;
@@ -661,7 +674,7 @@ fn find_child_mut<'a, T: Instance>(
 /// use terrarium::{Instance, InstanceAttributes, Part};
 ///
 /// let mut part = Part::new();
-/// part.set_typed_attribute("tags", vec!["wood", "breakable"]).unwrap();
+/// part.with_typed_attribute("tags", vec!["wood", "breakable"]).unwrap();
 /// assert_eq!(
 ///     part.get_typed_attribute::<Vec<String>>("tags").unwrap().unwrap(),
 ///     vec!["wood", "breakable"],
@@ -673,16 +686,16 @@ pub trait InstanceAttributes {
     ///
     /// Serialization failures (for example, a map with non-string keys) are
     /// reported without modifying the stored attributes.
-    fn set_typed_attribute<T>(
+    fn with_typed_attribute<T>(
         &mut self,
         name: impl Into<String>,
         value: T,
-    ) -> Result<(), serde_json::Error>
+    ) -> Result<&mut Self, serde_json::Error>
     where
         T: Serialize;
 
     /// Reads back custom metadata previously stored with
-    /// [`Instance::set_attribute`] or [`set_typed_attribute`](Self::set_typed_attribute).
+    /// [`Instance::with_attribute`] or [`with_typed_attribute`](Self::with_typed_attribute).
     ///
     /// Returns `None` when no attribute is stored under `name`. A stored value
     /// that does not match `T` yields `Some(Err(_))` instead.
@@ -692,15 +705,16 @@ pub trait InstanceAttributes {
 }
 
 impl<T: Instance> InstanceAttributes for T {
-    fn set_typed_attribute<U>(
+    fn with_typed_attribute<U>(
         &mut self,
         name: impl Into<String>,
         value: U,
-    ) -> Result<(), serde_json::Error>
+    ) -> Result<&mut Self, serde_json::Error>
     where
         U: Serialize,
     {
-        insert_typed_attribute(self, name, value)
+        insert_typed_attribute(self, name, value)?;
+        Ok(self)
     }
 
     fn get_typed_attribute<U>(&self, name: &str) -> Option<Result<U, serde_json::Error>>
@@ -712,15 +726,16 @@ impl<T: Instance> InstanceAttributes for T {
 }
 
 impl InstanceAttributes for dyn Instance {
-    fn set_typed_attribute<T>(
+    fn with_typed_attribute<T>(
         &mut self,
         name: impl Into<String>,
         value: T,
-    ) -> Result<(), serde_json::Error>
+    ) -> Result<&mut Self, serde_json::Error>
     where
         T: Serialize,
     {
-        insert_typed_attribute(self, name, value)
+        insert_typed_attribute(self, name, value)?;
+        Ok(self)
     }
 
     fn get_typed_attribute<T>(&self, name: &str) -> Option<Result<T, serde_json::Error>>
@@ -737,7 +752,7 @@ fn insert_typed_attribute(
     value: impl Serialize,
 ) -> Result<(), serde_json::Error> {
     let value = serde_json::to_value(value)?;
-    instance.set_attribute(name.into(), value);
+    instance.with_attribute(name.into(), value);
     Ok(())
 }
 
@@ -885,54 +900,96 @@ impl PVInstance {
     pub fn from_world_transform(transform: Mat4) -> Self {
         Self { pivot: transform }
     }
+}
+
+/// Access to the underlying [`PVInstance`].
+pub trait HasPVInstance {
+    /// Returns shared access to the underlying [`PVInstance`].
+    fn pv(&self) -> &PVInstance;
+
+    /// Returns mutable access to the underlying [`PVInstance`].
+    fn pv_mut(&mut self) -> &mut PVInstance;
 
     /// The world-space transform of the instance's pivot.
-    pub fn pivot(&self) -> Mat4 {
-        self.pivot
-    }
-
-    /// Transforms the [`PVInstance`] along with all of its descendant [`PVInstance`]s such that the pivot is now located at the specified transform.
-    pub fn pivot_to(&mut self, pivot: Mat4) {
-        self.pivot = pivot;
+    fn pivot(&self) -> Mat4 {
+        self.pv().pivot
     }
 
     /// Returns the translation component of the pivot.
-    pub fn position(&self) -> Vec3 {
-        self.pivot.w_axis.truncate()
-    }
-
-    /// Replaces the translation while preserving the current rotation.
-    pub fn set_position(&mut self, position: Vec3) {
-        let (_, rotation, _) = self.pivot.to_scale_rotation_translation();
-        self.pivot = Mat4::from_rotation_translation(rotation, position);
+    fn position(&self) -> Vec3 {
+        self.pv().pivot.w_axis.truncate()
     }
 
     /// Returns XYZ Euler orientation angles in degrees.
-    pub fn orientation(&self) -> Vec3 {
-        let (_, rotation, _) = self.pivot.to_scale_rotation_translation();
+    fn orientation(&self) -> Vec3 {
+        let (_, rotation, _) = self.pv().pivot.to_scale_rotation_translation();
         let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
 
         Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
     }
 
+    /// Returns the normalized world-space direction of local `-Z`.
+    fn forward(&self) -> Vec3 {
+        self.pivot()
+            .transform_vector3(Vec3::NEG_Z)
+            .normalize_or_zero()
+    }
+
+    /// Transforms the [`PVInstance`] along with all of its descendant [`PVInstance`]s such that the pivot is now located at the specified transform.
+    fn with_pivot(mut self, pivot: Mat4) -> Self
+    where
+        Self: Sized,
+    {
+        self.pv_mut().pivot = pivot;
+        self
+    }
+
+    /// Replaces the translation while preserving the current rotation.
+    fn with_position(mut self, position: Vec3) -> Self
+    where
+        Self: Sized,
+    {
+        let (_, rotation, _) = self.pv().pivot.to_scale_rotation_translation();
+        self.pv_mut().pivot = Mat4::from_rotation_translation(rotation, position);
+        self
+    }
+
     /// Replaces the XYZ Euler orientation in degrees while preserving position.
-    pub fn set_orientation(&mut self, orientation: Vec3) {
-        self.pivot = Mat4::from_rotation_translation(
+    fn with_orientation(mut self, orientation: Vec3) -> Self
+    where
+        Self: Sized,
+    {
+        let position = self.position();
+        self.pv_mut().pivot = Mat4::from_rotation_translation(
             Quat::from_euler(
                 EulerRot::XYZ,
                 orientation.x.to_radians(),
                 orientation.y.to_radians(),
                 orientation.z.to_radians(),
             ),
-            self.position(),
+            position,
         );
+        self
+    }
+}
+
+impl HasPVInstance for PVInstance {
+    fn pv(&self) -> &PVInstance {
+        self
     }
 
-    /// Returns the normalized world-space direction of local `-Z`.
-    pub fn forward(&self) -> Vec3 {
-        self.pivot()
-            .transform_vector3(Vec3::NEG_Z)
-            .normalize_or_zero()
+    fn pv_mut(&mut self) -> &mut PVInstance {
+        self
+    }
+}
+
+impl<T: HasPVInstance + ?Sized> HasPVInstance for &mut T {
+    fn pv(&self) -> &PVInstance {
+        (**self).pv()
+    }
+
+    fn pv_mut(&mut self) -> &mut PVInstance {
+        (**self).pv_mut()
     }
 }
 
@@ -960,7 +1017,7 @@ mod tests {
         instance
             .downcast_mut::<BasePart>()
             .unwrap()
-            .set_name("renamed".to_owned());
+            .with_name("renamed".to_owned());
         assert_eq!(instance.name(), "renamed");
 
         let instance = match instance.downcast::<BasePart>() {
@@ -973,9 +1030,7 @@ mod tests {
     #[test]
     fn every_instance_can_own_a_nested_instance_tree() {
         let mut model = BasePart::new().named("model");
-        let part_id = model.add_child_with(Part::new().named("part"), |part| {
-            part.shape = PartShape::Ball;
-        });
+        let part_id = model.add_child(Part::new().with_shape(PartShape::Ball).named("part"));
         let camera_id = Camera::default().set_parent(&mut model);
         let model_id = model.id();
 
@@ -1047,8 +1102,8 @@ mod tests {
         assert!(!part.has_attribute("health"));
         assert_eq!(part.get_attribute("health"), None);
 
-        part.set_attribute("health".to_owned(), serde_json::json!(100));
-        part.set_attribute(
+        part.with_attribute("health".to_owned(), serde_json::json!(100));
+        part.with_attribute(
             "tags".to_owned(),
             serde_json::json!({"material": "wood", "breakable": true}),
         );
@@ -1056,7 +1111,7 @@ mod tests {
         assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(100)));
 
         // Overwriting replaces the previous value and reports it on removal.
-        part.set_attribute("health".to_owned(), serde_json::json!(75));
+        part.with_attribute("health".to_owned(), serde_json::json!(75));
         assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(75)));
         assert_eq!(
             part.attributes().keys().collect::<Vec<_>>(),
@@ -1073,9 +1128,9 @@ mod tests {
     #[test]
     fn typed_attributes_round_trip_any_serializable_value() {
         let mut part = Part::new().named("crate");
-        part.set_typed_attribute("tags", vec!["wood", "breakable"])
+        part.with_typed_attribute("tags", vec!["wood", "breakable"])
             .unwrap();
-        part.set_typed_attribute("health", 100_i64).unwrap();
+        part.with_typed_attribute("health", 100_i64).unwrap();
 
         assert_eq!(
             part.get_typed_attribute::<Vec<String>>("tags")
@@ -1099,7 +1154,7 @@ mod tests {
     #[test]
     fn attributes_are_available_behind_trait_objects() {
         let mut instance: Box<dyn Instance> = Box::new(Part::new().named("crate"));
-        instance.set_attribute("health".to_owned(), serde_json::json!(100));
+        instance.with_attribute("health".to_owned(), serde_json::json!(100));
         assert_eq!(
             instance.get_attribute("health"),
             Some(&serde_json::json!(100))
@@ -1108,7 +1163,7 @@ mod tests {
         assert_eq!(instance.attributes().len(), 1);
 
         instance
-            .set_typed_attribute("tags", vec!["wood".to_owned()])
+            .with_typed_attribute("tags", vec!["wood".to_owned()])
             .unwrap();
         assert_eq!(
             instance
@@ -1124,7 +1179,7 @@ mod tests {
         workspace
             .instance_mut(child_id)
             .unwrap()
-            .set_attribute("health".to_owned(), serde_json::json!(42));
+            .with_attribute("health".to_owned(), serde_json::json!(42));
         assert!(workspace.instance(id).is_none());
         assert_eq!(
             workspace
@@ -1138,11 +1193,11 @@ mod tests {
     #[test]
     fn attributes_are_independent_per_instance_and_survive_cloning() {
         let mut parent = BasePart::new().named("parent");
-        parent.set_attribute("role".to_owned(), serde_json::json!("parent"));
+        parent.with_attribute("role".to_owned(), serde_json::json!("parent"));
         let child_id = parent.add_child(Part::new().named("child"));
         let child = parent.find_descendant_mut(child_id).unwrap();
         assert_eq!(child.get_attribute("role"), None);
-        child.set_attribute("role".to_owned(), serde_json::json!("child"));
+        child.with_attribute("role".to_owned(), serde_json::json!("child"));
 
         let cloned: BasePart = parent.clone();
         assert_eq!(
@@ -1163,7 +1218,7 @@ mod tests {
         workspace
             .instance_mut(parent_id)
             .unwrap()
-            .set_attribute("saved".to_owned(), serde_json::json!(true));
+            .with_attribute("saved".to_owned(), serde_json::json!(true));
         let cloned_workspace = workspace.clone();
         let cloned_parent = cloned_workspace
             .instances()

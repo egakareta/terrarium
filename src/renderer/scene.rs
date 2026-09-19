@@ -1,4 +1,5 @@
 use super::*;
+use crate::{HasBasePart, HasPVInstance, HasPart};
 
 impl Renderer {
     pub(super) fn prepare_scene(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
@@ -169,7 +170,7 @@ impl Renderer {
             for part in parts.by_ref().take(CULL_GROUP_SIZE) {
                 let pivot = part.pivot();
                 let max_scale = part.size().max_element().max(0.0);
-                let radius = part.shape.bounding_radius() * max_scale * 1.01;
+                let radius = part.shape().bounding_radius() * max_scale * 1.01;
                 let center = pivot.w_axis.truncate();
                 let extent = Vec3::splat(radius);
                 bounds_min = bounds_min.min(center - extent);
@@ -235,10 +236,10 @@ impl Renderer {
                 }
                 let has_custom_textures = visibility_mask & 1 != 0
                     && part.material_slots.slots.iter().flatten().any(|material| {
-                        material.textures.base_color.is_some()
-                            || material.textures.normal.is_some()
-                            || material.textures.metallic_roughness.is_some()
-                            || material.textures.emissive.is_some()
+                        material.textures().base_color.is_some()
+                            || material.textures().normal.is_some()
+                            || material.textures().metallic_roughness.is_some()
+                            || material.textures().emissive.is_some()
                     });
                 let custom_textures = if has_custom_textures {
                     let textures = self.material_textures(workspace, &part.material_slots)?;
@@ -257,7 +258,7 @@ impl Renderer {
                 };
                 let batch_index = if let Some(textures) = custom_textures {
                     let filters = custom_filters.unwrap_or(default_filters);
-                    let mesh = self.primitive_meshes[part.shape.index()];
+                    let mesh = self.primitive_meshes[part.shape().index()];
                     let key = (mesh, textures, filters, visibility_mask);
                     if let Some(&batch_index) = batch_indices.get(&key) {
                         batch_index
@@ -275,10 +276,10 @@ impl Renderer {
                         batch_index
                     }
                 } else {
-                    let mesh = self.primitive_meshes[part.shape.index()];
+                    let mesh = self.primitive_meshes[part.shape().index()];
                     if usize::from(visibility_mask) < VISIBILITY_MASK_COUNT {
                         let slot =
-                            &mut default_batches[part.shape.index()][visibility_mask as usize];
+                            &mut default_batches[part.shape().index()][visibility_mask as usize];
                         if let Some(batch_index) = *slot {
                             batch_index
                         } else {
@@ -380,10 +381,10 @@ impl Renderer {
                     .iter()
                     .flatten()
                     .any(|material| {
-                        material.textures.base_color.is_some()
-                            || material.textures.normal.is_some()
-                            || material.textures.metallic_roughness.is_some()
-                            || material.textures.emissive.is_some()
+                        material.textures().base_color.is_some()
+                            || material.textures().normal.is_some()
+                            || material.textures().metallic_roughness.is_some()
+                            || material.textures().emissive.is_some()
                     });
             let textures = if has_custom_textures {
                 self.material_textures(workspace, &meshpart.material_slots)?

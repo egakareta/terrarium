@@ -1,7 +1,5 @@
-use std::ops::{Deref, DerefMut};
-
 use crate::{
-    InstanceData, PVInstance,
+    HasPVInstance, InstanceData, PVInstance,
     glam::{Mat4, Quat, Vec3},
     winit::{
         event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
@@ -14,14 +12,85 @@ use crate::{
 pub struct Camera {
     pub(crate) instance: InstanceData,
     pub(crate) pv_instance: PVInstance,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32,
+}
+
+/// Access to a camera's projection properties.
+pub trait HasCamera {
+    /// Returns shared access to the underlying [`Camera`].
+    fn camera(&self) -> &Camera;
+
+    /// Returns mutable access to the underlying [`Camera`].
+    fn camera_mut(&mut self) -> &mut Camera;
+
     /// Viewport width divided by viewport height.
-    pub aspect: f32,
+    fn aspect(&self) -> f32 {
+        self.camera().aspect
+    }
+
     /// Vertical field of view in radians.
-    pub fovy: f32,
+    fn fovy(&self) -> f32 {
+        self.camera().fovy
+    }
+
     /// Near clipping plane distance.
-    pub znear: f32,
+    fn znear(&self) -> f32 {
+        self.camera().znear
+    }
+
     /// Far clipping plane distance.
-    pub zfar: f32,
+    fn zfar(&self) -> f32 {
+        self.camera().zfar
+    }
+
+    /// Sets the viewport width divided by viewport height.
+    fn with_aspect(mut self, aspect: f32) -> Self
+    where
+        Self: Sized,
+    {
+        self.camera_mut().aspect = aspect.max(0.001);
+        self
+    }
+
+    /// Sets the vertical field of view in radians.
+    fn with_fovy(mut self, fovy: f32) -> Self
+    where
+        Self: Sized,
+    {
+        self.camera_mut().fovy = fovy;
+        self
+    }
+
+    /// Sets the near clipping plane distance.
+    fn with_znear(mut self, znear: f32) -> Self
+    where
+        Self: Sized,
+    {
+        self.camera_mut().znear = znear;
+        self
+    }
+
+    /// Sets the far clipping plane distance.
+    fn with_zfar(mut self, zfar: f32) -> Self
+    where
+        Self: Sized,
+    {
+        self.camera_mut().zfar = zfar;
+        self
+    }
+}
+
+impl<T: HasCamera + ?Sized> HasCamera for &mut T {
+    fn camera(&self) -> &Camera {
+        (**self).camera()
+    }
+
+    fn camera_mut(&mut self) -> &mut Camera {
+        (**self).camera_mut()
+    }
 }
 
 impl Default for Camera {
@@ -346,7 +415,7 @@ impl CameraController {
             new_position += movement.normalize() * speed * delta_seconds;
         }
 
-        camera.pivot_to(Mat4::from_rotation_translation(new_rotation, new_position));
+        camera.with_pivot(Mat4::from_rotation_translation(new_rotation, new_position));
         self.mouse_delta = (0.0, 0.0);
     }
 
@@ -368,15 +437,23 @@ impl CameraController {
     }
 }
 
-impl Deref for Camera {
-    type Target = PVInstance;
-    fn deref(&self) -> &Self::Target {
+impl HasPVInstance for Camera {
+    fn pv(&self) -> &PVInstance {
         &self.pv_instance
     }
-}
-impl DerefMut for Camera {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+
+    fn pv_mut(&mut self) -> &mut PVInstance {
         &mut self.pv_instance
+    }
+}
+
+impl HasCamera for Camera {
+    fn camera(&self) -> &Camera {
+        self
+    }
+
+    fn camera_mut(&mut self) -> &mut Camera {
+        self
     }
 }
 
@@ -422,6 +499,20 @@ fn eframe_button(button: MouseButton) -> Option<crate::egui::PointerButton> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn camera_projection_properties_use_getters_and_mutable_builders() {
+        let camera = Camera::default()
+            .with_aspect(2.0)
+            .with_fovy(0.75)
+            .with_znear(0.2)
+            .with_zfar(400.0);
+
+        assert_eq!(camera.aspect(), 2.0);
+        assert_eq!(camera.fovy(), 0.75);
+        assert_eq!(camera.znear(), 0.2);
+        assert_eq!(camera.zfar(), 400.0);
+    }
 
     #[test]
     fn camera_mouse_look_rotates_in_place_with_the_expected_horizontal_sign() {

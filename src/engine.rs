@@ -232,7 +232,8 @@ impl Engine {
     }
 
     /// Sets both eframe's window clear color and Terrarium's scene clear color.
-    pub fn set_clear_color(&mut self, color: [f32; 4]) {
+    ///
+    pub fn set_clear_color(&mut self, color: [f32; 4]) -> &mut Self {
         self.clear_color = color;
         self.renderer().set_clear_color(egui_wgpu::wgpu::Color {
             r: color[0] as f64,
@@ -240,6 +241,7 @@ impl Engine {
             b: color[2] as f64,
             a: color[3] as f64,
         });
+        self
     }
 
     /// Returns locked access to the underlying renderer for advanced operations.
@@ -532,6 +534,11 @@ impl Drop for Engine {
     }
 }
 
+/// Convenience access to the owned [`Workspace`].
+///
+/// Method calls and field accesses that are not found on [`Engine`] itself
+/// resolve to its workspace, so `engine.add_child(part)` works without
+/// spelling out `engine.workspace`.
 impl Deref for Engine {
     type Target = Workspace;
     fn deref(&self) -> &Self::Target {

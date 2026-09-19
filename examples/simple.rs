@@ -15,8 +15,7 @@ fn main() {
     Terrarium::new()
         .run(|engine| {
             // Create a cube
-            let mut part = Part::new();
-            part.set_size(glam::Vec3::new(2.0, 2.0, 2.0));
+            let part = Part::new().with_size(glam::Vec3::new(2.0, 2.0, 2.0));
 
             // Add it into the scene
             engine.add_child(part);

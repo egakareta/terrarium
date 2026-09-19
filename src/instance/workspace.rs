@@ -98,7 +98,7 @@ impl Workspace {
 
     /// Returns the revision of a workspace texture, bumped by every
     /// [`add_texture`](Self::add_texture), [`get_texture_mut`](Self::get_texture_mut),
-    /// and [`set_texture`](Self::set_texture) call for its handle.
+    /// and [`with_texture`](Self::with_texture) call for its handle.
     ///
     /// The renderer uses this to re-upload edited textures before the next
     /// frame. It is also useful for external caches keyed by texture content.
@@ -129,7 +129,7 @@ impl Workspace {
         &mut self,
         handle: TextureHandle,
         texture: Texture,
-    ) -> Result<(), TextureError> {
+    ) -> Result<&mut Self, TextureError> {
         texture.validate()?;
         let slot = self
             .textures
@@ -138,7 +138,7 @@ impl Workspace {
         *slot = texture;
         self.texture_revision = self.texture_revision.wrapping_add(1);
         self.texture_revisions[handle.0] = self.texture_revision;
-        Ok(())
+        Ok(self)
     }
 
     /// Returns the lighting skybox, if one is set.
@@ -153,8 +153,9 @@ impl Workspace {
     /// Replaces the lighting skybox.
     ///
     /// The renderer re-uploads the six faces before the next frame.
-    pub fn set_skybox(&mut self, skybox: Skybox) {
-        self.lighting.set_skybox(skybox);
+    pub fn with_skybox(&mut self, skybox: Skybox) -> &mut Self {
+        self.lighting.with_skybox(skybox);
+        self
     }
 
     /// Removes the lighting skybox.
@@ -165,7 +166,7 @@ impl Workspace {
     }
 
     /// Returns the revision of the lighting skybox, bumped by every
-    /// [`set_skybox`](Self::set_skybox) and [`clear_skybox`](Self::clear_skybox)
+    /// [`with_skybox`](Self::with_skybox) and [`clear_skybox`](Self::clear_skybox)
     /// call.
     ///
     /// The renderer uses this to re-upload the skybox faces before the next
@@ -196,15 +197,16 @@ impl Workspace {
     /// non-finite direction falls back to straight up (`+Y`).
     /// [`clock_time`](Self::clock_time) is updated to the nearest hour whose
     /// sun-path direction best matches the new direction.
-    pub fn set_sun_direction(&mut self, direction: Vec3) {
-        self.lighting.set_sun_direction(direction);
+    pub fn with_sun_direction(&mut self, direction: Vec3) -> &mut Self {
+        self.lighting.with_sun_direction(direction);
+        self
     }
 
     /// Returns the time of day in hours, in `[0, 24)`.
     ///
-    /// This is the last value passed to [`set_clock_time`](Self::set_clock_time),
+    /// This is the last value passed to [`with_clock_time`](Self::with_clock_time),
     /// or the nearest matching hour after
-    /// [`set_sun_direction`](Self::set_sun_direction). `12.0` is midday and
+    /// [`with_sun_direction`](Self::with_sun_direction). `12.0` is midday and
     /// `0.0` is midnight. New workspaces start at midday.
     pub fn clock_time(&self) -> f32 {
         self.lighting.clock_time()
@@ -217,19 +219,21 @@ impl Workspace {
     /// `6.0` is sunrise on the eastern (`+X`) horizon, `12.0` is the midday
     /// sun, `18.0` is sunset on the western (`-X`) horizon, and `0.0` points
     /// below the horizon at midnight.
-    pub fn set_clock_time(&mut self, hours: f32) {
-        self.lighting.set_clock_time(hours);
+    pub fn with_clock_time(&mut self, hours: f32) -> &mut Self {
+        self.lighting.with_clock_time(hours);
+        self
     }
 
     /// Advances the time of day by `hours_per_second` for the elapsed real time.
-    pub fn advance_clock_time(&mut self, delta_seconds: f32, hours_per_second: f32) {
+    pub fn advance_clock_time(&mut self, delta_seconds: f32, hours_per_second: f32) -> &mut Self {
         self.lighting
             .advance_clock_time(delta_seconds, hours_per_second);
+        self
     }
 
     /// Returns the sun direction for a time of day in hours.
     ///
-    /// This is the same mapping [`set_clock_time`](Self::set_clock_time)
+    /// This is the same mapping [`with_clock_time`](Self::with_clock_time)
     /// uses, without modifying the workspace. Values wrap into `[0, 24)`;
     /// non-finite values map to the midday sun.
     pub fn sun_direction_from_clock_time(hours: f32) -> Vec3 {
@@ -242,8 +246,9 @@ impl Workspace {
     }
 
     /// Parses and sets a `HH:MM:SS` time.
-    pub fn set_time_of_day(&mut self, time: &str) -> Result<(), crate::TimeOfDayError> {
-        self.lighting.set_time_of_day(time)
+    pub fn with_time_of_day(&mut self, time: &str) -> Result<&mut Self, crate::TimeOfDayError> {
+        self.lighting.with_time_of_day(time)?;
+        Ok(self)
     }
 
     /// Returns minutes elapsed since midnight.
@@ -252,8 +257,9 @@ impl Workspace {
     }
 
     /// Sets the time using minutes elapsed since midnight.
-    pub fn set_minutes_after_midnight(&mut self, minutes: f32) {
-        self.lighting.set_minutes_after_midnight(minutes);
+    pub fn with_minutes_after_midnight(&mut self, minutes: f32) -> &mut Self {
+        self.lighting.with_minutes_after_midnight(minutes);
+        self
     }
 
     /// Returns the direction of the moon, opposite the sun direction.
@@ -439,7 +445,7 @@ crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, Part, PartShape, TextureColorSpace};
+    use crate::{BasePart, Camera, HasPart, Part, PartShape, TextureColorSpace};
     #[cfg(feature = "meshpart")]
     use crate::{Mesh, MeshPart};
 
@@ -485,8 +491,7 @@ mod tests {
     fn isolated_instances_can_be_parented_and_recovered_by_id() {
         let mut workspace = Workspace::new();
         let workspace_id = workspace.id();
-        let mut part = Part::new().named("part");
-        part.shape = PartShape::Ball;
+        let part = Part::new().with_shape(PartShape::Ball).named("part");
         let part_id = part.id();
         let returned_id = part.set_parent(&mut workspace);
 
@@ -497,7 +502,7 @@ mod tests {
         assert_eq!(child.class_name(), "Part");
         assert_eq!(child.parent(), Some(workspace_id));
         assert_eq!(
-            workspace.get::<Part>(part_id).unwrap().shape,
+            workspace.get::<Part>(part_id).unwrap().shape(),
             PartShape::Ball
         );
 
@@ -506,7 +511,7 @@ mod tests {
         workspace
             .get_mut::<BasePart>(basepart_id)
             .unwrap()
-            .set_name("renamed".to_owned());
+            .with_name("renamed".to_owned());
         assert_eq!(
             workspace.get::<BasePart>(basepart_id).unwrap().name(),
             "renamed"
@@ -690,7 +695,7 @@ mod tests {
             .map(|_| Image::from_rgba8(1, 1, pixels.clone()).expect("1x1 test face is valid"));
         workspace
             .lighting
-            .set_skybox(Skybox::from_faces(faces).unwrap());
+            .with_skybox(Skybox::from_faces(faces).unwrap());
         assert_eq!(workspace.skybox().unwrap().face_size(), 1);
         assert_eq!(
             workspace.clone().skybox().unwrap().face_size(),
@@ -745,15 +750,15 @@ mod tests {
     fn clock_time_round_trips_through_the_workspace() {
         let mut workspace = Workspace::new();
         for hours in [0.0, 5.5, 6.0, 9.25, 12.0, 15.75, 18.0, 23.5] {
-            workspace.set_clock_time(hours);
+            workspace.with_clock_time(hours);
             assert!((workspace.clock_time() - hours).abs() < f32::EPSILON);
             let expected = Workspace::sun_direction_from_clock_time(hours);
             assert!((workspace.sun_direction() - expected).length() < 1e-6);
         }
 
-        workspace.set_clock_time(25.0);
+        workspace.with_clock_time(25.0);
         assert!((workspace.clock_time() - 1.0).abs() < f32::EPSILON);
-        workspace.set_clock_time(f32::NAN);
+        workspace.with_clock_time(f32::NAN);
         assert!((workspace.clock_time() - 12.0).abs() < f32::EPSILON);
     }
 
@@ -761,14 +766,14 @@ mod tests {
     fn custom_sun_directions_report_the_nearest_clock_time() {
         let mut workspace = Workspace::new();
 
-        workspace.set_sun_direction(Vec3::X);
+        workspace.with_sun_direction(Vec3::X);
         assert!((workspace.sun_direction() - Vec3::X).length() < 1e-6);
         assert!((workspace.clock_time() - 6.0).abs() < 0.02);
 
-        workspace.set_sun_direction(-Vec3::X);
+        workspace.with_sun_direction(-Vec3::X);
         assert!((workspace.clock_time() - 18.0).abs() < 0.02);
 
-        workspace.set_sun_direction(Vec3::NEG_Y);
+        workspace.with_sun_direction(Vec3::NEG_Y);
         // Straight down is not on the sun path (midnight points below the
         // horizon along the tilted arc), so it reports a nearby nighttime hour.
         assert!(
@@ -778,16 +783,16 @@ mod tests {
         );
 
         // Directions on the sun path invert back to their hour.
-        workspace.set_sun_direction(Workspace::sun_direction_from_clock_time(9.26));
+        workspace.with_sun_direction(Workspace::sun_direction_from_clock_time(9.26));
         assert!((workspace.clock_time() - 9.26).abs() < 0.02);
 
-        workspace.set_sun_direction(Vec3::new(1.0, 2.0, 3.0));
+        workspace.with_sun_direction(Vec3::new(1.0, 2.0, 3.0));
         assert!((workspace.sun_direction().length() - 1.0).abs() < 1e-6);
 
-        workspace.set_sun_direction(Vec3::ZERO);
+        workspace.with_sun_direction(Vec3::ZERO);
         assert_eq!(workspace.sun_direction(), Vec3::Y);
 
-        workspace.set_sun_direction(Vec3::new(f32::NAN, 0.0, 0.0));
+        workspace.with_sun_direction(Vec3::new(f32::NAN, 0.0, 0.0));
         assert_eq!(workspace.sun_direction(), Vec3::Y);
         assert!(workspace.sun_direction().is_finite());
     }
@@ -795,7 +800,7 @@ mod tests {
     #[test]
     fn cloned_workspaces_keep_their_sun_settings() {
         let mut workspace = Workspace::new();
-        workspace.set_clock_time(17.5);
+        workspace.with_clock_time(17.5);
         workspace.lighting.brightness = 0.75;
         workspace.lighting.global_shadows = false;
         let cloned = workspace.clone();

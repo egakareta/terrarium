@@ -92,7 +92,7 @@ impl Mesh {
     /// This is how the built-in primitives support [`Face::Top`] and
     /// friends on every shape: run it on a custom mesh after setting normals,
     /// then assign per-face materials through
-    /// [`crate::Part::set_material_slot`]. Vertices with a zero normal use
+    /// [`crate::HasMaterials::with_material_slot`]. Vertices with a zero normal use
     /// [`Face::Top`].
     pub fn assign_directional_slots(&mut self) {
         for vertex in &mut self.vertices {
@@ -305,7 +305,7 @@ impl Mesh {
     /// meaning the wedge "points" or slopes toward `+X`.
     ///
     /// The geometry occupies a unit cube centered at the origin and is meant
-    /// to be scaled through [`crate::BasePart::size`].
+    /// to be scaled through [`crate::HasBasePart::size`].
     ///
     /// Each face is tagged with the directional [`Face`] matching its
     /// outward normal, so per-face materials work just like on a block.
@@ -401,7 +401,7 @@ impl Mesh {
     /// The apex direction from the center is `(-X, +Y, -Z)`.
     ///
     /// The geometry occupies a unit cube centered at the origin and is meant
-    /// to be scaled through [`crate::BasePart::size`].
+    /// to be scaled through [`crate::HasBasePart::size`].
     ///
     /// Each face is tagged with the directional [`Face`] matching its
     /// outward normal, so per-face materials work just like on a block.

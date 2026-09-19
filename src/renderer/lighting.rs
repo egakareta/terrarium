@@ -1,4 +1,7 @@
 use super::*;
+use crate::{
+    HasBasePart, HasCamera, HasLight, HasPVInstance, HasPointLight, HasSpotLight, HasSurfaceLight,
+};
 
 impl Renderer {
     pub(super) fn prepare_local_lights(
@@ -218,7 +221,7 @@ pub(super) fn directional_light_relevance(
     let view_position = view.transform_point3(position);
     let view_direction = view.transform_vector3(direction);
     let source_depth = -view_position.z;
-    let tan_half_fovy = (camera.fovy * 0.5).tan();
+    let tan_half_fovy = (camera.fovy() * 0.5).tan();
     let outer_cosine = (angle * 0.5).to_radians().cos();
     let inner_cosine = outer_cosine + (1.0 - outer_cosine) * 0.15;
     let mut relevance: f32 = 0.0;
@@ -236,15 +239,15 @@ pub(super) fn directional_light_relevance(
     };
 
     for depth in [
-        camera.znear,
-        camera.zfar,
+        camera.znear(),
+        camera.zfar(),
         source_depth,
         source_depth + range * 0.5,
         source_depth + range,
     ] {
-        let depth = depth.clamp(camera.znear, camera.zfar);
+        let depth = depth.clamp(camera.znear(), camera.zfar());
         let half_height = depth * tan_half_fovy;
-        let half_width = half_height * camera.aspect;
+        let half_width = half_height * camera.aspect();
         let closest_x = view_position.x.clamp(-half_width, half_width);
         let closest_y = view_position.y.clamp(-half_height, half_height);
         for [x, y] in [
@@ -302,8 +305,8 @@ pub(super) fn point_light_candidate(
     camera_planes: &[Vec4; 6],
 ) -> Option<LocalLightCandidate> {
     let parent = light_parent(workspace, light)?;
-    let (color, brightness) = local_light_color(light.color, light.brightness)?;
-    let range = finite_nonnegative(light.range).min(10_000.0);
+    let (color, brightness) = local_light_color(light.color(), light.brightness())?;
+    let range = finite_nonnegative(light.range()).min(10_000.0);
     if range <= 0.0 {
         return None;
     }
@@ -311,7 +314,7 @@ pub(super) fn point_light_candidate(
     if !sphere_visible(camera_planes, position, range) {
         return None;
     }
-    let shadow_view_projections = if light.shadows {
+    let shadow_view_projections = if light.shadows() {
         point_shadow_view_projections(position, 0.03, range)
     } else {
         [Mat4::IDENTITY; 6]
@@ -326,7 +329,7 @@ pub(super) fn point_light_candidate(
             params: [0.0, -1.0, 0.0, 0.0],
         },
         shadow_view_projections,
-        shadow_layer_count: if light.shadows { 6 } else { 0 },
+        shadow_layer_count: if light.shadows() { 6 } else { 0 },
         shadow_excluded_caster: parent.id,
         score: local_light_score(position, range, 0.0, color, brightness, camera.position()),
     })
@@ -341,11 +344,11 @@ pub(super) fn spot_light_candidate(
     directional_light_candidate(
         workspace,
         light,
-        light.face,
-        light.angle,
-        light.color,
-        light.brightness,
-        light.shadows,
+        light.face(),
+        light.angle(),
+        light.color(),
+        light.brightness(),
+        light.shadows(),
         false,
         camera,
         camera_planes,
@@ -361,11 +364,11 @@ pub(super) fn surface_light_candidate(
     directional_light_candidate(
         workspace,
         light,
-        light.face,
-        light.angle,
-        light.color,
-        light.brightness,
-        light.shadows,
+        light.face(),
+        light.angle(),
+        light.color(),
+        light.brightness(),
+        light.shadows(),
         true,
         camera,
         camera_planes,
@@ -493,8 +496,8 @@ pub(super) fn light_view_projections(
     let light_forward = -light_direction;
     let light_right = light_forward.cross(up).normalize();
     let light_up = light_right.cross(light_forward).normalize();
-    let near = camera.znear.max(0.001);
-    let far = camera.zfar.min(SHADOW_DISTANCE).max(near + 0.001);
+    let near = camera.znear().max(0.001);
+    let far = camera.zfar().min(SHADOW_DISTANCE).max(near + 0.001);
     let mut splits = [far; SHADOW_CASCADE_COUNT];
     let mut matrices = [Mat4::IDENTITY; SHADOW_CASCADE_COUNT];
     let mut texel_sizes = [0.0; SHADOW_CASCADE_COUNT];
@@ -589,11 +592,11 @@ pub(super) fn pack_shadow_values(values: [f32; SHADOW_CASCADE_COUNT]) -> [[f32; 
 }
 
 pub(super) fn camera_frustum_slice_corners(camera: &Camera, near: f32, far: f32) -> [Vec3; 8] {
-    let tan_half_fovy = (camera.fovy * 0.5).tan();
+    let tan_half_fovy = (camera.fovy() * 0.5).tan();
     let near_height = near * tan_half_fovy;
-    let near_width = near_height * camera.aspect;
+    let near_width = near_height * camera.aspect();
     let far_height = far * tan_half_fovy;
-    let far_width = far_height * camera.aspect;
+    let far_width = far_height * camera.aspect();
     let corners = [
         Vec3::new(-near_width, -near_height, -near),
         Vec3::new(near_width, -near_height, -near),
