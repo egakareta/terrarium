@@ -7,8 +7,8 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    BasePart, Face, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots, Texture,
-    TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
+    BasePart, DEFAULT_MATERIAL, Face, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
+    Texture, TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec2, Vec3},
 };
 
@@ -269,9 +269,7 @@ impl MeshPart {
 
     /// Returns the effective material for a mesh slot.
     pub fn material_slot(&self, slot: Face) -> &Material {
-        self.material_slots
-            .get(slot)
-            .unwrap_or(&crate::material::DEFAULT_MATERIAL)
+        self.material_slots.get(slot).unwrap_or(&DEFAULT_MATERIAL)
     }
 
     pub(crate) fn mesh_revision(&self) -> u64 {

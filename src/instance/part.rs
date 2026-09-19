@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    Color3, Face, InstanceData, Material, MeshMaterialSlots, PVInstance, PartShape,
+    Color3, DEFAULT_MATERIAL, Face, InstanceData, Material, MeshMaterialSlots, PVInstance,
+    PartShape,
     glam::{Mat4, Vec3},
 };
 
@@ -152,9 +153,7 @@ impl Part {
     ///
     /// An unassigned slot uses [`Material::default()`].
     pub fn material_slot(&self, slot: Face) -> &Material {
-        self.material_slots
-            .get(slot)
-            .unwrap_or(&crate::material::DEFAULT_MATERIAL)
+        self.material_slots.get(slot).unwrap_or(&DEFAULT_MATERIAL)
     }
 }
 
