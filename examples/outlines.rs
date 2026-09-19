@@ -7,6 +7,7 @@ struct OutlinesApp {
     mesh_part: InstanceId,
     outline: Option<InstanceId>,
     mode: OutlineMode,
+    width: f32,
 }
 
 impl OutlinesApp {
@@ -23,8 +24,13 @@ impl OutlinesApp {
         let Some(mesh_part) = engine.get_mut::<MeshPart>(self.mesh_part) else {
             return;
         };
-        self.outline =
-            Some(mesh_part.add_child(Outline::new(mode).with_color(Color3::WHITE).with_width(2.0)));
+        self.outline = Some(
+            mesh_part.add_child(
+                Outline::new(mode)
+                    .with_color(Color3::WHITE)
+                    .with_width(self.width),
+            ),
+        );
         self.mode = mode;
     }
 }
@@ -32,6 +38,7 @@ impl OutlinesApp {
 impl App for OutlinesApp {
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut selected_mode = self.mode;
+        let mut width_changed = false;
         egui::Panel::top("outline_modes")
             .resizable(false)
             .show(ui, |ui| {
@@ -40,10 +47,16 @@ impl App for OutlinesApp {
                     ui.selectable_value(&mut selected_mode, OutlineMode::Toon, "Toon");
                     ui.selectable_value(&mut selected_mode, OutlineMode::Silhouette, "Silhouette");
                     ui.selectable_value(&mut selected_mode, OutlineMode::Stencil, "Stencil");
+
+                    ui.separator();
+
+                    width_changed = ui
+                        .add(egui::Slider::new(&mut self.width, 0.5..=10.0).text("Width"))
+                        .changed();
                 });
             });
 
-        if selected_mode != self.mode {
+        if selected_mode != self.mode || width_changed {
             self.set_mode(engine, selected_mode);
         }
     }
@@ -60,6 +73,7 @@ fn main() {
                 mesh_part,
                 outline: None,
                 mode: OutlineMode::Stencil,
+                width: 2.0,
             };
             app.set_mode(engine, app.mode);
             Ok::<OutlinesApp, AppCreationError>(app)
