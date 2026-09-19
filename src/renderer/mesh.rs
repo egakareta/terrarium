@@ -45,6 +45,8 @@ impl Renderer {
         &mut self,
         meshpart: &MeshPart,
     ) -> Result<GpuMeshHandle, RendererError> {
+        use crate::HasMeshPart;
+
         if let Some(cached) = self.meshpart_meshes.get(&meshpart.id())
             && cached.revision == meshpart.mesh_revision()
         {

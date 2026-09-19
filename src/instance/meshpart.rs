@@ -221,24 +221,6 @@ impl MeshPart {
         ))
     }
 
-    /// Returns the CPU-side geometry rendered by this mesh part.
-    pub fn mesh(&self) -> &Mesh {
-        self.mesh.mesh()
-    }
-
-    /// Returns the shared mesh asset used by this part.
-    pub fn mesh_handle(&self) -> &MeshHandle {
-        &self.mesh
-    }
-
-    /// Replaces the geometry and schedules it for upload before the next frame.
-    pub fn with_mesh(mut self, mesh: Mesh) -> Self {
-        self.bounding_radius = mesh_bounding_radius(&mesh);
-        self.mesh = MeshHandle::from_parts(mesh, self.material_slots.clone());
-        self.mesh_revision = self.mesh_revision.wrapping_add(1);
-        self
-    }
-
     pub(crate) fn mesh_revision(&self) -> u64 {
         self.mesh_revision
     }
@@ -249,6 +231,57 @@ impl MeshPart {
 }
 
 crate::impl_instance!(MeshPart, class_name = "MeshPart", data = basepart.instance,);
+
+/// Access to the underlying [`MeshPart`].
+pub trait HasMeshPart {
+    /// Returns shared access to the underlying [`MeshPart`].
+    fn mesh_part(&self) -> &MeshPart;
+
+    /// Returns mutable access to the underlying [`MeshPart`].
+    fn mesh_part_mut(&mut self) -> &mut MeshPart;
+
+    /// Returns the CPU-side geometry rendered by this mesh part.
+    fn mesh(&self) -> &Mesh {
+        self.mesh_part().mesh()
+    }
+
+    /// Returns the shared mesh asset used by this part.
+    fn mesh_handle(&self) -> &MeshHandle {
+        &self.mesh_part().mesh
+    }
+
+    /// Replaces the geometry and schedules it for upload before the next frame.
+    fn with_mesh(mut self, mesh: Mesh) -> Self
+    where
+        Self: Sized,
+    {
+        let mesh_part = self.mesh_part_mut();
+        mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
+        mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots.clone());
+        mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
+        self
+    }
+}
+
+impl HasMeshPart for MeshPart {
+    fn mesh_part(&self) -> &MeshPart {
+        self
+    }
+
+    fn mesh_part_mut(&mut self) -> &mut MeshPart {
+        self
+    }
+}
+
+impl<T: HasMeshPart + ?Sized> HasMeshPart for &mut T {
+    fn mesh_part(&self) -> &MeshPart {
+        (**self).mesh_part()
+    }
+
+    fn mesh_part_mut(&mut self) -> &mut MeshPart {
+        (**self).mesh_part_mut()
+    }
+}
 
 impl HasPVInstance for MeshPart {
     fn pv(&self) -> &PVInstance {
@@ -754,6 +787,43 @@ mod tests {
 
         let meshpart = meshpart.with_material_slot(Face::Top, Material::default());
         assert_eq!(meshpart.material(), None);
+    }
+
+    #[test]
+    fn mesh_part_builder_replaces_geometry_through_has_mesh_part() {
+        let replacement = Mesh::new(
+            vec![
+                Vertex::with_attributes(
+                    [2.0, 3.0, 4.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    [1.0; 4],
+                ),
+                Vertex::with_attributes(
+                    [2.0, 3.0, 5.0],
+                    [0.0, 1.0, 0.0],
+                    [1.0, 0.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    [1.0; 4],
+                ),
+                Vertex::with_attributes(
+                    [3.0, 3.0, 4.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 1.0],
+                    [1.0, 0.0, 0.0, 1.0],
+                    [1.0; 4],
+                ),
+            ],
+            vec![0, 1, 2],
+        );
+        let meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).with_mesh(replacement);
+
+        assert_eq!(meshpart.mesh().vertices[0].position, [2.0, 3.0, 4.0]);
+        assert_eq!(
+            meshpart.mesh_handle().mesh().vertices[2].position,
+            [3.0, 3.0, 4.0]
+        );
     }
 
     #[test]
