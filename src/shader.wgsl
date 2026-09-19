@@ -6,11 +6,20 @@ struct Camera {
     light_direction: vec4<f32>,
     light_color: vec4<f32>,
     ambient_color: vec4<f32>,
+    outdoor_ambient_color: vec4<f32>,
+    color_shift_top: vec4<f32>,
+    color_shift_bottom: vec4<f32>,
+    shadow_color: vec4<f32>,
+    // x: daylight factor, y: shadow enable, z: shadow softness, w: exposure.
+    lighting_params: vec4<f32>,
+    fog_color: vec4<f32>,
+    // x: fog start distance, y: fog end distance.
+    fog_params: vec4<f32>,
     shadow_cascade_splits: array<vec4<f32>, 2>,
     shadow_texel_sizes: array<vec4<f32>, 2>,
     // x: environment cubemap mip level count,
-    // y: image-based lighting intensity,
-    // z: exposure applied before tone mapping,
+    // y: diffuse environment scale,
+    // z: specular environment scale,
     // w: 1.0 when an environment is bound, 0.0 for the ambient fallback.
     environment_params: vec4<f32>,
 };
@@ -323,7 +332,7 @@ fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
         return 1.0;
     }
 
-    let texel_size = 1.0 / SHADOW_MAP_SIZE;
+    let texel_size = camera.lighting_params.z / SHADOW_MAP_SIZE;
     var visibility = 0.0;
     for (var x = 0u; x < 3u; x = x + 1u) {
         for (var y = 0u; y < 3u; y = y + 1u) {
@@ -423,26 +432,29 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let biased_world = vertex.world_position + world_normal * normal_bias;
     let light_view_projection = camera.light_view_projections[cascade];
     let biased_shadow_position = light_view_projection * vec4<f32>(biased_world, 1.0);
-    let cascade_visibility = sample_shadow(biased_shadow_position, cascade);
-    var shadow_visibility = cascade_visibility;
-    if view_depth > shadow_cascade_split(SHADOW_CASCADE_COUNT - 1u) {
-        shadow_visibility = 1.0;
-    } else if cascade < SHADOW_CASCADE_COUNT - 1u {
-        // Fade between cascades while their projected texel footprints overlap.
-        // Without this, the different resolutions produce a visible band at
-        // every split even when both cascades are stable and well filtered.
-        let split = shadow_cascade_split(cascade);
-        let blend_width = max(split * 0.1, 0.05);
-        let blend_start = split - blend_width;
-        if view_depth > blend_start {
-            let next_cascade = cascade + 1u;
-            let next_normal_bias = shadow_texel_size(next_cascade) * min(normal_slope, 2.0);
-            let next_light_view_projection = camera.light_view_projections[next_cascade];
-            let next_biased_shadow_position = next_light_view_projection
-                * vec4<f32>(vertex.world_position + world_normal * next_normal_bias, 1.0);
-            let next_visibility = sample_shadow(next_biased_shadow_position, next_cascade);
-            let blend_amount = smoothstep(blend_start, split, view_depth);
-            shadow_visibility = mix(cascade_visibility, next_visibility, blend_amount);
+    var shadow_visibility = 1.0;
+    if camera.lighting_params.y > 0.5 {
+        let cascade_visibility = sample_shadow(biased_shadow_position, cascade);
+        shadow_visibility = cascade_visibility;
+        if view_depth > shadow_cascade_split(SHADOW_CASCADE_COUNT - 1u) {
+            shadow_visibility = 1.0;
+        } else if cascade < SHADOW_CASCADE_COUNT - 1u {
+            // Fade between cascades while their projected texel footprints overlap.
+            // Without this, the different resolutions produce a visible band at
+            // every split even when both cascades are stable and well filtered.
+            let split = shadow_cascade_split(cascade);
+            let blend_width = max(split * 0.1, 0.05);
+            let blend_start = split - blend_width;
+            if view_depth > blend_start {
+                let next_cascade = cascade + 1u;
+                let next_normal_bias = shadow_texel_size(next_cascade) * min(normal_slope, 2.0);
+                let next_light_view_projection = camera.light_view_projections[next_cascade];
+                let next_biased_shadow_position = next_light_view_projection
+                    * vec4<f32>(vertex.world_position + world_normal * next_normal_bias, 1.0);
+                let next_visibility = sample_shadow(next_biased_shadow_position, next_cascade);
+                let blend_amount = smoothstep(blend_start, split, view_depth);
+                shadow_visibility = mix(cascade_visibility, next_visibility, blend_amount);
+            }
         }
     }
     let specular = normal_distribution * geometry * fresnel
@@ -451,14 +463,15 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let direct = (diffuse * base_color.rgb + specular)
         * camera.light_color.rgb
         * normal_dot_light
-        * shadow_visibility;
+        * mix(camera.shadow_color.rgb, vec3<f32>(1.0), shadow_visibility);
     // Image-based lighting from the workspace skybox: metals get their
     // reflections here. Diffuse irradiance is a heavily blurred normal sample,
     // specular is a roughness-driven prefiltered reflection modulated by an
     // analytic environment BRDF (no LUT texture required).
     let environment_mip_count = camera.environment_params.x;
-    let environment_intensity = camera.environment_params.y;
-    let exposure = camera.environment_params.z;
+    let environment_diffuse_scale = camera.environment_params.y;
+    let environment_specular_scale = camera.environment_params.z;
+    let exposure = camera.lighting_params.w;
     let has_environment = camera.environment_params.w;
     let max_environment_lod = max(environment_mip_count - 1.0, 0.0);
     let reflection = reflect(-view_direction, mapped_normal);
@@ -480,14 +493,25 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         mapped_normal,
         diffuse_lod,
     ).rgb;
-    let diffuse_ibl = irradiance * base_color.rgb * (1.0 - metallic);
+    let diffuse_ibl = irradiance * base_color.rgb * (1.0 - metallic) * environment_diffuse_scale;
     let specular_ibl = prefiltered
         * environment_brdf_approx(base_reflectance, roughness, normal_dot_view);
-    let image_based = (diffuse_ibl + specular_ibl) * environment_intensity * has_environment;
-    let ambient = base_color.rgb * camera.ambient_color.rgb * (1.0 - metallic)
-        * (1.0 - has_environment);
-    let color = ambient + direct + slot_emissive_roughness.rgb * emissive_sample.rgb
-        + image_based;
+    let environment_day_factor = 0.08 + camera.lighting_params.x * 0.92;
+    let image_based = (diffuse_ibl + specular_ibl * environment_specular_scale)
+        * environment_day_factor
+        * has_environment;
+    let outdoor_ambient = camera.outdoor_ambient_color.rgb * camera.lighting_params.x;
+    let ambient = base_color.rgb * (camera.ambient_color.rgb + outdoor_ambient) * (1.0 - metallic);
+    let top_shift = max(mapped_normal.y, 0.0) * camera.color_shift_top.rgb;
+    let bottom_shift = max(-mapped_normal.y, 0.0) * camera.color_shift_bottom.rgb;
+    var color = ambient + direct + slot_emissive_roughness.rgb * emissive_sample.rgb
+        + image_based + base_color.rgb * (top_shift + bottom_shift);
+    let fog_amount = smoothstep(
+        camera.fog_params.x,
+        camera.fog_params.y,
+        view_depth,
+    );
+    color = mix(color, camera.fog_color.rgb, fog_amount);
     let tone_mapped = aces_tone_map(color * exposure);
     var display_color = linear_to_srgb(tone_mapped);
     if FRAMEBUFFER_IS_SRGB > 0.5 {

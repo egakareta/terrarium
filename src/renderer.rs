@@ -10,8 +10,8 @@ use web_time::Instant;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    Camera, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT, Material,
-    MaterialSlot, Mesh, MeshMaterialSlots, Part, PartShape, Skybox, SkyboxError, Texture,
+    Camera, Color3, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, MATERIAL_SLOT_COUNT,
+    Material, MaterialSlot, Mesh, MeshMaterialSlots, Part, PartShape, Skybox, SkyboxError, Texture,
     TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
@@ -28,12 +28,6 @@ const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Uno
 const SHADOW_DISTANCE: f32 = 80.0;
 const SHADOW_CASTER_MARGIN: f32 = 20.0;
 const SHADOW_RECEIVER_MARGIN: f32 = 5.0;
-/// Exposure applied to scene and skybox colors before ACES tone mapping,
-/// giving a punchy look.
-const EXPOSURE: f32 = 1.0;
-/// Strength of skybox image-based lighting on PBR materials.
-const ENVIRONMENT_INTENSITY: f32 = 1.0;
-
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
 pub enum RendererError {
@@ -387,6 +381,7 @@ pub struct Renderer {
     #[cfg(feature = "meshpart")]
     free_meshpart_meshes: Vec<GpuMeshHandle>,
     clear_color: wgpu::Color,
+    shadow_pass_enabled: bool,
     last_frame: Instant,
     fps_timer: Instant,
     frame_count: u32,
@@ -424,12 +419,26 @@ pub struct CameraUniform {
     pub light_color: [f32; 4],
     /// RGB intensity of the fixed ambient light.
     pub ambient_color: [f32; 4],
+    /// RGB outdoor ambient contribution.
+    pub outdoor_ambient_color: [f32; 4],
+    /// RGB tint applied to upward-facing surfaces.
+    pub color_shift_top: [f32; 4],
+    /// RGB tint applied to downward-facing surfaces.
+    pub color_shift_bottom: [f32; 4],
+    /// RGB tint used by fully shadowed direct light.
+    pub shadow_color: [f32; 4],
+    /// x: daylight factor, y: shadow enable, z: shadow softness, w: exposure.
+    pub lighting_params: [f32; 4],
+    /// RGB fog color.
+    pub fog_color: [f32; 4],
+    /// x: fog start distance, y: fog end distance.
+    pub fog_params: [f32; 4],
     /// View-space far distance of each directional shadow cascade.
     pub shadow_cascade_splits: [[f32; 4]; 2],
     /// World-space width of one texel in each directional shadow cascade.
     pub shadow_texel_sizes: [[f32; 4]; 2],
-    /// Image-based lighting parameters: cubemap mip count, IBL intensity,
-    /// exposure, and 1.0/0.0 environment presence.
+    /// Image-based lighting parameters: cubemap mip count, diffuse scale,
+    /// specular scale, and 1.0/0.0 environment presence.
     pub environment_params: [f32; 4],
 }
 
@@ -1022,6 +1031,7 @@ impl Renderer {
                 b: 0.065,
                 a: 1.0,
             },
+            shadow_pass_enabled: true,
             last_frame: Instant::now(),
             fps_timer: Instant::now(),
             frame_count: 0,
@@ -1806,9 +1816,23 @@ impl Renderer {
     fn prepare_scene(&mut self, workspace: &Workspace) -> Result<(), RendererError> {
         self.prepared_batches.clear();
         let camera_vp = workspace.current_camera.view_projection_matrix();
-        let light_direction = Vec3::new(-0.45, 0.85, 0.35);
+        let lighting = &workspace.lighting;
+        let light_direction = workspace.sun_direction();
         let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
             light_view_projections(&workspace.current_camera, light_direction);
+        let daylight = lighting.daylight_factor();
+        let style_scale = match lighting.lighting_style {
+            crate::LightingStyle::Realistic => 1.0,
+            crate::LightingStyle::Soft => 0.72,
+        };
+        let brightness = finite_nonnegative(lighting.brightness);
+        let direct_scale = brightness * 1.5 * daylight * style_scale;
+        let exposure = finite_or(lighting.exposure_compensation, 0.0)
+            .clamp(-16.0, 16.0)
+            .exp2();
+        let fog_start = finite_nonnegative(lighting.fog_start);
+        let fog_end = finite_nonnegative(lighting.fog_end).max(fog_start + 0.001);
+        self.shadow_pass_enabled = lighting.shadows_enabled();
         // Image-based lighting comes from the workspace skybox cubemap, which
         // carries a full CPU-generated mip chain: smooth surfaces sample sharp
         // reflections at LOD 0 while rough surfaces sample blurred mips.
@@ -1827,15 +1851,35 @@ impl Renderer {
                 .extend(1.0)
                 .to_array(),
             camera_forward: workspace.current_camera.forward().extend(0.0).to_array(),
-            light_direction: [-0.45, 0.85, 0.35, 0.0],
-            light_color: [3.0, 2.8, 2.5, 0.0],
-            ambient_color: [0.035, 0.045, 0.06, 0.0],
+            light_direction: light_direction.extend(0.0).to_array(),
+            light_color: [
+                1.0 * direct_scale,
+                0.93 * direct_scale,
+                0.83 * direct_scale,
+                0.0,
+            ],
+            ambient_color: scaled_color(lighting.ambient, 0.07),
+            outdoor_ambient_color: scaled_color(
+                lighting.outdoor_ambient,
+                0.07 * (0.08 + daylight * 0.92),
+            ),
+            color_shift_top: lighting_color(lighting.color_shift_top),
+            color_shift_bottom: lighting_color(lighting.color_shift_bottom),
+            shadow_color: lighting_color(lighting.shadow_color),
+            lighting_params: [
+                daylight,
+                if lighting.shadows_enabled() { 1.0 } else { 0.0 },
+                finite_nonnegative(lighting.shadow_softness).min(1.0),
+                exposure,
+            ],
+            fog_color: lighting_color(lighting.fog_color),
+            fog_params: [fog_start, fog_end, 0.0, 0.0],
             shadow_cascade_splits: pack_shadow_values(shadow_cascade_splits),
             shadow_texel_sizes: pack_shadow_values(shadow_texel_sizes),
             environment_params: [
                 environment_mip_count,
-                ENVIRONMENT_INTENSITY,
-                EXPOSURE,
+                finite_nonnegative(lighting.environment_diffuse_scale),
+                finite_nonnegative(lighting.environment_specular_scale),
                 has_environment,
             ],
         };
@@ -1859,7 +1903,7 @@ impl Renderer {
             0,
             bytemuck::bytes_of(&SkyboxCameraUniform {
                 view_projection: sky_view_projection.to_cols_array_2d(),
-                exposure: [EXPOSURE, 0.0, 0.0, 0.0],
+                exposure: [exposure * (0.08 + daylight * 0.92), 0.0, 0.0, 0.0],
             }),
         );
         if self.skybox_revision != Some(workspace.skybox_revision()) {
@@ -2442,6 +2486,9 @@ impl Renderer {
     }
 
     fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+        if !self.shadow_pass_enabled {
+            return;
+        }
         for (cascade, view) in self.shadow_layer_views.iter().enumerate() {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("directional shadow cascade pass"),
@@ -2994,6 +3041,37 @@ fn light_view_projections(
     }
 
     (matrices, splits, texel_sizes)
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    value.is_finite().then_some(value).unwrap_or(fallback)
+}
+
+fn finite_nonnegative(value: f32) -> f32 {
+    finite_or(value, 0.0).max(0.0)
+}
+
+fn color_channel(value: f32) -> f32 {
+    finite_or(value, 0.0).clamp(0.0, 1.0)
+}
+
+fn lighting_color(color: Color3) -> [f32; 4] {
+    [
+        color_channel(color.r),
+        color_channel(color.g),
+        color_channel(color.b),
+        0.0,
+    ]
+}
+
+fn scaled_color(color: Color3, scale: f32) -> [f32; 4] {
+    let scale = finite_nonnegative(scale);
+    [
+        color_channel(color.r) * scale,
+        color_channel(color.g) * scale,
+        color_channel(color.b) * scale,
+        0.0,
+    ]
 }
 
 fn pack_shadow_values(values: [f32; SHADOW_CASCADE_COUNT]) -> [[f32; 4]; 2] {

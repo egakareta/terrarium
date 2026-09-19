@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Skybox, Texture,
-    TextureError, TextureHandle, TweenManager,
+    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Lighting, Skybox,
+    Texture, TextureError, TextureHandle, TweenManager, glam::Vec3,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -20,8 +20,8 @@ pub struct Workspace {
     textures: Vec<Texture>,
     texture_revisions: Vec<u64>,
     texture_revision: u64,
-    skybox: Option<Skybox>,
-    skybox_revision: u64,
+    /// Scene-wide lighting configuration.
+    pub lighting: Lighting,
     lookup: Rc<InstanceLookup>,
 }
 
@@ -42,8 +42,7 @@ impl Workspace {
             textures: Vec::new(),
             texture_revisions: Vec::new(),
             texture_revision: 0,
-            skybox: Some(Skybox::default()),
-            skybox_revision: 1,
+            lighting: Lighting::default(),
             lookup,
         }
     }
@@ -136,39 +135,134 @@ impl Workspace {
         Ok(())
     }
 
-    /// Returns the workspace skybox, if one is set.
+    /// Returns the lighting skybox, if one is set.
     ///
     /// New workspaces default to an embedded cross-layout skybox.
     /// When no skybox is set, the renderer clears to its clear color
     /// instead.
     pub fn skybox(&self) -> Option<&Skybox> {
-        self.skybox.as_ref()
+        self.lighting.skybox()
     }
 
-    /// Replaces the workspace skybox.
+    /// Replaces the lighting skybox.
     ///
     /// The renderer re-uploads the six faces before the next frame.
     pub fn set_skybox(&mut self, skybox: Skybox) {
-        self.skybox = Some(skybox);
-        self.skybox_revision = self.skybox_revision.wrapping_add(1);
+        self.lighting.set_skybox(skybox);
     }
 
-    /// Removes the workspace skybox.
+    /// Removes the lighting skybox.
     ///
     /// The renderer clears to its clear color until a new skybox is set.
     pub fn clear_skybox(&mut self) {
-        self.skybox = None;
-        self.skybox_revision = self.skybox_revision.wrapping_add(1);
+        self.lighting.clear_skybox();
     }
 
-    /// Returns the revision of the workspace skybox, bumped by every
+    /// Returns the revision of the lighting skybox, bumped by every
     /// [`set_skybox`](Self::set_skybox) and [`clear_skybox`](Self::clear_skybox)
     /// call.
     ///
     /// The renderer uses this to re-upload the skybox faces before the next
     /// frame. It is also useful for external caches keyed by skybox content.
     pub fn skybox_revision(&self) -> u64 {
-        self.skybox_revision
+        self.lighting.skybox_revision()
+    }
+
+    /// Default direction toward the sun.
+    pub const DEFAULT_SUN_DIRECTION: Vec3 = Vec3::new(-0.45, 0.85, 0.35);
+
+    /// Returns the unit vector pointing from the scene toward the sun.
+    ///
+    /// The renderer uses this for the key light direction and its shadow
+    /// cascades. New workspaces point at the midday sun.
+    pub fn sun_direction(&self) -> Vec3 {
+        self.lighting.render_sun_direction()
+    }
+
+    /// Returns the direction of the sun.
+    pub fn get_sun_direction(&self) -> Vec3 {
+        self.sun_direction()
+    }
+
+    /// Sets the direction toward the sun.
+    ///
+    /// The direction is normalized before it is stored. A zero-length or
+    /// non-finite direction falls back to straight up (`+Y`).
+    /// [`clock_time`](Self::clock_time) is updated to the nearest hour whose
+    /// sun-path direction best matches the new direction.
+    pub fn set_sun_direction(&mut self, direction: Vec3) {
+        self.lighting.set_sun_direction(direction);
+    }
+
+    /// Returns the time of day in hours, in `[0, 24)`.
+    ///
+    /// This is the last value passed to [`set_clock_time`](Self::set_clock_time),
+    /// or the nearest matching hour after
+    /// [`set_sun_direction`](Self::set_sun_direction). `12.0` is midday and
+    /// `0.0` is midnight. New workspaces start at midday.
+    pub fn clock_time(&self) -> f32 {
+        self.lighting.clock_time()
+    }
+
+    /// Sets the time of day in hours and moves the sun along its arc.
+    ///
+    /// Values wrap into `[0, 24)`, so `25.0` is `1.0` and `-6.0` is `18.0`.
+    /// Non-finite values fall back to midday (`12.0`). On the sun path,
+    /// `6.0` is sunrise on the eastern (`+X`) horizon, `12.0` is the midday
+    /// sun, `18.0` is sunset on the western (`-X`) horizon, and `0.0` points
+    /// below the horizon at midnight.
+    pub fn set_clock_time(&mut self, hours: f32) {
+        self.lighting.set_clock_time(hours);
+    }
+
+    /// Advances the time of day by `hours_per_second` for the elapsed real time.
+    pub fn advance_clock_time(&mut self, delta_seconds: f32, hours_per_second: f32) {
+        self.lighting
+            .advance_clock_time(delta_seconds, hours_per_second);
+    }
+
+    /// Returns the sun direction for a time of day in hours.
+    ///
+    /// This is the same mapping [`set_clock_time`](Self::set_clock_time)
+    /// uses, without modifying the workspace. Values wrap into `[0, 24)`;
+    /// non-finite values map to the midday sun.
+    pub fn sun_direction_from_clock_time(hours: f32) -> Vec3 {
+        Lighting::sun_direction_from_clock_time(hours)
+    }
+
+    /// Returns the time as a `HH:MM:SS` string.
+    pub fn time_of_day(&self) -> String {
+        self.lighting.time_of_day()
+    }
+
+    /// Parses and sets a `HH:MM:SS` time.
+    pub fn set_time_of_day(&mut self, time: &str) -> Result<(), crate::TimeOfDayError> {
+        self.lighting.set_time_of_day(time)
+    }
+
+    /// Returns minutes elapsed since midnight.
+    pub fn get_minutes_after_midnight(&self) -> f32 {
+        self.lighting.get_minutes_after_midnight()
+    }
+
+    /// Sets the time using minutes elapsed since midnight.
+    pub fn set_minutes_after_midnight(&mut self, minutes: f32) {
+        self.lighting.set_minutes_after_midnight(minutes);
+    }
+
+    /// Returns the direction of the moon, opposite the sun direction.
+    pub fn moon_direction(&self) -> Vec3 {
+        self.lighting.moon_direction()
+    }
+
+    /// Returns the direction of the moon.
+    pub fn get_moon_direction(&self) -> Vec3 {
+        self.lighting.get_moon_direction()
+    }
+
+    /// Returns an approximate normalized lunar phase in `[0, 1)`.
+    pub fn get_moon_phase(&self) -> f32 {
+        self.lighting.get_moon_phase()
     }
 
     /// Returns a descendant by ID, downcast to its concrete instance type.
@@ -288,8 +382,7 @@ impl Clone for Workspace {
             textures: self.textures.clone(),
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
-            skybox: self.skybox.clone(),
-            skybox_revision: self.skybox_revision,
+            lighting: self.lighting.clone(),
             lookup: lookup.clone(),
         };
         for child in workspace.instance.children_mut() {
@@ -546,6 +639,7 @@ mod tests {
 
         let workspace = Workspace::new();
         let skybox = workspace.skybox().expect("default skybox is set");
+        assert!(workspace.lighting.skybox().is_some());
         assert_eq!(skybox.face_size(), 512);
         assert!(skybox.face(CubemapFace::Front).pixels().len() == 512 * 512 * 4);
 
@@ -558,13 +652,121 @@ mod tests {
         let pixels = vec![1, 2, 3, 255];
         let faces = CubemapFace::ALL
             .map(|_| Image::from_rgba8(1, 1, pixels.clone()).expect("1x1 test face is valid"));
-        workspace.set_skybox(Skybox::from_faces(faces).unwrap());
+        workspace
+            .lighting
+            .set_skybox(Skybox::from_faces(faces).unwrap());
         assert_eq!(workspace.skybox().unwrap().face_size(), 1);
         assert_eq!(
             workspace.clone().skybox().unwrap().face_size(),
             1,
             "cloned workspaces keep their skybox"
         );
+    }
+
+    #[test]
+    fn workspace_defaults_to_a_midday_sun() {
+        let workspace = Workspace::new();
+        let expected = Vec3::new(-0.45, 0.85, 0.35).normalize();
+        assert!(
+            (workspace.sun_direction() - expected).length() < 1e-6,
+            "default sun should match DEFAULT_SUN_DIRECTION, got {:?}",
+            workspace.sun_direction()
+        );
+        assert!((workspace.clock_time() - 12.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clock_time_moves_the_sun_along_its_arc() {
+        let noon = Workspace::sun_direction_from_clock_time(12.0);
+        let expected_noon = Vec3::new(-0.45, 0.85, 0.35).normalize();
+        assert!((noon - expected_noon).length() < 1e-6);
+
+        let sunrise = Workspace::sun_direction_from_clock_time(6.0);
+        assert!(
+            (sunrise - Vec3::X).length() < 1e-5,
+            "sunrise should sit on the eastern horizon, got {sunrise:?}"
+        );
+
+        let sunset = Workspace::sun_direction_from_clock_time(18.0);
+        assert!(
+            (sunset + Vec3::X).length() < 1e-5,
+            "sunset should sit on the western horizon, got {sunset:?}"
+        );
+
+        let midnight = Workspace::sun_direction_from_clock_time(0.0);
+        assert!(
+            midnight.y < -0.5,
+            "midnight sun should point below the horizon, got {midnight:?}"
+        );
+
+        assert!((Workspace::sun_direction_from_clock_time(24.0) - midnight).length() < 1e-6);
+        assert!((Workspace::sun_direction_from_clock_time(36.0) - noon).length() < 1e-6);
+        assert!((Workspace::sun_direction_from_clock_time(-6.0) - sunset).length() < 1e-6);
+        assert!((Workspace::sun_direction_from_clock_time(f32::NAN) - noon).length() < 1e-6);
+    }
+
+    #[test]
+    fn clock_time_round_trips_through_the_workspace() {
+        let mut workspace = Workspace::new();
+        for hours in [0.0, 5.5, 6.0, 9.25, 12.0, 15.75, 18.0, 23.5] {
+            workspace.set_clock_time(hours);
+            assert!((workspace.clock_time() - hours).abs() < f32::EPSILON);
+            let expected = Workspace::sun_direction_from_clock_time(hours);
+            assert!((workspace.sun_direction() - expected).length() < 1e-6);
+        }
+
+        workspace.set_clock_time(25.0);
+        assert!((workspace.clock_time() - 1.0).abs() < f32::EPSILON);
+        workspace.set_clock_time(f32::NAN);
+        assert!((workspace.clock_time() - 12.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn custom_sun_directions_report_the_nearest_clock_time() {
+        let mut workspace = Workspace::new();
+
+        workspace.set_sun_direction(Vec3::X);
+        assert!((workspace.sun_direction() - Vec3::X).length() < 1e-6);
+        assert!((workspace.clock_time() - 6.0).abs() < 0.02);
+
+        workspace.set_sun_direction(-Vec3::X);
+        assert!((workspace.clock_time() - 18.0).abs() < 0.02);
+
+        workspace.set_sun_direction(Vec3::NEG_Y);
+        // Straight down is not on the sun path (midnight points below the
+        // horizon along the tilted arc), so it reports a nearby nighttime hour.
+        assert!(
+            workspace.clock_time() < 2.0 || workspace.clock_time() > 20.0,
+            "straight down should report a nighttime hour, got {}",
+            workspace.clock_time()
+        );
+
+        // Directions on the sun path invert back to their hour.
+        workspace.set_sun_direction(Workspace::sun_direction_from_clock_time(9.26));
+        assert!((workspace.clock_time() - 9.26).abs() < 0.02);
+
+        workspace.set_sun_direction(Vec3::new(1.0, 2.0, 3.0));
+        assert!((workspace.sun_direction().length() - 1.0).abs() < 1e-6);
+
+        workspace.set_sun_direction(Vec3::ZERO);
+        assert_eq!(workspace.sun_direction(), Vec3::Y);
+
+        workspace.set_sun_direction(Vec3::new(f32::NAN, 0.0, 0.0));
+        assert_eq!(workspace.sun_direction(), Vec3::Y);
+        assert!(workspace.sun_direction().is_finite());
+    }
+
+    #[test]
+    fn cloned_workspaces_keep_their_sun_settings() {
+        let mut workspace = Workspace::new();
+        workspace.set_clock_time(17.5);
+        workspace.lighting.brightness = 0.75;
+        workspace.lighting.global_shadows = false;
+        let cloned = workspace.clone();
+        assert!((cloned.clock_time() - 17.5).abs() < f32::EPSILON);
+        assert!((cloned.sun_direction() - workspace.sun_direction()).length() < 1e-6);
+        assert_eq!(cloned.lighting.brightness, 0.75);
+        assert!(!cloned.lighting.global_shadows);
     }
 
     #[test]
