@@ -61,7 +61,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         TextureColorSpace::Srgb,
     )?)?;
 
-    let ground = engine.add_child_with_ref(Part::new("Ground"), |part| {
+    let ground = engine.add_child_with_ref(Part::new().named("Ground"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
@@ -72,7 +72,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
 
     for x in -4..=4 {
         let x = x as f32 * 2.1;
-        ground.add_child_with(Part::unnamed(), |part| {
+        ground.add_child_with(Part::new(), |part| {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
@@ -82,7 +82,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         });
     }
 
-    let tower = engine.add_child_with(Part::unnamed(), |part| {
+    let tower = engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Cylinder;
         part.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
@@ -96,7 +96,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_material_slot(Face::Top, Material::textured(grass_top));
         part.set_material_slot(Face::Right, Material::textured(grass_side));
         part.set_material_slot(Face::Bottom, Material::textured(dirt));
-        part.add_child_with(SpotLight::new("TowerSpotLight"), |light| {
+        part.add_child_with(SpotLight::new().named("TowerSpotLight"), |light| {
             light.color = Color3::new(0.18, 0.45, 1.0);
             light.brightness = 4.0;
             light.face = Face::Back;
@@ -104,7 +104,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         });
     });
 
-    engine.add_child_with(Part::new("GrassBlock"), |part| {
+    engine.add_child_with(Part::new().named("GrassBlock"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(3.2, 0.8, -2.3));
         part.size = Vec3::new(1.5, 1.6, 1.5);
@@ -126,7 +126,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_material_slot(Face::Right, grass_side);
     });
 
-    let platform = engine.add_child_with(Part::unnamed(), |part| {
+    let platform = engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
@@ -136,7 +136,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_material(material);
     });
 
-    let orb = engine.add_child_with(Part::unnamed(), |part| {
+    let orb = engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Ball;
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
@@ -146,7 +146,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             ..Default::default()
         });
         part.can_collide = false;
-        part.add_child_with(PointLight::unnamed(), |light| {
+        part.add_child_with(PointLight::new(), |light| {
             light.color = Color3::new(1.0, 0.35, 0.08);
             light.brightness = 3.5;
             light.range = 8.0;
@@ -154,7 +154,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         });
     });
 
-    engine.add_child_with(Part::unnamed(), |part| {
+    engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::Wedge;
         part.set_position(Vec3::new(2.7, 1.5, 2.2));
         part.size = Vec3::new(1.1, 3.0, 1.1);
@@ -162,7 +162,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_orientation(Vec3::new(0.0, 26.0, 0.0));
     });
 
-    engine.add_child_with(Part::unnamed(), |part| {
+    engine.add_child_with(Part::new(), |part| {
         part.shape = PartShape::CornerWedge;
         part.set_position(Vec3::new(-4.7, 0.6, 3.1));
         part.size = Vec3::new(1.8, 1.2, 1.8);

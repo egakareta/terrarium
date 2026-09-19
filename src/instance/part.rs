@@ -33,9 +33,9 @@ pub struct BasePart {
 impl BasePart {
     /// Creates a base part with identity transform, unit size, white tint, and
     /// collision metadata enabled.
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            instance: InstanceData::new(name),
+            instance: InstanceData::new("BasePart"),
             pv_instance: PVInstance::new(),
             size: Vec3::ONE,
             color: Color3::WHITE,
@@ -43,16 +43,11 @@ impl BasePart {
             can_collide: true,
         }
     }
-
-    /// Creates a base part without assigning a display name.
-    pub fn unnamed() -> Self {
-        Self::new("")
-    }
 }
 
 impl Default for BasePart {
     fn default() -> Self {
-        Self::unnamed()
+        Self::new()
     }
 }
 
@@ -105,17 +100,12 @@ pub struct Part {
 impl Part {
     /// Creates a visible part using a unit [`PartShape::Block`] and the default
     /// material.
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            basepart: BasePart::new(name),
+            basepart: <BasePart as crate::Instance>::named(BasePart::new(), "Part"),
             shape: PartShape::Block,
             material_slots: MeshMaterialSlots::default(),
         }
-    }
-
-    /// Creates a visible part without assigning a display name.
-    pub fn unnamed() -> Self {
-        Self::new("")
     }
 
     /// Assigns the same material to all six directional slots.
@@ -160,7 +150,7 @@ impl Part {
 
 impl Default for Part {
     fn default() -> Self {
-        Self::unnamed()
+        Self::new()
     }
 }
 
@@ -184,12 +174,13 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
+    use crate::Instance as _;
 
     #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {
         let position = Vec3::new(1.0, 2.0, 3.0);
         let orientation = Vec3::new(10.0, 20.0, 30.0);
-        let mut part = Part::new("part");
+        let mut part = Part::new().named("part");
 
         part.set_position(position);
         part.set_orientation(orientation);
@@ -200,7 +191,7 @@ mod tests {
 
     #[test]
     fn material_slot_falls_back_to_the_default_material_until_overridden() {
-        let mut part = Part::new("part");
+        let mut part = Part::new().named("part");
         assert_eq!(part.material_slot(Face::Top), &Material::default());
         assert_eq!(part.material(), Some(&Material::default()));
 
@@ -213,7 +204,7 @@ mod tests {
 
     #[test]
     fn set_material_assigns_all_directional_slots() {
-        let mut part = Part::new("part");
+        let mut part = Part::new().named("part");
         let material = Material::from_color(Color3::new(1.0, 0.0, 0.0));
 
         part.set_material(material);

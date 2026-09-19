@@ -44,22 +44,17 @@ pub struct PointLight {
 impl PointLight {
     /// Creates a white point light with brightness `1`, range `8`, and shadows
     /// disabled.
-    pub fn new(name: impl Into<String>) -> Self {
+    pub fn new() -> Self {
         Self {
-            light: LightProperties::new(name),
+            light: LightProperties::new("PointLight"),
             range: 8.0,
         }
-    }
-
-    /// Creates a point light without assigning a display name.
-    pub fn unnamed() -> Self {
-        Self::new("")
     }
 }
 
 impl Default for PointLight {
     fn default() -> Self {
-        Self::unnamed()
+        Self::new()
     }
 }
 
@@ -95,23 +90,21 @@ pub struct SpotLight {
 impl SpotLight {
     /// Creates a white front-facing spot light with brightness `1`, a
     /// 90-degree cone, and shadows disabled.
-    pub fn new(name: impl Into<String>) -> Self {
+    ///
+    /// The display name defaults to `"SpotLight"`; use
+    /// [`Instance::named`](crate::Instance::named) to override it.
+    pub fn new() -> Self {
         Self {
-            light: LightProperties::new(name),
+            light: LightProperties::new("SpotLight"),
             face: Face::Front,
             angle: 90.0,
         }
-    }
-
-    /// Creates a spot light without assigning a display name.
-    pub fn unnamed() -> Self {
-        Self::new("")
     }
 }
 
 impl Default for SpotLight {
     fn default() -> Self {
-        Self::unnamed()
+        Self::new()
     }
 }
 
@@ -147,23 +140,21 @@ pub struct SurfaceLight {
 impl SurfaceLight {
     /// Creates a white front-facing surface light with brightness `1`, a
     /// 90-degree emission angle, and shadows disabled.
-    pub fn new(name: impl Into<String>) -> Self {
+    ///
+    /// The display name defaults to `"SurfaceLight"`; use
+    /// [`Instance::named`](crate::Instance::named) to override it.
+    pub fn new() -> Self {
         Self {
-            light: LightProperties::new(name),
+            light: LightProperties::new("SurfaceLight"),
             face: Face::Front,
             angle: 90.0,
         }
-    }
-
-    /// Creates a surface light without assigning a display name.
-    pub fn unnamed() -> Self {
-        Self::new("")
     }
 }
 
 impl Default for SurfaceLight {
     fn default() -> Self {
-        Self::unnamed()
+        Self::new()
     }
 }
 
@@ -200,8 +191,8 @@ mod tests {
         assert_instance::<SpotLight>();
         assert_instance::<SurfaceLight>();
 
-        let mut parent = BasePart::new("fixture");
-        let light = parent.add_child_with_ref(PointLight::new("bulb"), |light| {
+        let mut parent = BasePart::new().named("fixture");
+        let light = parent.add_child_with_ref(PointLight::new().named("bulb"), |light| {
             light.color = Color3::new(1.0, 0.5, 0.25);
             light.brightness = 3.0;
             light.shadows = true;

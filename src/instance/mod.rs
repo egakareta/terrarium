@@ -345,10 +345,24 @@ pub trait Instance: Any + Debug + InstanceClone {
     fn class_name(&self) -> &'static str;
 
     /// The display name of this instance.
+    ///
+    /// This is the class name e.g. `"Part"`, `"PointLight"` if
+    /// not explicitly set.
     fn name(&self) -> &str;
 
     /// Changes the display name of this instance.
     fn set_name(&mut self, name: String);
+
+    /// Returns this instance with its display name set.
+    ///
+    /// Builder-style alternative to [`set_name`](Self::set_name).
+    fn named(mut self, name: impl Into<String>) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_name(name.into());
+        self
+    }
 
     /// Returns this instance's stable identifier.
     fn id(&self) -> InstanceId;
@@ -753,10 +767,10 @@ mod tests {
         assert_instance::<Camera>();
         assert_instance::<Part>();
         assert_eq!(Workspace::new().name(), "Workspace");
-        assert_eq!(BasePart::new("base").name(), "base");
+        assert_eq!(BasePart::new().named("base").name(), "base");
         assert_eq!(Camera::default().name(), "Camera");
 
-        let mut instance: Box<dyn Instance> = Box::new(BasePart::new("base"));
+        let mut instance: Box<dyn Instance> = Box::new(BasePart::new().named("base"));
         assert!(instance.is::<BasePart>());
         assert!(!instance.is::<Part>());
         assert_eq!(instance.downcast_ref::<BasePart>().unwrap().name(), "base");
@@ -775,8 +789,8 @@ mod tests {
 
     #[test]
     fn every_instance_can_own_a_nested_instance_tree() {
-        let mut model = BasePart::new("model");
-        let part_id = model.add_child_with(Part::new("part"), |part| {
+        let mut model = BasePart::new().named("model");
+        let part_id = model.add_child_with(Part::new().named("part"), |part| {
             part.shape = PartShape::Ball;
         });
         let camera_id = Camera::default().set_parent(&mut model);
@@ -821,8 +835,8 @@ mod tests {
     #[test]
     fn mutable_children_are_iterated_without_exposing_the_backing_slice() {
         let mut workspace = Workspace::new();
-        let first_id = Part::new("first").set_parent(&mut workspace);
-        let second_id = Part::new("second").set_parent(&mut workspace);
+        let first_id = Part::new().named("first").set_parent(&mut workspace);
+        let second_id = Part::new().named("second").set_parent(&mut workspace);
 
         {
             let mut children = workspace.children_mut();
@@ -837,8 +851,8 @@ mod tests {
 
     #[test]
     fn dropped_instance_ids_get_a_new_generation() {
-        let old_id = Part::new("old").id();
-        let new_id = Part::new("new").id();
+        let old_id = Part::new().id();
+        let new_id = Part::new().id();
 
         assert_ne!(old_id, new_id);
     }

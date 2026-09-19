@@ -52,9 +52,9 @@ fn eframe_composite_shader_validates() {
 
 #[test]
 fn material_set_keys_resolve_unset_slots_to_the_default_material() {
-    use crate::{Face, Part};
+    use crate::{Face, Instance as _, Part};
 
-    let mut part = Part::new("part");
+    let mut part = Part::new().named("part");
     let top = Material {
         base_color: [0.1, 0.4, 0.2, 1.0],
         metallic: 0.1,
@@ -77,14 +77,14 @@ fn material_set_keys_resolve_unset_slots_to_the_default_material() {
 
 #[test]
 fn material_set_keys_distinguish_per_face_factors() {
-    use crate::{Face, Part};
+    use crate::{Face, Instance as _, Part};
 
-    let mut copper = Part::new("copper");
+    let mut copper = Part::new().named("copper");
     copper.set_material(Material {
         metallic: 0.82,
         ..Material::default()
     });
-    let mut copper_top_metal = Part::new("copper-top-metal");
+    let mut copper_top_metal = Part::new().named("copper-top-metal");
     copper_top_metal.set_material(Material {
         metallic: 0.82,
         ..Material::default()
@@ -96,7 +96,7 @@ fn material_set_keys_distinguish_per_face_factors() {
             ..Material::default()
         },
     );
-    let mut copper_clone = Part::new("copper-clone");
+    let mut copper_clone = Part::new().named("copper-clone");
     copper_clone.set_material(Material {
         metallic: 0.82,
         ..Material::default()

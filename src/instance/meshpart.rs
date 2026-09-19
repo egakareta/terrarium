@@ -157,7 +157,7 @@ impl MeshPart {
     /// Passing a cloned [`MeshHandle`] creates an independent part variant that
     /// shares the underlying mesh data while retaining its own transform and
     /// material overrides.
-    pub fn new<M>(name: impl Into<String>, mesh: M) -> Self
+    pub fn new<M>(mesh: M) -> Self
     where
         M: Into<MeshHandle>,
     {
@@ -165,7 +165,7 @@ impl MeshPart {
         let bounding_radius = mesh_bounding_radius(mesh.mesh());
         let material_slots = mesh.0.material_slots.clone();
         Self {
-            basepart: BasePart::new(name),
+            basepart: <BasePart as crate::Instance>::named(BasePart::new(), "MeshPart"),
             mesh,
             mesh_revision: 0,
             bounding_radius,
@@ -764,7 +764,7 @@ mod tests {
 
     #[test]
     fn material_returns_only_uniform_effective_slots() {
-        let mut meshpart = MeshPart::new("part", Mesh::block(1.0, [1.0; 4]));
+        let mut meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).named("part");
         assert_eq!(meshpart.material(), Some(&Material::default()));
 
         let material = Material::from_color(crate::Color3::new(1.0, 0.0, 0.0));
@@ -790,7 +790,7 @@ mod tests {
             let mesh_handle = workspace
                 .add_mesh(bytes)
                 .unwrap_or_else(|error| panic!("failed to import {name}: {error}"));
-            let meshpart = MeshPart::new(name, mesh_handle.clone());
+            let meshpart = MeshPart::new(mesh_handle.clone()).named(name);
             let mesh = meshpart.mesh();
 
             assert!(!mesh.vertices.is_empty(), "{name} has no vertices");
@@ -841,7 +841,7 @@ mod tests {
             assert_eq!(loaded.class_name(), "MeshPart");
             assert_eq!(loaded.name(), name);
             let vertex_count = loaded.mesh().vertices.len();
-            let variant_id = workspace.add_child(MeshPart::new(name, mesh_handle.clone()));
+            let variant_id = workspace.add_child(MeshPart::new(mesh_handle.clone()).named(name));
             let variant = workspace.get::<MeshPart>(variant_id).unwrap();
             assert_eq!(variant.mesh().vertices.len(), vertex_count);
             assert!(workspace.get_mesh(&mesh_handle).is_some());

@@ -378,12 +378,12 @@ mod tests {
     fn dynamic_parts_fall_and_rest_on_anchored_parts() {
         let mut workspace = Workspace::new();
 
-        let mut floor = Part::unnamed();
+        let mut floor = Part::new();
         floor.size = Vec3::new(10.0, 1.0, 10.0);
         floor.set_position(Vec3::new(0.0, -0.5, 0.0));
         floor.set_parent(&mut workspace);
 
-        let mut ball = Part::unnamed();
+        let mut ball = Part::new();
         ball.shape = PartShape::Ball;
         ball.anchored = false;
         ball.set_position(Vec3::new(0.0, 3.0, 0.0));

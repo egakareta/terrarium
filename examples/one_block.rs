@@ -11,7 +11,7 @@ fn initialize(engine: &mut Engine) -> Result<(), RendererError> {
         TextureColorSpace::Srgb,
     )?)?;
 
-    engine.add_child_with(Part::new("Lantern"), |part| {
+    engine.add_child_with(Part::new().named("Lantern"), |part| {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, 1.0, 0.0));
         part.size = Vec3::new(2.0, 2.0, 2.0);

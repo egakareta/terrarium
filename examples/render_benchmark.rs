@@ -226,7 +226,7 @@ impl Benchmark {
         self.upper_layer_ids.reserve(block_count);
 
         for _ in 0..block_count {
-            let mut block = Part::unnamed();
+            let mut block = Part::new();
             block.shape = PartShape::Block;
             block.pivot_to(Mat4::from_rotation_translation(
                 Quat::from_rotation_y(self.random_f32() * std::f32::consts::TAU),
@@ -329,7 +329,7 @@ fn create_benchmark_workspace(
     for index in 0..part_count {
         let column = index % side;
         let row = index / side;
-        let mut part = Part::unnamed();
+        let mut part = Part::new();
         part.shape = match index % 5 {
             0 => PartShape::Block,
             1 => PartShape::Ball,
@@ -360,7 +360,7 @@ fn create_benchmark_workspace(
         part_ids.push(part.set_parent(workspace));
     }
 
-    let mut floor = Part::unnamed();
+    let mut floor = Part::new();
     floor.pivot_to(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)));
     floor.size = Vec3::new(extent + spacing * 2.0, 0.1, extent + spacing * 2.0);
     floor.color = Color3::new(0.08, 0.10, 0.14);

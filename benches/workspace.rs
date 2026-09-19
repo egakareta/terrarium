@@ -19,7 +19,7 @@ fn workspace_add_direct_children(bencher: &mut Bencher) {
     bencher.iter(|| {
         let mut workspace = Workspace::new();
         for _ in 0..FLAT_CHILDREN {
-            black_box(workspace.add_child(Part::unnamed()));
+            black_box(workspace.add_child(Part::new()));
         }
         black_box(workspace.instances().count());
     });
@@ -111,7 +111,7 @@ fn workspace_mixed_add_delete_churn(bencher: &mut Bencher) {
                 }
             }
             for _ in 0..delete_count {
-                active.push(workspace.add_child(Part::unnamed()));
+                active.push(workspace.add_child(Part::new()));
             }
         }
         black_box((removed, workspace.instances().count()));
@@ -122,14 +122,14 @@ fn build_flat_workspace(count: usize) -> (Workspace, Vec<InstanceId>) {
     let mut workspace = Workspace::new();
     let mut ids = Vec::with_capacity(count);
     for _ in 0..count {
-        ids.push(workspace.add_child(Part::unnamed()));
+        ids.push(workspace.add_child(Part::new()));
     }
     (workspace, ids)
 }
 
 fn populate_tree(workspace: &mut Workspace, roots: usize, depth: usize, branching: usize) {
     let mut frontier = (0..roots)
-        .map(|_| workspace.add_child(BasePart::unnamed()))
+        .map(|_| workspace.add_child(BasePart::new()))
         .collect::<Vec<_>>();
 
     for _ in 1..depth {
@@ -139,7 +139,7 @@ fn populate_tree(workspace: &mut Workspace, roots: usize, depth: usize, branchin
                 .get_mut::<BasePart>(parent_id)
                 .expect("tree frontier should contain base parts");
             for _ in 0..branching {
-                next_frontier.push(parent.add_child(BasePart::unnamed()));
+                next_frontier.push(parent.add_child(BasePart::new()));
             }
         }
         frontier = next_frontier;
@@ -153,13 +153,13 @@ fn build_subtree_workspace(
     let mut workspace = Workspace::new();
     let mut roots = Vec::with_capacity(root_count);
     for _ in 0..root_count {
-        let root_id = workspace.add_child(BasePart::unnamed());
+        let root_id = workspace.add_child(BasePart::new());
         roots.push(root_id);
         let root = workspace
             .get_mut::<BasePart>(root_id)
             .expect("new subtree root should be a base part");
         for _ in 0..children_per_root {
-            root.add_child(Part::unnamed());
+            root.add_child(Part::new());
         }
     }
     (workspace, roots)

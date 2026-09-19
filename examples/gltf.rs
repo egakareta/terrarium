@@ -3,7 +3,7 @@ use terrarium::{Engine, GltfError, Instance, MeshPart, Terrarium, glam::Vec3};
 fn initialize(engine: &mut Engine) -> Result<(), GltfError> {
     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
     let helmet_mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
-    let mut helmet = MeshPart::new("DamagedHelmet", helmet_mesh);
+    let mut helmet = MeshPart::new(helmet_mesh).named("DamagedHelmet");
     helmet.set_position(Vec3::new(0.0, 0.75, 0.0));
     engine.add_child(helmet);
     Ok(())
