@@ -782,9 +782,9 @@ mod tests {
         let assets: [(&str, &[u8]); 2] = [
             (
                 "DamagedHelmet",
-                include_bytes!("../assets/DamagedHelmet.glb"),
+                include_bytes!("../../assets/DamagedHelmet.glb"),
             ),
-            ("Duck", include_bytes!("../assets/Duck.glb")),
+            ("Duck", include_bytes!("../../assets/Duck.glb")),
         ];
 
         for (name, bytes) in assets {

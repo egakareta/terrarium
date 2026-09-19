@@ -12,6 +12,18 @@ use std::{
 use slotmap::SlotMap;
 
 use crate::glam::{EulerRot, Mat4, Quat, Vec3};
+mod camera;
+mod light;
+#[cfg(feature = "meshpart")]
+mod meshpart;
+mod part;
+mod workspace;
+pub use camera::*;
+pub use light::*;
+#[cfg(feature = "meshpart")]
+pub use meshpart::*;
+pub use part::*;
+pub use workspace::*;
 
 #[derive(Default)]
 struct InstanceIdHasher(u64);
