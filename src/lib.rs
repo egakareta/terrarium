@@ -4,8 +4,6 @@
 mod engine;
 mod instance;
 mod interpolation;
-#[cfg(feature = "physics")]
-mod physics;
 mod primitive;
 mod renderer;
 mod scene;
@@ -15,8 +13,6 @@ pub use engine::*;
 pub use glam;
 pub use instance::*;
 pub use interpolation::*;
-#[cfg(feature = "physics")]
-pub use physics::*;
 pub use primitive::*;
 #[cfg(feature = "physics")]
 pub use rapier3d;
