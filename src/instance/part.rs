@@ -1,6 +1,6 @@
 use crate::{
-    Color3, DEFAULT_MATERIAL, Face, HasPVInstance, InstanceData, Material, MeshMaterialSlots,
-    PVInstance, PartShape,
+    Color3, DEFAULT_MATERIAL, Face, HasPVInstance, Instance, InstanceData, Material,
+    MeshMaterialSlots, PVInstance, PartShape,
     glam::{Mat4, Vec3},
 };
 
@@ -247,7 +247,7 @@ impl Part {
     /// material.
     pub fn new() -> Self {
         Self {
-            basepart: <BasePart as crate::Instance>::named(BasePart::new(), "Part"),
+            basepart: BasePart::new().with_name("Part"),
             shape: PartShape::Block,
             material_slots: MeshMaterialSlots::default(),
         }
@@ -338,14 +338,13 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
-    use crate::Instance as _;
 
     #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {
         let position = Vec3::new(1.0, 2.0, 3.0);
         let orientation = Vec3::new(10.0, 20.0, 30.0);
         let part = Part::new()
-            .named("part")
+            .with_name("part")
             .with_position(position)
             .with_orientation(orientation);
 
@@ -355,7 +354,7 @@ mod tests {
 
     #[test]
     fn material_slot_falls_back_to_the_default_material_until_overridden() {
-        let part = Part::new().named("part");
+        let part = Part::new().with_name("part");
         assert_eq!(part.material_slot(Face::Top), &Material::default());
         assert_eq!(part.material(), Some(&Material::default()));
 
@@ -368,7 +367,7 @@ mod tests {
 
     #[test]
     fn with_material_assigns_all_directional_slots() {
-        let part = Part::new().named("part");
+        let part = Part::new().with_name("part");
         let material = Material::from_color(Color3::new(1.0, 0.0, 0.0));
 
         let part = part.with_material(material);

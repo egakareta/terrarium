@@ -3,9 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    BasePart, Face, HasBasePart, HasMaterials, HasPVInstance, MATERIAL_SLOT_COUNT, Material, Mesh,
-    MeshMaterialSlots, PVInstance, Texture, TextureColorSpace, TextureError, TextureFilter,
-    TextureHandle, Vertex, Workspace,
+    BasePart, Face, HasBasePart, HasMaterials, HasPVInstance, Instance, MATERIAL_SLOT_COUNT,
+    Material, Mesh, MeshMaterialSlots, PVInstance, Texture, TextureColorSpace, TextureError,
+    TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec2, Vec3},
 };
 
@@ -164,7 +164,7 @@ impl MeshPart {
         let bounding_radius = mesh_bounding_radius(mesh.mesh());
         let material_slots = mesh.0.material_slots.clone();
         Self {
-            basepart: <BasePart as crate::Instance>::named(BasePart::new(), "MeshPart"),
+            basepart: BasePart::new().with_name("MeshPart"),
             mesh,
             mesh_revision: 0,
             bounding_radius,
@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn material_returns_only_uniform_effective_slots() {
-        let meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).named("part");
+        let meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).with_name("part");
         assert_eq!(meshpart.material(), Some(&Material::default()));
 
         let material = Material::from_color(crate::Color3::new(1.0, 0.0, 0.0));
@@ -771,7 +771,7 @@ mod tests {
             let mesh_handle = workspace
                 .add_mesh(bytes)
                 .unwrap_or_else(|error| panic!("failed to import {name}: {error}"));
-            let meshpart = MeshPart::new(mesh_handle.clone()).named(name);
+            let meshpart = MeshPart::new(mesh_handle.clone()).with_name(name);
             let mesh = meshpart.mesh();
 
             assert!(!mesh.vertices.is_empty(), "{name} has no vertices");
@@ -822,7 +822,8 @@ mod tests {
             assert_eq!(loaded.class_name(), "MeshPart");
             assert_eq!(loaded.name(), name);
             let vertex_count = loaded.mesh().vertices.len();
-            let variant_id = workspace.add_child(MeshPart::new(mesh_handle.clone()).named(name));
+            let variant_id =
+                workspace.add_child(MeshPart::new(mesh_handle.clone()).with_name(name));
             let variant = workspace.get::<MeshPart>(variant_id).unwrap();
             assert_eq!(variant.mesh().vertices.len(), vertex_count);
             assert!(workspace.get_mesh(&mesh_handle).is_some());

@@ -281,7 +281,7 @@ impl SpotLight {
     /// 90-degree cone, and shadows disabled.
     ///
     /// The display name defaults to `"SpotLight"`; use
-    /// [`Instance::named`](crate::Instance::named) to override it.
+    /// [`Instance::with_name`](crate::Instance::with_name) to override it.
     pub fn new() -> Self {
         Self {
             light: LightProperties::new("SpotLight"),
@@ -389,14 +389,14 @@ mod tests {
         assert_instance::<SpotLight>();
         assert_instance::<SurfaceLight>();
 
-        let mut parent = BasePart::new().named("fixture");
+        let mut parent = BasePart::new().with_name("fixture");
         let light = parent.add_child_ref(
             PointLight::new()
                 .with_color(Color3::new(1.0, 0.5, 0.25))
                 .with_brightness(3.0)
                 .with_shadows(true)
                 .with_range(12.0)
-                .named("bulb"),
+                .with_name("bulb"),
         );
         assert_eq!(light.name(), "bulb");
         assert_eq!(light.color(), Color3::new(1.0, 0.5, 0.25));

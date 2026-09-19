@@ -131,8 +131,8 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.name()
             }
 
-            fn with_name(&mut self, name: String) -> &mut dyn $crate::Instance {
-                self.$data $(.$data_tail)*.set_name(name);
+            fn with_name(mut self, name: impl Into<String>) -> Self {
+                self.$data $(.$data_tail)*.set_name(name.into());
                 self
             }
 
@@ -176,11 +176,11 @@ macro_rules! impl_instance {
             }
 
             fn with_attribute(
-                &mut self,
-                name: String,
+                mut self,
+                name: impl Into<String>,
                 value: serde_json::Value,
-            ) -> &mut dyn $crate::Instance {
-                self.$data $(.$data_tail)*.set_attribute(name, value);
+            ) -> Self {
+                self.$data $(.$data_tail)*.set_attribute(name.into(), value);
                 self
             }
 
@@ -405,17 +405,10 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// not explicitly set.
     fn name(&self) -> &str;
 
-    /// Changes the display name of this instance.
-    fn with_name(&mut self, name: String) -> &mut dyn Instance;
-
     /// Returns this instance with its display name set.
-    fn named(mut self, name: impl Into<String>) -> Self
+    fn with_name(self, name: impl Into<String>) -> Self
     where
-        Self: Sized,
-    {
-        self.with_name(name.into());
-        self
-    }
+        Self: Sized;
 
     /// Returns this instance's stable identifier.
     fn id(&self) -> InstanceId;
@@ -431,20 +424,14 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// ```
     /// use terrarium::{Instance, Part};
     ///
-    /// let mut part = Part::new().named("crate");
-    /// part.with_attribute("health".to_owned(), serde_json::json!(100));
+    /// let part = Part::new()
+    ///     .with_name("crate")
+    ///     .with_attribute("health", serde_json::json!(100));
     /// assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(100)));
     /// ```
-    fn with_attribute(&mut self, name: String, value: serde_json::Value) -> &mut dyn Instance;
-
-    /// Returns this instance with custom metadata stored under `name`.
-    fn attributed(mut self, name: String, value: serde_json::Value) -> Self
+    fn with_attribute(self, name: impl Into<String>, value: serde_json::Value) -> Self
     where
-        Self: Sized,
-    {
-        self.with_attribute(name, value);
-        self
-    }
+        Self: Sized;
 
     /// Returns the custom metadata stored under `name`, if any.
     fn get_attribute(&self, name: &str) -> Option<&serde_json::Value>;
@@ -673,8 +660,9 @@ fn find_child_mut<'a, T: Instance>(
 /// ```
 /// use terrarium::{Instance, InstanceAttributes, Part};
 ///
-/// let mut part = Part::new();
-/// part.with_typed_attribute("tags", vec!["wood", "breakable"]).unwrap();
+/// let part = Part::new()
+///     .with_typed_attribute("tags", vec!["wood", "breakable"])
+///     .unwrap();
 /// assert_eq!(
 ///     part.get_typed_attribute::<Vec<String>>("tags").unwrap().unwrap(),
 ///     vec!["wood", "breakable"],
@@ -687,11 +675,12 @@ pub trait InstanceAttributes {
     /// Serialization failures (for example, a map with non-string keys) are
     /// reported without modifying the stored attributes.
     fn with_typed_attribute<T>(
-        &mut self,
+        self,
         name: impl Into<String>,
         value: T,
-    ) -> Result<&mut Self, serde_json::Error>
+    ) -> Result<Self, serde_json::Error>
     where
+        Self: Sized,
         T: Serialize;
 
     /// Reads back custom metadata previously stored with
@@ -706,15 +695,16 @@ pub trait InstanceAttributes {
 
 impl<T: Instance> InstanceAttributes for T {
     fn with_typed_attribute<U>(
-        &mut self,
+        self,
         name: impl Into<String>,
         value: U,
-    ) -> Result<&mut Self, serde_json::Error>
+    ) -> Result<Self, serde_json::Error>
     where
+        Self: Sized,
         U: Serialize,
     {
-        insert_typed_attribute(self, name, value)?;
-        Ok(self)
+        let value = serde_json::to_value(value)?;
+        Ok(self.with_attribute(name, value))
     }
 
     fn get_typed_attribute<U>(&self, name: &str) -> Option<Result<U, serde_json::Error>>
@@ -726,34 +716,12 @@ impl<T: Instance> InstanceAttributes for T {
 }
 
 impl InstanceAttributes for dyn Instance {
-    fn with_typed_attribute<T>(
-        &mut self,
-        name: impl Into<String>,
-        value: T,
-    ) -> Result<&mut Self, serde_json::Error>
-    where
-        T: Serialize,
-    {
-        insert_typed_attribute(self, name, value)?;
-        Ok(self)
-    }
-
     fn get_typed_attribute<T>(&self, name: &str) -> Option<Result<T, serde_json::Error>>
     where
         T: DeserializeOwned,
     {
         read_typed_attribute(self, name)
     }
-}
-
-fn insert_typed_attribute(
-    instance: &mut dyn Instance,
-    name: impl Into<String>,
-    value: impl Serialize,
-) -> Result<(), serde_json::Error> {
-    let value = serde_json::to_value(value)?;
-    instance.with_attribute(name.into(), value);
-    Ok(())
 }
 
 fn read_typed_attribute<T>(
@@ -1007,30 +975,25 @@ mod tests {
         assert_instance::<Camera>();
         assert_instance::<Part>();
         assert_eq!(Workspace::new().name(), "Workspace");
-        assert_eq!(BasePart::new().named("base").name(), "base");
+        assert_eq!(BasePart::new().with_name("base").name(), "base");
         assert_eq!(Camera::default().name(), "Camera");
 
-        let mut instance: Box<dyn Instance> = Box::new(BasePart::new().named("base"));
+        let instance: Box<dyn Instance> = Box::new(BasePart::new().with_name("base"));
         assert!(instance.is::<BasePart>());
         assert!(!instance.is::<Part>());
         assert_eq!(instance.downcast_ref::<BasePart>().unwrap().name(), "base");
-        instance
-            .downcast_mut::<BasePart>()
-            .unwrap()
-            .with_name("renamed".to_owned());
-        assert_eq!(instance.name(), "renamed");
-
         let instance = match instance.downcast::<BasePart>() {
             Ok(instance) => instance,
             Err(_) => panic!("expected a BasePart"),
         };
+        let instance = instance.with_name("renamed");
         assert_eq!(instance.name(), "renamed");
     }
 
     #[test]
     fn every_instance_can_own_a_nested_instance_tree() {
-        let mut model = BasePart::new().named("model");
-        let part_id = model.add_child(Part::new().with_shape(PartShape::Ball).named("part"));
+        let mut model = BasePart::new().with_name("model");
+        let part_id = model.add_child(Part::new().with_shape(PartShape::Ball).with_name("part"));
         let camera_id = Camera::default().set_parent(&mut model);
         let model_id = model.id();
 
@@ -1073,8 +1036,8 @@ mod tests {
     #[test]
     fn mutable_children_are_iterated_without_exposing_the_backing_slice() {
         let mut workspace = Workspace::new();
-        let first_id = Part::new().named("first").set_parent(&mut workspace);
-        let second_id = Part::new().named("second").set_parent(&mut workspace);
+        let first_id = Part::new().with_name("first").set_parent(&mut workspace);
+        let second_id = Part::new().with_name("second").set_parent(&mut workspace);
 
         {
             let mut children = workspace.children_mut();
@@ -1097,21 +1060,22 @@ mod tests {
 
     #[test]
     fn attributes_store_and_remove_json_values() {
-        let mut part = Part::new().named("crate");
+        let mut part = Part::new().with_name("crate");
         assert!(part.attributes().is_empty());
         assert!(!part.has_attribute("health"));
         assert_eq!(part.get_attribute("health"), None);
 
-        part.with_attribute("health".to_owned(), serde_json::json!(100));
-        part.with_attribute(
-            "tags".to_owned(),
-            serde_json::json!({"material": "wood", "breakable": true}),
-        );
+        part = part
+            .with_attribute("health", serde_json::json!(100))
+            .with_attribute(
+                "tags",
+                serde_json::json!({"material": "wood", "breakable": true}),
+            );
         assert!(part.has_attribute("health"));
         assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(100)));
 
         // Overwriting replaces the previous value and reports it on removal.
-        part.with_attribute("health".to_owned(), serde_json::json!(75));
+        part = part.with_attribute("health", serde_json::json!(75));
         assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(75)));
         assert_eq!(
             part.attributes().keys().collect::<Vec<_>>(),
@@ -1127,10 +1091,12 @@ mod tests {
 
     #[test]
     fn typed_attributes_round_trip_any_serializable_value() {
-        let mut part = Part::new().named("crate");
-        part.with_typed_attribute("tags", vec!["wood", "breakable"])
+        let part = Part::new()
+            .with_name("crate")
+            .with_typed_attribute("tags", vec!["wood", "breakable"])
+            .unwrap()
+            .with_typed_attribute("health", 100_i64)
             .unwrap();
-        part.with_typed_attribute("health", 100_i64).unwrap();
 
         assert_eq!(
             part.get_typed_attribute::<Vec<String>>("tags")
@@ -1153,18 +1119,20 @@ mod tests {
 
     #[test]
     fn attributes_are_available_behind_trait_objects() {
-        let mut instance: Box<dyn Instance> = Box::new(Part::new().named("crate"));
-        instance.with_attribute("health".to_owned(), serde_json::json!(100));
+        let instance: Box<dyn Instance> = Box::new(
+            Part::new()
+                .with_name("crate")
+                .with_attribute("health", serde_json::json!(100))
+                .with_typed_attribute("tags", vec!["wood".to_owned()])
+                .unwrap(),
+        );
         assert_eq!(
             instance.get_attribute("health"),
             Some(&serde_json::json!(100))
         );
         assert!(instance.has_attribute("health"));
-        assert_eq!(instance.attributes().len(), 1);
+        assert_eq!(instance.attributes().len(), 2);
 
-        instance
-            .with_typed_attribute("tags", vec!["wood".to_owned()])
-            .unwrap();
         assert_eq!(
             instance
                 .get_typed_attribute::<Vec<String>>("tags")
@@ -1175,11 +1143,10 @@ mod tests {
 
         let mut workspace = Workspace::new();
         let id = instance.id();
-        let child_id = Part::new().named("child").set_parent(&mut workspace);
-        workspace
-            .instance_mut(child_id)
-            .unwrap()
-            .with_attribute("health".to_owned(), serde_json::json!(42));
+        let child_id = Part::new()
+            .with_name("child")
+            .with_attribute("health", serde_json::json!(42))
+            .set_parent(&mut workspace);
         assert!(workspace.instance(id).is_none());
         assert_eq!(
             workspace
@@ -1192,12 +1159,19 @@ mod tests {
 
     #[test]
     fn attributes_are_independent_per_instance_and_survive_cloning() {
-        let mut parent = BasePart::new().named("parent");
-        parent.with_attribute("role".to_owned(), serde_json::json!("parent"));
-        let child_id = parent.add_child(Part::new().named("child"));
+        let mut parent = BasePart::new()
+            .with_name("parent")
+            .with_attribute("role", serde_json::json!("parent"));
+        let child_id = parent.add_child(
+            Part::new()
+                .with_name("child")
+                .with_attribute("role", serde_json::json!("child")),
+        );
         let child = parent.find_descendant_mut(child_id).unwrap();
-        assert_eq!(child.get_attribute("role"), None);
-        child.with_attribute("role".to_owned(), serde_json::json!("child"));
+        assert_eq!(
+            child.get_attribute("role"),
+            Some(&serde_json::json!("child"))
+        );
 
         let cloned: BasePart = parent.clone();
         assert_eq!(
@@ -1214,11 +1188,9 @@ mod tests {
         );
 
         let mut workspace = Workspace::new();
-        let parent_id = parent.set_parent(&mut workspace);
-        workspace
-            .instance_mut(parent_id)
-            .unwrap()
-            .with_attribute("saved".to_owned(), serde_json::json!(true));
+        parent
+            .with_attribute("saved", serde_json::json!(true))
+            .set_parent(&mut workspace);
         let cloned_workspace = workspace.clone();
         let cloned_parent = cloned_workspace
             .instances()

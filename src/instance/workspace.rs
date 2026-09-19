@@ -125,7 +125,7 @@ impl Workspace {
     ///
     /// The replacement is marked dirty so the renderer re-uploads it before
     /// the next frame. Dimensions and color space may change.
-    pub fn set_texture(
+    pub fn with_texture(
         &mut self,
         handle: TextureHandle,
         texture: Texture,
@@ -455,8 +455,8 @@ mod tests {
         let mut workspace = Workspace::new();
         let handle = workspace.add_mesh(Mesh::block(1.0, [1.0; 4])).unwrap();
 
-        let first_id = workspace.add_child(MeshPart::new(handle.clone()).named("first"));
-        let second_id = workspace.add_child(MeshPart::new(handle.clone()).named("second"));
+        let first_id = workspace.add_child(MeshPart::new(handle.clone()).with_name("first"));
+        let second_id = workspace.add_child(MeshPart::new(handle.clone()).with_name("second"));
 
         assert_eq!(workspace.get::<MeshPart>(first_id).unwrap().name(), "first");
         assert_eq!(
@@ -469,8 +469,8 @@ mod tests {
     #[test]
     fn find_first_child_matches_the_requested_concrete_type() {
         let mut workspace = Workspace::new();
-        let basepart_id = workspace.add_child(BasePart::new().named("shared"));
-        let part_id = workspace.add_child(Part::new().named("shared"));
+        let basepart_id = workspace.add_child(BasePart::new().with_name("shared"));
+        let part_id = workspace.add_child(Part::new().with_name("shared"));
 
         assert_eq!(
             workspace
@@ -491,7 +491,7 @@ mod tests {
     fn isolated_instances_can_be_parented_and_recovered_by_id() {
         let mut workspace = Workspace::new();
         let workspace_id = workspace.id();
-        let part = Part::new().with_shape(PartShape::Ball).named("part");
+        let part = Part::new().with_shape(PartShape::Ball).with_name("part");
         let part_id = part.id();
         let returned_id = part.set_parent(&mut workspace);
 
@@ -506,12 +506,10 @@ mod tests {
             PartShape::Ball
         );
 
-        let basepart_id = BasePart::new().named("base").set_parent(&mut workspace);
+        let basepart_id = BasePart::new()
+            .with_name("renamed")
+            .set_parent(&mut workspace);
         let camera_id = Camera::default().set_parent(&mut workspace);
-        workspace
-            .get_mut::<BasePart>(basepart_id)
-            .unwrap()
-            .with_name("renamed".to_owned());
         assert_eq!(
             workspace.get::<BasePart>(basepart_id).unwrap().name(),
             "renamed"
@@ -543,7 +541,7 @@ mod tests {
     #[test]
     fn removing_a_direct_child_removes_it_from_the_workspace_lookup() {
         let mut workspace = Workspace::new();
-        let part_id = Part::new().named("part").set_parent(&mut workspace);
+        let part_id = Part::new().with_name("part").set_parent(&mut workspace);
 
         assert!(workspace.remove_child(part_id));
         assert!(workspace.instance(part_id).is_none());
@@ -554,9 +552,9 @@ mod tests {
     #[test]
     fn removing_a_child_keeps_the_swapped_child_removable() {
         let mut workspace = Workspace::new();
-        let first_id = Part::new().named("first").set_parent(&mut workspace);
-        let removed_id = Part::new().named("removed").set_parent(&mut workspace);
-        let last_id = Part::new().named("last").set_parent(&mut workspace);
+        let first_id = Part::new().with_name("first").set_parent(&mut workspace);
+        let removed_id = Part::new().with_name("removed").set_parent(&mut workspace);
+        let last_id = Part::new().with_name("last").set_parent(&mut workspace);
 
         assert!(workspace.remove_child(removed_id));
         assert!(workspace.instance(first_id).is_some());
@@ -568,11 +566,11 @@ mod tests {
     #[test]
     fn destroying_an_instance_removes_the_instance_and_its_descendants() {
         let mut workspace = Workspace::new();
-        let parent_id = workspace.add_child(Part::new().named("parent"));
+        let parent_id = workspace.add_child(Part::new().with_name("parent"));
         let child_id = workspace
             .get_mut::<Part>(parent_id)
             .unwrap()
-            .add_child(Part::new().named("child"));
+            .add_child(Part::new().with_name("child"));
 
         assert!(workspace.instance_mut(parent_id).unwrap().destroy());
         assert!(workspace.instance(parent_id).is_none());
@@ -583,11 +581,11 @@ mod tests {
     #[test]
     fn destroying_a_nested_instance_keeps_its_parent() {
         let mut workspace = Workspace::new();
-        let parent_id = workspace.add_child(Part::new().named("parent"));
+        let parent_id = workspace.add_child(Part::new().with_name("parent"));
         let child_id = workspace
             .get_mut::<Part>(parent_id)
             .unwrap()
-            .add_child(Part::new().named("child"));
+            .add_child(Part::new().with_name("child"));
 
         assert!(workspace.instance_mut(child_id).unwrap().destroy());
         assert!(workspace.instance(parent_id).is_some());
@@ -604,12 +602,12 @@ mod tests {
     #[test]
     fn lookup_index_tracks_nested_instances_and_stays_workspace_local() {
         let mut workspace = Workspace::new();
-        let parent_id = workspace.add_child(Part::new().named("parent"));
+        let parent_id = workspace.add_child(Part::new().with_name("parent"));
         let child_id = {
             workspace
                 .get_mut::<Part>(parent_id)
                 .unwrap()
-                .add_child(Part::new().named("child"))
+                .add_child(Part::new().with_name("child"))
         };
 
         assert_eq!(workspace.get::<Part>(child_id).unwrap().name(), "child");
@@ -642,7 +640,7 @@ mod tests {
         let added_version = workspace.texture_version(handle).unwrap();
 
         workspace
-            .set_texture(
+            .with_texture(
                 handle,
                 Texture::linear(2, 1, vec![1, 2, 3, 4, 5, 6, 7, 8]).unwrap(),
             )
@@ -653,14 +651,14 @@ mod tests {
         workspace
             .get_texture_mut(handle)
             .unwrap()
-            .set_pixel(0, 0, [9, 9, 9, 9]);
+            .with_pixel(0, 0, [9, 9, 9, 9]);
         assert_eq!(
             workspace.get_texture(handle).unwrap().pixel(0, 0),
             [9, 9, 9, 9]
         );
 
         assert!(matches!(
-            workspace.set_texture(
+            workspace.with_texture(
                 TextureHandle(999),
                 Texture::linear(1, 1, vec![0, 0, 0, 0]).unwrap()
             ),

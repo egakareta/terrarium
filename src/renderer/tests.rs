@@ -55,7 +55,7 @@ fn eframe_composite_shader_validates() {
 fn material_set_keys_resolve_unset_slots_to_the_default_material() {
     use crate::{Face, HasMaterials as _, Instance as _, Part};
 
-    let part = Part::new().named("part");
+    let part = Part::new().with_name("part");
     let top = Material::default()
         .with_base_color([0.1, 0.4, 0.2, 1.0])
         .with_metallic(0.1)
@@ -79,14 +79,14 @@ fn material_set_keys_distinguish_per_face_factors() {
     use crate::{Face, HasMaterials as _, Instance as _, Part};
 
     let copper = Part::new()
-        .named("copper")
+        .with_name("copper")
         .with_material(Material::default().with_metallic(0.82));
     let copper_top_metal = Part::new()
-        .named("copper-top-metal")
+        .with_name("copper-top-metal")
         .with_material(Material::default().with_metallic(0.82))
         .with_material_slot(Face::Top, Material::default().with_metallic(0.1));
     let copper_clone = Part::new()
-        .named("copper-clone")
+        .with_name("copper-clone")
         .with_material(Material::default().with_metallic(0.82));
 
     assert_eq!(

@@ -68,7 +68,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
     let floor_material = Material::from_color(Color3::new(0.12, 0.16, 0.22)).with_roughness(0.88);
     engine.add_child(
         Part::new()
-            .named("Floor")
+            .with_name("Floor")
             .with_size(Vec3::new(18.0, 0.5, 18.0))
             .with_position(Vec3::new(0.0, -0.25, 0.0))
             .with_material(floor_material),
@@ -91,7 +91,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
             .with_can_collide(false)
             .with_size(Vec3::splat(0.1))
             .with_position(Vec3::new(0.0, 5.0, 2.0))
-            .named("LightAnchor"),
+            .with_name("LightAnchor"),
     );
     light_anchor.add_child(
         PointLight::new()

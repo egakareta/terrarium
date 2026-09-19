@@ -72,7 +72,7 @@ struct Benchmark {
 
 impl Benchmark {
     fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
-        engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
+        engine.with_clear_color([0.012, 0.019, 0.050, 1.0]);
         let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
             &mut engine.workspace,
             config.parts,

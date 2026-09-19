@@ -233,9 +233,9 @@ impl Engine {
 
     /// Sets both eframe's window clear color and Terrarium's scene clear color.
     ///
-    pub fn set_clear_color(&mut self, color: [f32; 4]) -> &mut Self {
+    pub fn with_clear_color(&mut self, color: [f32; 4]) -> &mut Self {
         self.clear_color = color;
-        self.renderer().set_clear_color(egui_wgpu::wgpu::Color {
+        self.renderer().with_clear_color(egui_wgpu::wgpu::Color {
             r: color[0] as f64,
             g: color[1] as f64,
             b: color[2] as f64,

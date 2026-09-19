@@ -1,10 +1,10 @@
 use terrarium::{Engine, GltfError, HasPVInstance as _, Instance, MeshPart, Terrarium, glam::Vec3};
 
 fn initialize(engine: &mut Engine) -> Result<(), GltfError> {
-    engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
+    engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
     let helmet_mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
     let helmet = MeshPart::new(helmet_mesh)
-        .named("DamagedHelmet")
+        .with_name("DamagedHelmet")
         .with_position(Vec3::new(0.0, 0.75, 0.0));
     engine.add_child(helmet);
     Ok(())

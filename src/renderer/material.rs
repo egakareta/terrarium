@@ -512,7 +512,7 @@ impl Texture {
     /// # Panics
     ///
     /// Panics if (`x`, `y`) is outside the texture dimensions.
-    pub fn set_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
+    pub fn with_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
         let start = pixel_index(self.width, self.height, x, y);
         self.pixels[start..start + 4].copy_from_slice(&pixel);
         self
@@ -999,7 +999,7 @@ mod tests {
         assert_eq!(texture.pixel(0, 0), [1, 2, 3, 4]);
         assert_eq!(texture.pixel(1, 0), [5, 6, 7, 8]);
 
-        texture.set_pixel(1, 0, [9, 9, 9, 9]);
+        texture.with_pixel(1, 0, [9, 9, 9, 9]);
         assert_eq!(texture.pixel(1, 0), [9, 9, 9, 9]);
 
         texture.pixels_mut()[0] = 42;

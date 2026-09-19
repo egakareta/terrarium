@@ -64,7 +64,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
 
     let ground = engine.add_child_ref(
         Part::new()
-            .named("Ground")
+            .with_name("Ground")
             .with_shape(PartShape::Block)
             .with_position(Vec3::new(0.0, -0.1, 0.0))
             .with_size(Vec3::new(42.0, 0.2, 42.0))
@@ -96,7 +96,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         |part| {
             part.add_child(
                 SpotLight::new()
-                    .named("TowerSpotLight")
+                    .with_name("TowerSpotLight")
                     .with_color(Color3::new(0.18, 0.45, 1.0))
                     .with_brightness(4.0)
                     .with_face(Face::Back)
@@ -107,7 +107,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
 
     engine.add_child(
         Part::new()
-            .named("GrassBlock")
+            .with_name("GrassBlock")
             .with_shape(PartShape::Block)
             .with_position(Vec3::new(3.2, 0.8, -2.3))
             .with_size(Vec3::new(1.5, 1.6, 1.5))

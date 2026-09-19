@@ -3,7 +3,7 @@ use super::*;
 impl Renderer {
     /// Sets the color used to clear the color attachment before each frame.
     ///
-    pub fn set_clear_color(&mut self, color: wgpu::Color) -> &mut Self {
+    pub fn with_clear_color(&mut self, color: wgpu::Color) -> &mut Self {
         self.clear_color = color;
         self
     }
