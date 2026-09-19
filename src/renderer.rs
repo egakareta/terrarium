@@ -3044,7 +3044,7 @@ fn light_view_projections(
 }
 
 fn finite_or(value: f32, fallback: f32) -> f32 {
-    value.is_finite().then_some(value).unwrap_or(fallback)
+    if value.is_finite() { value } else { fallback }
 }
 
 fn finite_nonnegative(value: f32) -> f32 {
