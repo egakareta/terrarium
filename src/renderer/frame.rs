@@ -270,11 +270,6 @@ impl Renderer {
     }
 
     pub(super) fn encode_outline_mask_pass(&self, encoder: &mut wgpu::CommandEncoder) {
-        if self.outline_batches[OutlineMode::Toon.index()].is_empty()
-            && self.outline_batches[OutlineMode::Silhouette.index()].is_empty()
-        {
-            return;
-        }
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("screen-space outline mask pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
