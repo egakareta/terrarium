@@ -1,7 +1,0 @@
-[build]
-target = "../assets/web/index.html"
-dist = "dist.app"
-example = "app"
-
-[watch]
-watch = ["../src", "app.rs"]
