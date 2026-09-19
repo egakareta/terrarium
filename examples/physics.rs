@@ -57,7 +57,7 @@ impl App for PhysicsApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
-    engine.with_clock_time(16.5);
+    engine.lighting.with_clock_time(16.5);
     engine.current_camera = terrarium::Camera::new(
         Vec3::new(10.0, 7.5, 13.0),
         Vec3::new(0.0, 2.2, 0.0),

@@ -9,7 +9,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
-            engine.clear_skybox();
+            engine.lighting.clear_skybox();
             engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
             let lantern = engine.add_texture(Texture::from_bytes(
                 include_bytes!("../assets/festival_lantern.png"),

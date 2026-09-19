@@ -8,7 +8,7 @@ impl Renderer {
         let camera_planes = frustum_planes(camera_vp);
         let local_shadows = self.prepare_local_lights(workspace, &camera_planes);
         let lighting = &workspace.lighting;
-        let light_direction = workspace.sun_direction();
+        let light_direction = lighting.render_sun_direction();
         let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
             light_view_projections(&workspace.current_camera, light_direction);
         let daylight = lighting.daylight_factor();
@@ -27,7 +27,7 @@ impl Renderer {
         // Image-based lighting comes from the workspace skybox cubemap, which
         // carries a full CPU-generated mip chain: smooth surfaces sample sharp
         // reflections at LOD 0 while rough surfaces sample blurred mips.
-        let (environment_mip_count, has_environment) = match workspace.skybox() {
+        let (environment_mip_count, has_environment) = match lighting.skybox() {
             Some(skybox) => (skybox.face_size().ilog2() as f32 + 1.0, 1.0),
             None => (1.0, 0.0),
         };
@@ -97,9 +97,9 @@ impl Renderer {
                 exposure: [exposure * (0.08 + daylight * 0.92), 0.0, 0.0, 0.0],
             }),
         );
-        if self.skybox_revision != Some(workspace.skybox_revision()) {
-            self.sync_skybox(workspace.skybox())?;
-            self.skybox_revision = Some(workspace.skybox_revision());
+        if self.skybox_revision != Some(lighting.skybox_revision()) {
+            self.sync_skybox(lighting.skybox())?;
+            self.skybox_revision = Some(lighting.skybox_revision());
         }
         let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;

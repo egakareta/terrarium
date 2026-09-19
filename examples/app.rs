@@ -15,7 +15,7 @@ impl App for SceneApp {
         _frame: &mut eframe::Frame,
     ) {
         let delta_seconds = context.input(|input| input.stable_dt.min(0.1));
-        engine.advance_clock_time(delta_seconds, 0.25);
+        engine.lighting.advance_clock_time(delta_seconds, 0.25);
     }
 
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -36,7 +36,7 @@ impl App for SceneApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
-    engine.with_clock_time(18.0);
+    engine.lighting.with_clock_time(18.0);
 
     let dirt = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
