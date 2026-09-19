@@ -1,5 +1,5 @@
 use terrarium::{
-    Engine, Instance, Material, MaterialSlot, Part, PartShape, RendererError, Terrarium, Texture,
+    Engine, Instance, Material, Part, PartShape, RendererError, Terrarium, Texture,
     TextureColorSpace, glam::Vec3,
 };
 
@@ -15,7 +15,7 @@ fn initialize(engine: &mut Engine) -> Result<(), RendererError> {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, 1.0, 0.0));
         part.size = Vec3::new(2.0, 2.0, 2.0);
-        part.set_material_slot(MaterialSlot::Base, Material::textured(lantern));
+        part.set_material(Material::textured(lantern));
     });
     Ok(())
 }

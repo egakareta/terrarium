@@ -97,8 +97,6 @@ pub struct Part {
     basepart: BasePart,
     /// Primitive geometry used when the part is rendered.
     pub shape: PartShape,
-    /// Material assigned to the base material slot.
-    pub material: Material,
     pub(crate) material_slots: MeshMaterialSlots,
 }
 
@@ -109,7 +107,6 @@ impl Part {
         Self {
             basepart: BasePart::new(name),
             shape: PartShape::Block,
-            material: Material::default(),
             material_slots: MeshMaterialSlots::default(),
         }
     }
@@ -119,31 +116,45 @@ impl Part {
         Self::new("")
     }
 
-    /// Assigns a material to a mesh-selected slot.
+    /// Assigns the same material to all six directional slots.
+    pub fn set_material(&mut self, material: Material) {
+        for slot in MaterialSlot::ALL_DIRECTIONS {
+            self.set_material_slot(slot, material);
+        }
+    }
+
+    /// Assigns a material to a mesh-selected directional slot.
     ///
     /// Slots are directional, so they work for any [`PartShape`]: setting
     /// [`MaterialSlot::Top`] affects the top-facing triangles of a block,
-    /// cylinder cap, wedge slope, sphere pole, or custom mesh alike. Setting
-    /// [`MaterialSlot::Base`] replaces the whole-part material.
+    /// cylinder cap, wedge slope, sphere pole, or custom mesh alike.
     pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
-        if slot == MaterialSlot::Base {
-            self.material = material;
+        self.material_slots.set(slot, material);
+    }
+
+    /// Returns the material if all directional slots have the same effective material.
+    ///
+    /// Unassigned slots use [`Material::default()`] when compared.
+    pub fn material(&self) -> Option<&Material> {
+        let material = self.material_slot(MaterialSlot::ALL_DIRECTIONS[0]);
+        if MaterialSlot::ALL_DIRECTIONS
+            .into_iter()
+            .skip(1)
+            .all(|slot| self.material_slot(slot) == material)
+        {
+            Some(material)
         } else {
-            self.material_slots.set(slot, material);
+            None
         }
     }
 
     /// Returns the effective material for a slot.
     ///
-    /// [`MaterialSlot::Base`] returns [`Self::material`]. Any other slot
-    /// returns its override when one was assigned, or [`Self::material`] as
-    /// the fallback used at render time.
+    /// An unassigned slot uses [`Material::default()`].
     pub fn material_slot(&self, slot: MaterialSlot) -> &Material {
-        if slot == MaterialSlot::Base {
-            &self.material
-        } else {
-            self.material_slots.get(slot).unwrap_or(&self.material)
-        }
+        self.material_slots
+            .get(slot)
+            .unwrap_or(&crate::material::DEFAULT_MATERIAL)
     }
 }
 
@@ -188,16 +199,31 @@ mod tests {
     }
 
     #[test]
-    fn material_slot_falls_back_to_the_base_material_until_overridden() {
+    fn material_slot_falls_back_to_the_default_material_until_overridden() {
         let mut part = Part::new("part");
-        assert_eq!(part.material_slot(MaterialSlot::Top), &part.material);
+        assert_eq!(part.material_slot(MaterialSlot::Top), &Material::default());
+        assert_eq!(part.material(), Some(&Material::default()));
 
         let top = Material::from_color(Color3::new(1.0, 0.0, 0.0));
         part.set_material_slot(MaterialSlot::Top, top);
         assert_eq!(part.material_slot(MaterialSlot::Top), &top);
+        assert_eq!(part.material(), None);
         assert_eq!(
             part.material_slot(MaterialSlot::Bottom),
-            part.material_slot(MaterialSlot::Base)
+            &Material::default()
         );
+    }
+
+    #[test]
+    fn set_material_assigns_all_directional_slots() {
+        let mut part = Part::new("part");
+        let material = Material::from_color(Color3::new(1.0, 0.0, 0.0));
+
+        part.set_material(material);
+
+        for slot in MaterialSlot::ALL_DIRECTIONS {
+            assert_eq!(part.material_slot(slot), &material);
+        }
+        assert_eq!(part.material(), Some(&material));
     }
 }

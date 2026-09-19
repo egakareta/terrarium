@@ -92,8 +92,8 @@ impl Mesh {
     /// This is how the built-in primitives support [`MaterialSlot::Top`] and
     /// friends on every shape: run it on a custom mesh after setting normals,
     /// then assign per-face materials through
-    /// [`crate::Part::set_material_slot`]. Vertices with a zero normal keep
-    /// [`MaterialSlot::Base`].
+    /// [`crate::Part::set_material_slot`]. Vertices with a zero normal use
+    /// [`MaterialSlot::Top`].
     pub fn assign_directional_slots(&mut self) {
         for vertex in &mut self.vertices {
             vertex.material_slot = MaterialSlot::from_normal(vertex.normal) as u32;
@@ -649,7 +649,7 @@ mod tests {
             assert!(
                 segment[0..4]
                     .iter()
-                    .all(|vertex| vertex.material_slot != MaterialSlot::Base as u32)
+                    .all(|vertex| vertex.material_slot != MaterialSlot::Top as u32)
             );
             assert!(
                 segment[4..7]
@@ -671,15 +671,15 @@ mod tests {
 
         for segment in mesh.vertices.chunks_exact(10) {
             let slot = segment[0].material_slot as usize;
-            if slot >= MaterialSlot::Top as usize {
-                counts[slot - 1] += 1;
+            if slot >= MaterialSlot::Front as usize {
+                counts[slot] += 1;
             }
         }
 
-        assert_eq!(counts[MaterialSlot::Front as usize - 1], 6);
-        assert_eq!(counts[MaterialSlot::Back as usize - 1], 6);
-        assert_eq!(counts[MaterialSlot::Left as usize - 1], 6);
-        assert_eq!(counts[MaterialSlot::Right as usize - 1], 6);
+        assert_eq!(counts[MaterialSlot::Front as usize], 6);
+        assert_eq!(counts[MaterialSlot::Back as usize], 6);
+        assert_eq!(counts[MaterialSlot::Left as usize], 6);
+        assert_eq!(counts[MaterialSlot::Right as usize], 6);
     }
 
     #[test]
@@ -724,7 +724,7 @@ mod tests {
     fn assign_directional_slots_tags_a_custom_mesh_by_normal() {
         let mut mesh = Mesh::block(1.0, [1.0; 4]);
         for vertex in &mut mesh.vertices {
-            vertex.material_slot = MaterialSlot::Base as u32;
+            vertex.material_slot = MaterialSlot::Top as u32;
         }
         mesh.assign_directional_slots();
 

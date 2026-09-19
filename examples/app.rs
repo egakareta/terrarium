@@ -65,8 +65,9 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.shape = PartShape::Block;
         part.set_position(Vec3::new(0.0, -0.1, 0.0));
         part.size = Vec3::new(42.0, 0.2, 42.0);
-        part.material = Material::textured(dirt);
-        part.material.roughness = 0.9;
+        let mut material = Material::textured(dirt);
+        material.roughness = 0.9;
+        part.set_material(material);
     });
 
     for x in -4..=4 {
@@ -75,8 +76,9 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             part.shape = PartShape::Block;
             part.set_position(Vec3::new(x, 0.22, -4.0));
             part.size = Vec3::new(0.72, 0.45, 0.72);
-            part.material = Material::textured(cobblestone);
-            part.material.roughness = 0.82;
+            let mut material = Material::textured(cobblestone);
+            material.roughness = 0.82;
+            part.set_material(material);
         });
     }
 
@@ -85,11 +87,11 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_position(Vec3::new(-3.4, 1.0, -1.8));
         part.size = Vec3::new(1.2, 2.0, 1.2);
         part.color = Color3::new(0.76, 0.30, 0.14);
-        part.material = Material {
+        part.set_material(Material {
             metallic: 0.82,
             roughness: 0.24,
             ..Material::default()
-        };
+        });
         part.set_orientation(Vec3::new(0.0, -33.0, 0.0));
         part.set_material_slot(MaterialSlot::Top, Material::textured(grass_top));
         part.set_material_slot(MaterialSlot::Right, Material::textured(grass_side));
@@ -115,7 +117,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         grass_top.roughness = 0.82;
         let mut dirt = Material::textured(dirt).with_filter(TextureFilter::Nearest);
         dirt.roughness = 0.9;
-        part.set_material_slot(MaterialSlot::Base, grass_side);
+        part.set_material(grass_side);
         part.set_material_slot(MaterialSlot::Top, grass_top);
         part.set_material_slot(MaterialSlot::Bottom, dirt);
         part.set_material_slot(MaterialSlot::Front, grass_side);
@@ -129,8 +131,9 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_position(Vec3::new(-1.0, 0.55, 1.6));
         part.size = Vec3::new(2.0, 1.1, 2.0);
         part.color = Color3::new(0.60, 0.68, 0.50);
-        part.material = Material::textured(festival_lantern);
-        part.material.roughness = 0.82;
+        let mut material = Material::textured(festival_lantern);
+        material.roughness = 0.82;
+        part.set_material(material);
     });
 
     let orb = engine.add_child_with(Part::unnamed(), |part| {
@@ -138,7 +141,9 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
         part.color = Color3::new(0.95, 0.72, 0.22);
-        part.material.roughness = 0.18;
+        let mut material = Material::default();
+        material.roughness = 0.18;
+        part.set_material(material);
         part.can_collide = false;
         part.add_child_with(PointLight::unnamed(), |light| {
             light.color = Color3::new(1.0, 0.35, 0.08);

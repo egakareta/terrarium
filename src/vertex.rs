@@ -24,7 +24,7 @@ pub struct Vertex {
 }
 
 impl Vertex {
-    /// Creates a vertex using the base material slot.
+    /// Creates a vertex using the directional slot matching its normal.
     pub fn with_attributes(
         position: [f32; 3],
         normal: [f32; 3],
@@ -32,7 +32,14 @@ impl Vertex {
         tangent: [f32; 4],
         color: [f32; 4],
     ) -> Self {
-        Self::with_material_slot(position, normal, uv, tangent, color, MaterialSlot::Base)
+        Self::with_material_slot(
+            position,
+            normal,
+            uv,
+            tangent,
+            color,
+            MaterialSlot::from_normal(normal),
+        )
     }
 
     /// Creates a vertex with an explicit material slot.
@@ -72,7 +79,8 @@ impl Vertex {
     }
 }
 
-/// Appends one triangle using default UVs and the base material slot.
+/// Appends one triangle using default UVs and the directional slot matching its
+/// normal.
 ///
 /// The triangle normal and tangent are derived from the supplied positions and
 /// UVs. Indices are appended relative to the existing vertex count.
@@ -91,7 +99,8 @@ pub fn push_triangle(
     );
 }
 
-/// Appends one triangle with explicit UVs and the base material slot.
+/// Appends one triangle with explicit UVs and the directional slot matching its
+/// normal.
 pub fn push_triangle_with_uv(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -105,7 +114,7 @@ pub fn push_triangle_with_uv(
         positions,
         uvs,
         color,
-        MaterialSlot::Base,
+        MaterialSlot::from_normal(triangle_normal(positions)),
     );
 }
 
@@ -127,7 +136,8 @@ pub fn push_triangle_with_uv_and_material_slot(
     indices.extend([start, start + 1, start + 2]);
 }
 
-/// Appends one quad as two triangles using default UVs and the base material slot.
+/// Appends one quad as two triangles using default UVs and the directional slot
+/// matching its normal.
 pub fn push_quad(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -143,7 +153,8 @@ pub fn push_quad(
     );
 }
 
-/// Appends one quad as two triangles with explicit UVs and the base material slot.
+/// Appends one quad as two triangles with explicit UVs and the directional slot
+/// matching its normal.
 pub fn push_quad_with_uv(
     vertices: &mut Vec<Vertex>,
     indices: &mut Vec<u16>,
@@ -157,7 +168,7 @@ pub fn push_quad_with_uv(
         positions,
         uvs,
         color,
-        MaterialSlot::Base,
+        MaterialSlot::from_normal(triangle_normal([positions[0], positions[1], positions[2]])),
     );
 }
 

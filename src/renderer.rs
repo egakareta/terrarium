@@ -11,9 +11,9 @@ use web_time::Instant;
 use crate::MeshPart;
 use crate::{
     BasePart, Camera, Color3, CubemapFace, DEPTH_FORMAT, Image, Instance, InstanceId, LightFace,
-    MATERIAL_SLOT_COUNT, Material, MaterialSlot, Mesh, MeshMaterialSlots, Part, PartShape,
-    PointLight, Skybox, SkyboxError, SpotLight, SurfaceLight, Texture, TextureColorSpace,
-    TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
+    MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots, Part, PartShape, PointLight, Skybox,
+    SkyboxError, SpotLight, SurfaceLight, Texture, TextureColorSpace, TextureError, TextureFilter,
+    TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
@@ -222,9 +222,9 @@ struct PackedMaterialTextures {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct PackedTextureHandle(usize);
 
-/// Packed `vec4` count for one deduplicated per-face PBR factor set: seven
-/// slots (base + six directions) times three `vec4`s per slot (base color,
-/// emissive RGB + roughness, metallic).
+/// Packed `vec4` count for one deduplicated per-face PBR factor set: six
+/// directional slots times three `vec4`s per slot (base color, emissive RGB +
+/// roughness, metallic).
 const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 3;
 
 /// Width of the material-factor data texture: one texel per packed `vec4`,
@@ -237,9 +237,8 @@ const MATERIAL_FACTOR_TEXTURE_WIDTH: u32 = MATERIAL_VEC4S_PER_SET as u32;
 const MATERIAL_FACTOR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 /// Hashable per-face PBR factors for one part: bit patterns of base color
-/// RGBA, metallic, roughness, and emissive RGB for each of the seven slots in
-/// [`MaterialSlot`] order, with unset directional slots resolved to the base
-/// material.
+/// RGBA, metallic, roughness, and emissive RGB for each directional slot, with
+/// unset slots resolved to the default material.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct MaterialSetKey([[u32; 9]; MATERIAL_SLOT_COUNT]);
 
@@ -258,26 +257,21 @@ impl MaterialSetKey {
         ]
     }
 
-    /// A uniform set where every face uses the base material: the common case
-    /// for parts without slot overrides.
-    fn uniform(base: [u32; 9]) -> Self {
-        Self([base; MATERIAL_SLOT_COUNT])
+    /// A uniform set where every face uses the default material: the common
+    /// case for parts without slot overrides.
+    fn uniform(material: [u32; 9]) -> Self {
+        Self([material; MATERIAL_SLOT_COUNT])
     }
 
-    fn from_materials(material: &Material, material_slots: &MeshMaterialSlots) -> Self {
+    fn from_materials(material_slots: &MeshMaterialSlots) -> Self {
         if material_slots.slots.is_empty() {
-            return Self::uniform(Self::base_bits(material));
+            return Self::uniform(Self::base_bits(&crate::material::DEFAULT_MATERIAL));
         }
         let mut slots = [[0u32; 9]; MATERIAL_SLOT_COUNT];
-        for (index, slot) in std::iter::once(MaterialSlot::Base)
-            .chain(MaterialSlot::ALL_DIRECTIONS)
-            .enumerate()
-        {
-            let material = if slot == MaterialSlot::Base {
-                material
-            } else {
-                material_slots.get(slot).unwrap_or(material)
-            };
+        for (index, slot) in crate::MaterialSlot::ALL_DIRECTIONS.into_iter().enumerate() {
+            let material = material_slots
+                .get(slot)
+                .unwrap_or(&crate::material::DEFAULT_MATERIAL);
             slots[index] = Self::base_bits(material);
         }
         Self(slots)
@@ -1386,7 +1380,6 @@ impl Renderer {
     fn material_textures(
         &mut self,
         workspace: &Workspace,
-        material: &Material,
         material_slots: &MeshMaterialSlots,
     ) -> Result<MaterialTextures, RendererError> {
         let resolve = |renderer: &mut Self,
@@ -1398,26 +1391,10 @@ impl Renderer {
             })
         };
 
-        let base_color = resolve(
-            self,
-            material.textures.base_color,
-            self.default_material_textures.base_color[0],
-        )?;
-        let normal = resolve(
-            self,
-            material.textures.normal,
-            self.default_material_textures.normal[0],
-        )?;
-        let metallic_roughness = resolve(
-            self,
-            material.textures.metallic_roughness,
-            self.default_material_textures.metallic_roughness[0],
-        )?;
-        let emissive = resolve(
-            self,
-            material.textures.emissive,
-            self.default_material_textures.emissive[0],
-        )?;
+        let base_color = self.default_material_textures.base_color[0];
+        let normal = self.default_material_textures.normal[0];
+        let metallic_roughness = self.default_material_textures.metallic_roughness[0];
+        let emissive = self.default_material_textures.emissive[0];
         let mut textures = MaterialTextures {
             base_color: [base_color; MATERIAL_SLOT_COUNT],
             normal: [normal; MATERIAL_SLOT_COUNT],
@@ -1427,11 +1404,11 @@ impl Renderer {
         for (index, material) in material_slots
             .slots
             .iter()
-            .take(MATERIAL_SLOT_COUNT - 1)
+            .take(MATERIAL_SLOT_COUNT)
             .enumerate()
             .filter_map(|(index, material)| material.as_ref().map(|material| (index, material)))
         {
-            let slot = index + 1;
+            let slot = index;
             textures.base_color[slot] = resolve(self, material.textures.base_color, base_color)?;
             textures.normal[slot] = resolve(self, material.textures.normal, normal)?;
             textures.metallic_roughness[slot] = resolve(
@@ -1445,46 +1422,38 @@ impl Renderer {
     }
 
     fn material_filters(
-        material: &Material,
         material_slots: &MeshMaterialSlots,
     ) -> [TextureFilter; MATERIAL_SLOT_COUNT] {
-        let base_filter = material.filter;
-        let mut filters = [base_filter; MATERIAL_SLOT_COUNT];
+        let mut filters = [TextureFilter::default(); MATERIAL_SLOT_COUNT];
         for (index, material) in material_slots
             .slots
             .iter()
-            .take(MATERIAL_SLOT_COUNT - 1)
+            .take(MATERIAL_SLOT_COUNT)
             .enumerate()
         {
             if let Some(material) = material {
-                filters[index + 1] = material.filter;
-            } else {
-                filters[index + 1] = base_filter;
+                filters[index] = material.filter;
             }
         }
         filters
     }
 
-    fn material_set_index(
-        &mut self,
-        material: &Material,
-        material_slots: &MeshMaterialSlots,
-    ) -> u32 {
-        // Fast path: no overrides means every face uses the base material, so
-        // only the 9 base words need comparing.
+    fn material_set_index(&mut self, material_slots: &MeshMaterialSlots) -> u32 {
+        // Fast path: no overrides means every face uses the default material,
+        // so only the 9 default words need comparing.
         if material_slots.slots.is_empty() {
-            let base = MaterialSetKey::base_bits(material);
-            if let Some((last_base, index)) = self.material_factor_last_uniform
-                && last_base == base
+            let default = MaterialSetKey::base_bits(&crate::material::DEFAULT_MATERIAL);
+            if let Some((last_default, index)) = self.material_factor_last_uniform
+                && last_default == default
             {
                 return index;
             }
-            let key = MaterialSetKey::uniform(base);
+            let key = MaterialSetKey::uniform(default);
             let index = self.material_set_index_uncached(key);
-            self.material_factor_last_uniform = Some((base, index));
+            self.material_factor_last_uniform = Some((default, index));
             return index;
         }
-        let key = MaterialSetKey::from_materials(material, material_slots);
+        let key = MaterialSetKey::from_materials(material_slots);
         if let Some((last_key, index)) = self.material_factor_last
             && last_key == key
         {
@@ -2232,19 +2201,14 @@ impl Renderer {
                     continue;
                 }
                 let has_custom_textures = visibility_mask & 1 != 0
-                    && (part.material.textures.base_color.is_some()
-                        || part.material.textures.normal.is_some()
-                        || part.material.textures.metallic_roughness.is_some()
-                        || part.material.textures.emissive.is_some()
-                        || part.material_slots.slots.iter().flatten().any(|material| {
-                            material.textures.base_color.is_some()
-                                || material.textures.normal.is_some()
-                                || material.textures.metallic_roughness.is_some()
-                                || material.textures.emissive.is_some()
-                        }));
+                    && part.material_slots.slots.iter().flatten().any(|material| {
+                        material.textures.base_color.is_some()
+                            || material.textures.normal.is_some()
+                            || material.textures.metallic_roughness.is_some()
+                            || material.textures.emissive.is_some()
+                    });
                 let custom_textures = if has_custom_textures {
-                    let textures =
-                        self.material_textures(workspace, &part.material, &part.material_slots)?;
+                    let textures = self.material_textures(workspace, &part.material_slots)?;
                     (textures != default_textures).then_some(textures)
                 } else {
                     None
@@ -2253,7 +2217,7 @@ impl Renderer {
                 // textures sample identically under any filter, so untextured
                 // parts keep sharing the fast-path default batch.
                 let custom_filters = if custom_textures.is_some() {
-                    let filters = Self::material_filters(&part.material, &part.material_slots);
+                    let filters = Self::material_filters(&part.material_slots);
                     (filters != default_filters).then_some(filters)
                 } else {
                     None
@@ -2326,7 +2290,7 @@ impl Renderer {
                     (
                         normal_scales_from_model(&model),
                         part.color.rgba(),
-                        self.material_set_index(&part.material, &part.material_slots),
+                        self.material_set_index(&part.material_slots),
                     )
                 } else {
                     ([0.0; 3], [0.0; 4], 0)
@@ -2377,30 +2341,26 @@ impl Renderer {
 
             let mesh = self.meshpart_mesh(meshpart)?;
             let has_custom_textures = visibility_mask & 1 != 0
-                && (meshpart.material.textures.base_color.is_some()
-                    || meshpart.material.textures.normal.is_some()
-                    || meshpart.material.textures.metallic_roughness.is_some()
-                    || meshpart.material.textures.emissive.is_some()
-                    || meshpart
-                        .material_slots
-                        .slots
-                        .iter()
-                        .flatten()
-                        .any(|material| {
-                            material.textures.base_color.is_some()
-                                || material.textures.normal.is_some()
-                                || material.textures.metallic_roughness.is_some()
-                                || material.textures.emissive.is_some()
-                        }));
+                && meshpart
+                    .material_slots
+                    .slots
+                    .iter()
+                    .flatten()
+                    .any(|material| {
+                        material.textures.base_color.is_some()
+                            || material.textures.normal.is_some()
+                            || material.textures.metallic_roughness.is_some()
+                            || material.textures.emissive.is_some()
+                    });
             let textures = if has_custom_textures {
-                self.material_textures(workspace, &meshpart.material, &meshpart.material_slots)?
+                self.material_textures(workspace, &meshpart.material_slots)?
             } else {
                 default_textures
             };
             let filters = if textures == default_textures {
                 default_filters
             } else {
-                Self::material_filters(&meshpart.material, &meshpart.material_slots)
+                Self::material_filters(&meshpart.material_slots)
             };
             let key = (mesh, textures, filters, visibility_mask);
             let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
@@ -2428,7 +2388,7 @@ impl Renderer {
                 (
                     normal_scales_from_model(&model),
                     meshpart.color.rgba(),
-                    self.material_set_index(&meshpart.material, &meshpart.material_slots),
+                    self.material_set_index(&meshpart.material_slots),
                 )
             } else {
                 ([0.0; 3], [0.0; 4], 0)
@@ -4014,17 +3974,10 @@ mod tests {
     }
 
     #[test]
-    fn material_set_keys_resolve_unset_slots_to_the_base_material() {
+    fn material_set_keys_resolve_unset_slots_to_the_default_material() {
         use crate::{MaterialSlot, Part};
 
         let mut part = Part::new("part");
-        part.material = Material {
-            base_color: [0.76, 0.30, 0.14, 1.0],
-            metallic: 0.82,
-            roughness: 0.24,
-            emissive: [0.1, 0.2, 0.3],
-            ..Material::default()
-        };
         let top = Material {
             base_color: [0.1, 0.4, 0.2, 1.0],
             metallic: 0.1,
@@ -4034,19 +3987,15 @@ mod tests {
         };
         part.set_material_slot(MaterialSlot::Top, top);
 
-        let vec4s = MaterialSetKey::from_materials(&part.material, &part.material_slots).vec4s();
-        // Base slot carries the base factors.
-        assert_eq!(vec4s[0], [0.76, 0.30, 0.14, 1.0]);
-        assert_eq!(vec4s[1], [0.1, 0.2, 0.3, 0.24]);
-        assert_eq!(vec4s[2][0], 0.82);
+        let vec4s = MaterialSetKey::from_materials(&part.material_slots).vec4s();
         // The Top override carries its own factors.
-        assert_eq!(vec4s[3], [0.1, 0.4, 0.2, 1.0]);
-        assert_eq!(vec4s[4], [0.0, 0.0, 0.0, 0.9]);
-        assert_eq!(vec4s[5][0], 0.1);
-        // Unset slots fall back to the base factors, not the defaults.
-        assert_eq!(vec4s[6], [0.76, 0.30, 0.14, 1.0]);
-        assert_eq!(vec4s[7], [0.1, 0.2, 0.3, 0.24]);
-        assert_eq!(vec4s[8][0], 0.82);
+        assert_eq!(vec4s[0], [0.1, 0.4, 0.2, 1.0]);
+        assert_eq!(vec4s[1], [0.0, 0.0, 0.0, 0.9]);
+        assert_eq!(vec4s[2][0], 0.1);
+        // Unset slots fall back to the default material.
+        assert_eq!(vec4s[3], [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(vec4s[4], [0.0, 0.0, 0.0, 0.5]);
+        assert_eq!(vec4s[5][0], 0.0);
     }
 
     #[test]
@@ -4054,9 +4003,15 @@ mod tests {
         use crate::{MaterialSlot, Part};
 
         let mut copper = Part::new("copper");
-        copper.material.metallic = 0.82;
+        copper.set_material(Material {
+            metallic: 0.82,
+            ..Material::default()
+        });
         let mut copper_top_metal = Part::new("copper-top-metal");
-        copper_top_metal.material.metallic = 0.82;
+        copper_top_metal.set_material(Material {
+            metallic: 0.82,
+            ..Material::default()
+        });
         copper_top_metal.set_material_slot(
             MaterialSlot::Top,
             Material {
@@ -4065,18 +4020,18 @@ mod tests {
             },
         );
         let mut copper_clone = Part::new("copper-clone");
-        copper_clone.material.metallic = 0.82;
+        copper_clone.set_material(Material {
+            metallic: 0.82,
+            ..Material::default()
+        });
 
         assert_eq!(
-            MaterialSetKey::from_materials(&copper.material, &copper.material_slots),
-            MaterialSetKey::from_materials(&copper_clone.material, &copper_clone.material_slots)
+            MaterialSetKey::from_materials(&copper.material_slots),
+            MaterialSetKey::from_materials(&copper_clone.material_slots)
         );
         assert_ne!(
-            MaterialSetKey::from_materials(&copper.material, &copper.material_slots),
-            MaterialSetKey::from_materials(
-                &copper_top_metal.material,
-                &copper_top_metal.material_slots
-            )
+            MaterialSetKey::from_materials(&copper.material_slots),
+            MaterialSetKey::from_materials(&copper_top_metal.material_slots)
         );
     }
 

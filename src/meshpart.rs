@@ -85,8 +85,6 @@ pub struct MeshPart {
     mesh: MeshHandle,
     mesh_revision: u64,
     bounding_radius: f32,
-    /// Material assigned to mesh material slot zero.
-    pub material: Material,
     pub(crate) material_slots: MeshMaterialSlots,
 }
 
@@ -119,7 +117,6 @@ impl<'a, const N: usize> From<&'a [u8; N]> for MeshSource<'a> {
 #[derive(Clone, Debug)]
 struct MeshAsset {
     mesh: Mesh,
-    material: Material,
     material_slots: MeshMaterialSlots,
 }
 
@@ -131,10 +128,9 @@ struct MeshAsset {
 pub struct MeshHandle(Arc<MeshAsset>);
 
 impl MeshHandle {
-    fn from_parts(mesh: Mesh, material: Material, material_slots: MeshMaterialSlots) -> Self {
+    fn from_parts(mesh: Mesh, material_slots: MeshMaterialSlots) -> Self {
         Self(Arc::new(MeshAsset {
             mesh,
-            material,
             material_slots,
         }))
     }
@@ -151,7 +147,7 @@ impl MeshHandle {
 
 impl From<Mesh> for MeshHandle {
     fn from(mesh: Mesh) -> Self {
-        Self::from_parts(mesh, Material::default(), MeshMaterialSlots::default())
+        Self::from_parts(mesh, MeshMaterialSlots::default())
     }
 }
 
@@ -167,14 +163,12 @@ impl MeshPart {
     {
         let mesh = mesh.into();
         let bounding_radius = mesh_bounding_radius(mesh.mesh());
-        let material = mesh.0.material;
         let material_slots = mesh.0.material_slots.clone();
         Self {
             basepart: BasePart::new(name),
             mesh,
             mesh_revision: 0,
             bounding_radius,
-            material,
             material_slots,
         }
     }
@@ -218,20 +212,12 @@ impl MeshPart {
             )?);
         }
 
-        let mut material = Material::default();
         let mut material_slots = MeshMaterialSlots::default();
-        if let Some(imported_material) = materials.first().copied() {
-            material = imported_material;
-        }
-        for (slot, material) in MaterialSlot::ALL_DIRECTIONS
-            .into_iter()
-            .zip(materials.into_iter().skip(1))
-        {
+        for (slot, material) in MaterialSlot::ALL_DIRECTIONS.into_iter().zip(materials) {
             material_slots.set(slot, material);
         }
         Ok(MeshHandle::from_parts(
             Mesh::new(vertices, indices),
-            material,
             material_slots,
         ))
     }
@@ -249,26 +235,43 @@ impl MeshPart {
     /// Replaces the geometry and schedules it for upload before the next frame.
     pub fn set_mesh(&mut self, mesh: Mesh) {
         self.bounding_radius = mesh_bounding_radius(&mesh);
-        self.mesh = MeshHandle::from_parts(mesh, self.material, self.material_slots.clone());
+        self.mesh = MeshHandle::from_parts(mesh, self.material_slots.clone());
         self.mesh_revision = self.mesh_revision.wrapping_add(1);
     }
 
-    /// Assigns a material to a mesh-selected slot.
+    /// Assigns the same material to all six directional slots.
+    pub fn set_material(&mut self, material: Material) {
+        for slot in MaterialSlot::ALL_DIRECTIONS {
+            self.set_material_slot(slot, material);
+        }
+    }
+
+    /// Assigns a material to a mesh-selected directional slot.
     pub fn set_material_slot(&mut self, slot: MaterialSlot, material: Material) {
-        if slot == MaterialSlot::Base {
-            self.material = material;
+        self.material_slots.set(slot, material);
+    }
+
+    /// Returns the material if all directional slots have the same effective material.
+    ///
+    /// Unassigned slots use [`Material::default()`] when compared.
+    pub fn material(&self) -> Option<&Material> {
+        let material = self.material_slot(MaterialSlot::ALL_DIRECTIONS[0]);
+        if MaterialSlot::ALL_DIRECTIONS
+            .into_iter()
+            .skip(1)
+            .all(|slot| self.material_slot(slot) == material)
+        {
+            Some(material)
         } else {
-            self.material_slots.set(slot, material);
+            None
         }
     }
 
     /// Returns the effective material for a mesh slot.
     pub fn material_slot(&self, slot: MaterialSlot) -> &Material {
-        if slot == MaterialSlot::Base {
-            &self.material
-        } else {
-            self.material_slots.get(slot).unwrap_or(&self.material)
-        }
+        self.material_slots
+            .get(slot)
+            .unwrap_or(&crate::material::DEFAULT_MATERIAL)
     }
 
     pub(crate) fn mesh_revision(&self) -> u64 {
@@ -762,6 +765,19 @@ mod tests {
     use crate::Instance;
 
     #[test]
+    fn material_returns_only_uniform_effective_slots() {
+        let mut meshpart = MeshPart::new("part", Mesh::block(1.0, [1.0; 4]));
+        assert_eq!(meshpart.material(), Some(&Material::default()));
+
+        let material = Material::from_color(crate::Color3::new(1.0, 0.0, 0.0));
+        meshpart.set_material(material);
+        assert_eq!(meshpart.material(), Some(&material));
+
+        meshpart.set_material_slot(MaterialSlot::Top, Material::default());
+        assert_eq!(meshpart.material(), None);
+    }
+
+    #[test]
     fn imports_supplied_glb_assets_as_renderable_meshparts() {
         let assets: [(&str, &[u8]); 2] = [
             (
@@ -799,8 +815,8 @@ mod tests {
                 assert!((vertex.material_slot as usize) < MATERIAL_SLOT_COUNT);
             }
 
-            let texture_handles = std::iter::once(MaterialSlot::Base)
-                .chain(MaterialSlot::ALL_DIRECTIONS)
+            let texture_handles = MaterialSlot::ALL_DIRECTIONS
+                .into_iter()
                 .flat_map(|slot| {
                     let textures = meshpart.material_slot(slot).textures;
                     [

@@ -101,32 +101,26 @@ var material_texture_4: texture_2d_array<f32>;
 var material_texture_5: texture_2d_array<f32>;
 
 @group(1) @binding(6)
-var material_texture_6: texture_2d_array<f32>;
-
-@group(1) @binding(7)
 var material_sampler_0: sampler;
 
-@group(1) @binding(8)
+@group(1) @binding(7)
 var material_sampler_1: sampler;
 
-@group(1) @binding(9)
+@group(1) @binding(8)
 var material_sampler_2: sampler;
 
-@group(1) @binding(10)
+@group(1) @binding(9)
 var material_sampler_3: sampler;
 
-@group(1) @binding(11)
+@group(1) @binding(10)
 var material_sampler_4: sampler;
 
-@group(1) @binding(12)
+@group(1) @binding(11)
 var material_sampler_5: sampler;
 
-@group(1) @binding(13)
-var material_sampler_6: sampler;
-
 // Per-face PBR factors for every deduplicated part material set. Each set
-// packs seven slots (base + six directions, in MaterialSlot order) as three
-// vec4s per slot: base color, then emissive RGB + roughness, then metallic.
+// packs six directional slots in MaterialSlot order as three vec4s per slot:
+// base color, then emissive RGB + roughness, then metallic.
 //
 // Stored in a 2D float texture (width = MATERIAL_VEC4S_PER_SET, height =
 // set count) instead of a storage buffer: OpenGL ES / WebGL backends expose
@@ -136,7 +130,7 @@ var material_sampler_6: sampler;
 var material_factor_texture: texture_2d<f32>;
 
 const MATERIAL_VEC4S_PER_SLOT: u32 = 3u;
-const MATERIAL_VEC4S_PER_SET: u32 = 21u;
+const MATERIAL_VEC4S_PER_SET: u32 = 18u;
 
 fn load_material_vec4(set_index: u32, vec4_index: u32) -> vec4<f32> {
     return textureLoad(material_factor_texture, vec2<u32>(vec4_index, set_index), 0);
@@ -303,8 +297,6 @@ fn sample_base_color(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32
         return textureSampleGrad(material_texture_4, material_sampler_4, uv, 0, uv_dx, uv_dy);
     } else if slot == 5u {
         return textureSampleGrad(material_texture_5, material_sampler_5, uv, 0, uv_dx, uv_dy);
-    } else if slot == 6u {
-        return textureSampleGrad(material_texture_6, material_sampler_6, uv, 0, uv_dx, uv_dy);
     }
     return textureSampleGrad(material_texture_0, material_sampler_0, uv, 0, uv_dx, uv_dy);
 }
@@ -326,8 +318,6 @@ fn sample_surface(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) 
         return textureSampleGrad(material_texture_4, material_sampler_4, uv, 1, uv_dx, uv_dy);
     } else if slot == 5u {
         return textureSampleGrad(material_texture_5, material_sampler_5, uv, 1, uv_dx, uv_dy);
-    } else if slot == 6u {
-        return textureSampleGrad(material_texture_6, material_sampler_6, uv, 1, uv_dx, uv_dy);
     }
     return textureSampleGrad(material_texture_0, material_sampler_0, uv, 1, uv_dx, uv_dy);
 }
@@ -343,8 +333,6 @@ fn sample_emissive(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>)
         return textureSampleGrad(material_texture_4, material_sampler_4, uv, 2, uv_dx, uv_dy);
     } else if slot == 5u {
         return textureSampleGrad(material_texture_5, material_sampler_5, uv, 2, uv_dx, uv_dy);
-    } else if slot == 6u {
-        return textureSampleGrad(material_texture_6, material_sampler_6, uv, 2, uv_dx, uv_dy);
     }
     return textureSampleGrad(material_texture_0, material_sampler_0, uv, 2, uv_dx, uv_dy);
 }

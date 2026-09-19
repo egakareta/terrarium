@@ -6,9 +6,8 @@ use crate::Color3;
 
 /// Depth format used by the built-in renderer.
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-/// Number of material slots available to a mesh, including the base slot and
-/// six directional slots.
-pub const MATERIAL_SLOT_COUNT: usize = 7;
+/// Number of directional material slots available to a mesh.
+pub const MATERIAL_SLOT_COUNT: usize = 6;
 
 /// A handle to a texture stored in a [`crate::Workspace`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -31,25 +30,23 @@ pub struct TextureHandle(
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MaterialSlot {
-    /// The default material, stored in [`crate::Part::material`].
-    Base = 0,
     /// The top-facing material slot.
-    Top = 1,
+    Top = 0,
     /// The bottom-facing material slot.
-    Bottom = 2,
+    Bottom = 1,
     /// The front-facing material slot toward `+Z`.
-    Front = 3,
+    Front = 2,
     /// The back-facing material slot toward `-Z`.
-    Back = 4,
+    Back = 3,
     /// The left-facing material slot toward `-X`.
-    Left = 5,
+    Left = 4,
     /// The right-facing material slot toward `+X`.
-    Right = 6,
+    Right = 5,
 }
 
 impl MaterialSlot {
     /// All directional slots in GPU slot order.
-    pub const ALL_DIRECTIONS: [Self; MATERIAL_SLOT_COUNT - 1] = [
+    pub const ALL_DIRECTIONS: [Self; MATERIAL_SLOT_COUNT] = [
         Self::Top,
         Self::Bottom,
         Self::Front,
@@ -67,14 +64,14 @@ impl MaterialSlot {
     ///
     /// The dominant axis of `normal` wins: `|y|` beats `|x|` beats `|z|` on
     /// ties, so an up-facing slope maps to [`Top`](Self::Top) rather than a
-    /// side. A zero normal maps to [`Base`](Self::Base).
+    /// side. A zero normal maps to [`Top`](Self::Top).
     pub fn from_normal(normal: [f32; 3]) -> Self {
         let [x, y, z] = normal;
         let ax = x.abs();
         let ay = y.abs();
         let az = z.abs();
         if ax == 0.0 && ay == 0.0 && az == 0.0 {
-            return Self::Base;
+            return Self::Top;
         }
         if ay >= ax && ay >= az {
             if y >= 0.0 { Self::Top } else { Self::Bottom }
@@ -109,9 +106,7 @@ pub struct TextureSet {
 /// base color, metallic, roughness, and emissive values; the part tint
 /// ([`crate::BasePart::color`]) still multiplies every face.
 ///
-/// Texture sampling for each slot uses that slot's [`Material::filter`]; unset
-/// directional slots fall back to the base material's filter, matching the
-/// fallback used for textures and scalar factors.
+/// Texture sampling for each slot uses that slot's [`Material::filter`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
     /// RGBA multiplier for the base color. Values are not clamped on assignment.
@@ -130,16 +125,23 @@ pub struct Material {
 
 impl Default for Material {
     fn default() -> Self {
-        Self {
-            base_color: [1.0, 1.0, 1.0, 1.0],
-            metallic: 0.0,
-            roughness: 0.5,
-            emissive: [0.0, 0.0, 0.0],
-            textures: TextureSet::default(),
-            filter: TextureFilter::default(),
-        }
+        DEFAULT_MATERIAL
     }
 }
+
+pub(crate) const DEFAULT_MATERIAL: Material = Material {
+    base_color: [1.0, 1.0, 1.0, 1.0],
+    metallic: 0.0,
+    roughness: 0.5,
+    emissive: [0.0, 0.0, 0.0],
+    textures: TextureSet {
+        base_color: None,
+        normal: None,
+        metallic_roughness: None,
+        emissive: None,
+    },
+    filter: TextureFilter::Trilinear,
+};
 
 impl Material {
     /// Creates a material using a texture as its base-color map.
@@ -175,7 +177,7 @@ impl Material {
     ///
     /// Each directional slot samples with its own filter, so set the same
     /// filter on every slot material when they should match. Unset slots fall
-    /// back to the base material's filter.
+    /// back to the default material's filter.
     pub fn with_filter(mut self, filter: TextureFilter) -> Self {
         self.filter = filter;
         self
@@ -190,64 +192,48 @@ impl Material {
     }
 }
 
-/// Materials assigned to the non-default slots of a mesh.
+/// Materials assigned to the directional slots of a mesh.
 ///
-/// Slot zero is the [`crate::Part::material`] field. The first element in this list
-/// is slot one, the second is slot two, and so on. Entries are `Some` only for
-/// slots assigned through [`MeshMaterialSlots::set`]; skipped slots stay `None`
-/// and fall back to the base material at render time.
+/// The first element in this list is [`MaterialSlot::Top`], followed by the
+/// remaining slots in [`MaterialSlot::ALL_DIRECTIONS`] order. Entries are
+/// `Some` only for slots assigned through [`MeshMaterialSlots::set`]; skipped
+/// slots stay `None` and fall back to [`Material::default()`] at render time.
 ///
 /// Slots are directional (see [`MaterialSlot`]), so the same slot names work
 /// for every shape: setting [`MaterialSlot::Top`] affects the top-facing
 /// triangles of a [`crate::PartShape::Block`], [`crate::PartShape::Cylinder`],
 /// [`crate::PartShape::Wedge`], or any custom [`crate::Mesh`] whose vertices
-/// are tagged by orientation. Unset slots fall back to the base material at
+/// are tagged by orientation. Unset slots fall back to the default material at
 /// render time, including its scalar PBR factors.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshMaterialSlots {
-    /// Materials for slots after [`MaterialSlot::Base`], stored by slot order.
+    /// Materials stored by directional slot order.
     ///
     /// `None` entries were never assigned and fall back to
-    /// [`crate::Part::material`].
+    /// [`Material::default()`].
     pub slots: Vec<Option<Material>>,
 }
 
 impl MeshMaterialSlots {
-    /// Assigns a non-base material slot, growing the slot list as needed.
+    /// Assigns a directional material slot, growing the slot list as needed.
     ///
-    /// Skipped slots stay `None` and fall back to [`crate::Part::material`].
-    ///
-    /// Passing [`MaterialSlot::Base`] panics because the base slot belongs in
-    /// [`crate::Part::material`].
+    /// Skipped slots stay `None` and fall back to [`Material::default()`].
     pub fn set(&mut self, slot: MaterialSlot, material: Material) {
-        assert!(slot != MaterialSlot::Base, "slot zero is Part::material");
-        let index = slot.index() - 1;
+        let index = slot.index();
         if self.slots.len() <= index {
             self.slots.resize(index + 1, None);
         }
         self.slots[index] = Some(material);
     }
 
-    /// Returns the material assigned to a non-base slot, if any.
-    ///
-    /// Passing [`MaterialSlot::Base`] returns `None` because the base slot
-    /// belongs in [`crate::Part::material`].
+    /// Returns the material assigned to a directional slot, if any.
     pub fn get(&self, slot: MaterialSlot) -> Option<&Material> {
-        if slot == MaterialSlot::Base {
-            return None;
-        }
-        self.slots.get(slot.index() - 1)?.as_ref()
+        self.slots.get(slot.index())?.as_ref()
     }
 
-    /// Returns the mutable material assigned to a non-base slot, if any.
-    ///
-    /// Passing [`MaterialSlot::Base`] returns `None` because the base slot
-    /// belongs in [`crate::Part::material`].
+    /// Returns the mutable material assigned to a directional slot, if any.
     pub fn get_mut(&mut self, slot: MaterialSlot) -> Option<&mut Material> {
-        if slot == MaterialSlot::Base {
-            return None;
-        }
-        self.slots.get_mut(slot.index() - 1)?.as_mut()
+        self.slots.get_mut(slot.index())?.as_mut()
     }
 }
 
@@ -984,7 +970,7 @@ mod tests {
         );
         assert_eq!(
             MaterialSlot::from_normal([0.0, 0.0, 0.0]),
-            MaterialSlot::Base
+            MaterialSlot::Top
         );
     }
 
@@ -1005,7 +991,6 @@ mod tests {
     #[test]
     fn mesh_material_slots_round_trip_through_get() {
         let mut slots = MeshMaterialSlots::default();
-        assert!(slots.get(MaterialSlot::Base).is_none());
         assert!(slots.get(MaterialSlot::Top).is_none());
 
         let material = Material::from_color(Color3::new(1.0, 0.0, 0.0));
