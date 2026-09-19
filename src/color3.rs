@@ -16,6 +16,9 @@ impl Default for Color3 {
 }
 
 impl Color3 {
+    /// Opaque black.
+    pub const BLACK: Self = Self::new(0.0, 0.0, 0.0);
+
     /// Opaque white.
     pub const WHITE: Self = Self::new(1.0, 1.0, 1.0);
 
