@@ -141,9 +141,10 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         part.set_position(Vec3::new(3.3, 2.8, 0.0));
         part.size = Vec3::splat(0.8);
         part.color = Color3::new(0.95, 0.72, 0.22);
-        let mut material = Material::default();
-        material.roughness = 0.18;
-        part.set_material(material);
+        part.set_material(Material {
+            roughness: 0.18,
+            ..Default::default()
+        });
         part.can_collide = false;
         part.add_child_with(PointLight::unnamed(), |light| {
             light.color = Color3::new(1.0, 0.35, 0.08);
