@@ -267,7 +267,15 @@ impl Engine {
     /// Processes camera input, advances the workspace, and requests the next frame.
     pub fn update(&mut self, context: &egui::Context) {
         let delta = context.input(|input| input.stable_dt.min(0.1));
-        context.input(|input| self.workspace.process_eframe_input(input));
+        let egui_wants_pointer_input = context.egui_wants_pointer_input();
+        let egui_wants_keyboard_input = context.egui_wants_keyboard_input();
+        context.input(|input| {
+            self.workspace.process_eframe_input_with_capture(
+                input,
+                egui_wants_pointer_input,
+                egui_wants_keyboard_input,
+            )
+        });
         self.workspace.update(delta);
         context.request_repaint();
     }

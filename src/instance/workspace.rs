@@ -268,6 +268,24 @@ impl Workspace {
     pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
         self.camera_controller.process_eframe_input(input);
     }
+
+    /// Forwards eframe input to the active camera controller while respecting
+    /// egui's pointer and keyboard capture state.
+    ///
+    /// The egui capture flags should come from the matching [`crate::egui::Context`]
+    /// methods so camera input is ignored while an egui widget owns it.
+    pub fn process_eframe_input_with_capture(
+        &mut self,
+        input: &crate::egui::InputState,
+        egui_wants_pointer_input: bool,
+        egui_wants_keyboard_input: bool,
+    ) {
+        self.camera_controller.process_eframe_input_with_capture(
+            input,
+            egui_wants_pointer_input,
+            egui_wants_keyboard_input,
+        );
+    }
 }
 
 impl Clone for Workspace {

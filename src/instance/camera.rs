@@ -289,26 +289,47 @@ impl CameraController {
 
     /// Feeds eframe's normalized input state into the controller.
     pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
+        self.process_eframe_input_with_capture(input, false, false);
+    }
+
+    /// Feeds eframe's normalized input state into the controller while
+    /// respecting egui's pointer and keyboard capture state.
+    ///
+    /// `egui_wants_pointer_input` and `egui_wants_keyboard_input` should come
+    /// from the matching [`crate::egui::Context`] methods. Camera input is
+    /// suppressed independently for each device while egui owns it.
+    pub fn process_eframe_input_with_capture(
+        &mut self,
+        input: &crate::egui::InputState,
+        egui_wants_pointer_input: bool,
+        egui_wants_keyboard_input: bool,
+    ) {
         if !input.focused {
             self.clear_keys();
             return;
         }
 
-        let key_down = |binding: &[KeyCode]| {
-            binding
-                .iter()
-                .copied()
-                .any(|key| eframe_key(key).is_some_and(|key| input.key_down(key)))
-        };
-        self.forward = key_down(&self.key_bindings.forward);
-        self.backward = key_down(&self.key_bindings.backward);
-        self.left = key_down(&self.key_bindings.left);
-        self.right = key_down(&self.key_bindings.right);
-        self.up = key_down(&self.key_bindings.up);
-        self.down = key_down(&self.key_bindings.down);
-        self.sprint = key_down(&self.key_bindings.sprint);
+        if egui_wants_keyboard_input {
+            self.clear_keyboard_input();
+        } else {
+            let key_down = |binding: &[KeyCode]| {
+                binding
+                    .iter()
+                    .copied()
+                    .any(|key| eframe_key(key).is_some_and(|key| input.key_down(key)))
+            };
+            self.forward = key_down(&self.key_bindings.forward);
+            self.backward = key_down(&self.key_bindings.backward);
+            self.left = key_down(&self.key_bindings.left);
+            self.right = key_down(&self.key_bindings.right);
+            self.up = key_down(&self.key_bindings.up);
+            self.down = key_down(&self.key_bindings.down);
+            self.sprint = key_down(&self.key_bindings.sprint);
+        }
 
-        if let Some(button) = eframe_button(self.mouse_drag_button)
+        if egui_wants_pointer_input {
+            self.mouse_delta = (0.0, 0.0);
+        } else if let Some(button) = eframe_button(self.mouse_drag_button)
             && input.pointer.button_down(button)
         {
             let delta = input.pointer.delta() * input.pixels_per_point;
@@ -420,6 +441,12 @@ impl CameraController {
     }
 
     fn clear_keys(&mut self) {
+        self.clear_keyboard_input();
+        self.mouse_delta = (0.0, 0.0);
+        self.stop_mouse_drag();
+    }
+
+    fn clear_keyboard_input(&mut self) {
         self.forward = false;
         self.backward = false;
         self.left = false;
@@ -427,8 +454,6 @@ impl CameraController {
         self.up = false;
         self.down = false;
         self.sprint = false;
-        self.mouse_delta = (0.0, 0.0);
-        self.stop_mouse_drag();
     }
 
     fn stop_mouse_drag(&mut self) {
@@ -525,5 +550,31 @@ mod tests {
 
         assert_eq!(camera.pivot().w_axis.truncate(), original_position);
         assert!(camera.forward().x > 0.0);
+    }
+
+    #[test]
+    fn egui_keyboard_capture_clears_camera_movement() {
+        let mut controller = CameraController::default();
+        controller.forward = true;
+        controller.sprint = true;
+        let mut input = crate::egui::InputState::default();
+        input.focused = true;
+
+        controller.process_eframe_input_with_capture(&input, false, true);
+
+        assert!(!controller.forward);
+        assert!(!controller.sprint);
+    }
+
+    #[test]
+    fn egui_pointer_capture_clears_camera_look_delta() {
+        let mut controller = CameraController::default();
+        controller.mouse_delta = (4.0, -2.0);
+        let mut input = crate::egui::InputState::default();
+        input.focused = true;
+
+        controller.process_eframe_input_with_capture(&input, true, false);
+
+        assert_eq!(controller.mouse_delta, (0.0, 0.0));
     }
 }
