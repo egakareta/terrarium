@@ -109,8 +109,11 @@ impl Renderer {
         let local_shadows = self.prepare_local_lights(workspace, &camera_planes);
         let lighting = &workspace.lighting;
         let light_direction = lighting.render_sun_direction();
-        let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
-            light_view_projections(&workspace.current_camera, light_direction);
+        let (light_vps, shadow_cascade_splits, shadow_texel_sizes) = light_view_projections(
+            &workspace.current_camera,
+            light_direction,
+            self.shadow_map_size,
+        );
         let daylight = lighting.daylight_factor();
         let style_scale = match lighting.lighting_style {
             crate::LightingStyle::Realistic => 1.0,

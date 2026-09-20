@@ -81,6 +81,10 @@ impl Renderer {
         let size = viewport.size;
         let viewport_id = viewport.workspace.id();
         self.ensure_viewport_target(viewport_id, size, render_state);
+        let shadow_map_size = directional_shadow_map_size(size[0], size[1]);
+        if self.shadow_map_size < shadow_map_size {
+            self.set_directional_shadow_map_size(shadow_map_size);
+        }
 
         self.prepare_scene(&viewport.workspace)?;
         {

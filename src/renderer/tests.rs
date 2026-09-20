@@ -159,7 +159,7 @@ fn frustum_culling_keeps_visible_and_rejects_outside() {
 fn shadow_cascades_cover_their_camera_frustum_slices() {
     let camera = Camera::new(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
     let (matrices, splits, texel_sizes) =
-        light_view_projections(&camera, Vec3::new(-0.45, 0.85, 0.35));
+        light_view_projections(&camera, Vec3::new(-0.45, 0.85, 0.35), MAX_SHADOW_MAP_SIZE);
     let mut near = camera.znear();
 
     for cascade in 0..SHADOW_CASCADE_COUNT {

@@ -284,9 +284,8 @@ impl Renderer {
                         base_texture.height,
                     ),
                 )?;
-                let base_mips = base_texture.mip_levels()?;
-                let surface_mips = surface_texture.mip_levels()?;
-                let emissive_mips = emissive_texture.mip_levels()?;
+                let (base_mips, mut surface_mips, emissive_mips) =
+                    material_mip_levels(&base_texture, &surface_texture, &emissive_texture)?;
                 let format = texture_gpu_format(base_texture.color_space);
                 let entry = &self.gpu_material_textures[packed_handle.0];
                 if entry._texture.size().width != base_texture.width
@@ -312,7 +311,7 @@ impl Renderer {
                         &self.queue,
                         &replacement,
                         &base_mips,
-                        &surface_mips,
+                        &mut surface_mips,
                         &emissive_mips,
                         base_texture.color_space,
                     );
@@ -331,7 +330,7 @@ impl Renderer {
                         &self.queue,
                         &entry._texture,
                         &base_mips,
-                        &surface_mips,
+                        &mut surface_mips,
                         &emissive_mips,
                         base_texture.color_space,
                     );
@@ -367,9 +366,8 @@ impl Renderer {
         surface: &Texture,
         emissive: &Texture,
     ) -> Result<PackedTextureHandle, RendererError> {
-        let base_mips = base_color.mip_levels()?;
-        let surface_mips = surface.mip_levels()?;
-        let emissive_mips = emissive.mip_levels()?;
+        let (base_mips, mut surface_mips, emissive_mips) =
+            material_mip_levels(base_color, surface, emissive)?;
         let format = texture_gpu_format(base_color.color_space);
         let gpu_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("packed material texture"),
@@ -389,7 +387,7 @@ impl Renderer {
             &self.queue,
             &gpu_texture,
             &base_mips,
-            &surface_mips,
+            &mut surface_mips,
             &emissive_mips,
             base_color.color_space,
         );
@@ -501,4 +499,34 @@ impl Renderer {
             entries: &entries,
         })
     }
+}
+
+type MaterialMipLevels = (Vec<Image>, Vec<Image>, Vec<Image>);
+
+fn material_mip_levels(
+    base_color: &Texture,
+    surface: &Texture,
+    emissive: &Texture,
+) -> Result<MaterialMipLevels, TextureError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if u64::from(base_color.width) * u64::from(base_color.height) >= 256 * 256 {
+        return std::thread::scope(|scope| {
+            let surface_mips = scope.spawn(|| surface.mip_levels());
+            let emissive_mips = scope.spawn(|| emissive.mip_levels());
+            let base_mips = base_color.mip_levels();
+            let surface_mips = surface_mips
+                .join()
+                .expect("surface mip generation thread panicked");
+            let emissive_mips = emissive_mips
+                .join()
+                .expect("emissive mip generation thread panicked");
+            Ok((base_mips?, surface_mips?, emissive_mips?))
+        });
+    }
+
+    Ok((
+        base_color.mip_levels()?,
+        surface.mip_levels()?,
+        emissive.mip_levels()?,
+    ))
 }

@@ -294,6 +294,20 @@ impl Renderer {
             &self.outline_uniform_buffer,
         );
         self.eframe_scene.resize(&self.device, width, height);
+        let shadow_map_size = directional_shadow_map_size(width, height);
+        if self.shadow_map_size != shadow_map_size {
+            self.set_directional_shadow_map_size(shadow_map_size);
+        }
+    }
+
+    pub(super) fn set_directional_shadow_map_size(&mut self, size: u32) {
+        let (shadow_texture, shadow_view, shadow_layer_views) =
+            create_shadow_texture(&self.device, size);
+        self._shadow_texture = shadow_texture;
+        self.shadow_view = shadow_view;
+        self.shadow_layer_views = shadow_layer_views;
+        self.shadow_map_size = size;
+        self.refresh_environment_binding();
     }
 
     /// Prepares a workspace for drawing in an eframe WGPU paint callback.

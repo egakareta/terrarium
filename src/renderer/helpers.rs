@@ -314,10 +314,15 @@ pub(super) fn write_packed_mips(
     queue: &wgpu::Queue,
     texture: &wgpu::Texture,
     base_mips: &[Image],
-    surface_mips: &[Image],
+    surface_mips: &mut [Image],
     emissive_mips: &[Image],
     base_color_space: TextureColorSpace,
 ) {
+    if base_color_space == TextureColorSpace::Srgb {
+        for image in surface_mips.iter_mut() {
+            encode_srgb_rgb_in_place(&mut image.pixels);
+        }
+    }
     for (mip_level, ((base_image, surface_image), emissive_image)) in base_mips
         .iter()
         .zip(surface_mips)
@@ -343,11 +348,6 @@ pub(super) fn write_packed_mips(
                 depth_or_array_layers: 1,
             },
         );
-        let surface_pixels = if base_color_space == TextureColorSpace::Srgb {
-            encode_srgb_rgb(&surface_image.pixels)
-        } else {
-            surface_image.pixels.clone()
-        };
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -355,7 +355,7 @@ pub(super) fn write_packed_mips(
                 origin: wgpu::Origin3d { x: 0, y: 0, z: 1 },
                 aspect: wgpu::TextureAspect::All,
             },
-            &surface_pixels,
+            &surface_image.pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(surface_image.width * 4),
@@ -438,14 +438,12 @@ pub(super) fn resize_texture_pixels(texture: &Texture, width: u32, height: u32) 
     pixels
 }
 
-pub(super) fn encode_srgb_rgb(pixels: &[u8]) -> Vec<u8> {
-    let mut encoded = pixels.to_vec();
-    for pixel in encoded.chunks_exact_mut(4) {
+pub(super) fn encode_srgb_rgb_in_place(pixels: &mut [u8]) {
+    for pixel in pixels.chunks_exact_mut(4) {
         pixel[0] = linear_to_srgb_byte(pixel[0]);
         pixel[1] = linear_to_srgb_byte(pixel[1]);
         pixel[2] = linear_to_srgb_byte(pixel[2]);
     }
-    encoded
 }
 
 pub(super) fn linear_to_srgb_byte(value: u8) -> u8 {
@@ -543,6 +541,7 @@ pub(super) fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> b
 
 pub(super) fn create_shadow_texture(
     device: &wgpu::Device,
+    size: u32,
 ) -> (
     wgpu::Texture,
     wgpu::TextureView,
@@ -551,8 +550,8 @@ pub(super) fn create_shadow_texture(
     let texture = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("directional shadow map"),
         size: wgpu::Extent3d {
-            width: SHADOW_MAP_SIZE,
-            height: SHADOW_MAP_SIZE,
+            width: size,
+            height: size,
             depth_or_array_layers: SHADOW_CASCADE_COUNT as u32,
         },
         mip_level_count: 1,
@@ -577,6 +576,16 @@ pub(super) fn create_shadow_texture(
         })
     });
     (texture, view, layer_views)
+}
+
+pub(super) fn directional_shadow_map_size(width: u32, height: u32) -> u32 {
+    width
+        .max(height)
+        .max(1)
+        .saturating_mul(2)
+        .checked_next_power_of_two()
+        .unwrap_or(MAX_SHADOW_MAP_SIZE)
+        .clamp(MIN_SHADOW_MAP_SIZE, MAX_SHADOW_MAP_SIZE)
 }
 
 pub(super) fn create_local_shadow_texture(

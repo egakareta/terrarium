@@ -52,7 +52,6 @@ struct LocalLights {
 };
 
 override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
-override SHADOW_MAP_SIZE: f32 = 3072.0;
 
 const SHADOW_CASCADE_COUNT: u32 = 7u;
 const SHADOW_FILTER_OFFSETS = array<f32, 3>(-1.0, 0.0, 1.0);
@@ -349,7 +348,7 @@ fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
         return 1.0;
     }
 
-    let texel_size = camera.lighting_params.z / SHADOW_MAP_SIZE;
+    let texel_size = camera.lighting_params.z / f32(textureDimensions(shadow_map).x);
     var visibility = 0.0;
     for (var x = 0u; x < 3u; x = x + 1u) {
         for (var y = 0u; y < 3u; y = y + 1u) {

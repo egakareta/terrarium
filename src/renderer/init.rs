@@ -20,7 +20,9 @@ impl Renderer {
         let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let (outline_mask_texture, outline_mask_view) =
             create_outline_mask_texture(&device, width, height);
-        let (shadow_texture, shadow_view, shadow_layer_views) = create_shadow_texture(&device);
+        let shadow_map_size = directional_shadow_map_size(width, height);
+        let (shadow_texture, shadow_view, shadow_layer_views) =
+            create_shadow_texture(&device, shadow_map_size);
         let (local_shadow_texture, local_shadow_view, local_shadow_layer_views) =
             create_local_shadow_texture(&device, 1);
         let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -417,13 +419,10 @@ impl Renderer {
             emissive: [GpuTextureHandle(3); MATERIAL_SLOT_COUNT],
         };
         let shader = shaders.mesh;
-        let shader_constants = [
-            (
-                "FRAMEBUFFER_IS_SRGB",
-                if format.is_srgb() { 1.0 } else { 0.0 },
-            ),
-            ("SHADOW_MAP_SIZE", SHADOW_MAP_SIZE as f64),
-        ];
+        let shader_constants = [(
+            "FRAMEBUFFER_IS_SRGB",
+            if format.is_srgb() { 1.0 } else { 0.0 },
+        )];
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh pipeline layout"),
             bind_group_layouts: &[
@@ -806,8 +805,6 @@ impl Renderer {
                 bind_group_layouts: &[Some(&skybox_bind_group_layout)],
                 immediate_size: 0,
             });
-        // The skybox shader only declares FRAMEBUFFER_IS_SRGB: passing the
-        // mesh shader's SHADOW_MAP_SIZE override would fail pipeline creation.
         let skybox_shader_constants = [("FRAMEBUFFER_IS_SRGB", shader_constants[0].1)];
         let skybox_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skybox pipeline"),
@@ -890,6 +887,7 @@ impl Renderer {
             outline_mask_texture,
             outline_mask_view,
             _shadow_texture: shadow_texture,
+            shadow_map_size,
             shadow_layer_views,
             _local_shadow_texture: local_shadow_texture,
             local_shadow_view,

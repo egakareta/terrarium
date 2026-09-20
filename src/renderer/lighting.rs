@@ -479,6 +479,7 @@ pub(super) fn point_shadow_view_projections(position: Vec3, near: f32, far: f32)
 pub(super) fn light_view_projections(
     camera: &Camera,
     light_direction: Vec3,
+    shadow_map_size: u32,
 ) -> (
     [Mat4; SHADOW_CASCADE_COUNT],
     [f32; SHADOW_CASCADE_COUNT],
@@ -517,7 +518,7 @@ pub(super) fn light_view_projections(
         // A fixed-size bounding sphere prevents projection scale from changing as
         // the camera rotates. Leave a little room for snapping at the map edge.
         let extent = ((radius + 1.0 / 16.0) * 16.0).ceil() / 16.0;
-        let texel_size = 2.0 * extent / SHADOW_MAP_SIZE as f32;
+        let texel_size = 2.0 * extent / shadow_map_size as f32;
         texel_sizes[cascade] = texel_size;
 
         // Quantizing the light-space center keeps stationary shadows from

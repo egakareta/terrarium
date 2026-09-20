@@ -40,7 +40,8 @@ pub use viewport::*;
 #[cfg(test)]
 mod tests;
 
-const SHADOW_MAP_SIZE: u32 = 3072;
+const MAX_SHADOW_MAP_SIZE: u32 = 3072;
+const MIN_SHADOW_MAP_SIZE: u32 = 256;
 const SHADOW_CASCADE_COUNT: usize = 7;
 /// Maximum number of camera-relevant local lights rendered in one frame.
 ///
@@ -547,6 +548,7 @@ pub struct Renderer {
     outline_mask_texture: wgpu::Texture,
     outline_mask_view: wgpu::TextureView,
     _shadow_texture: wgpu::Texture,
+    shadow_map_size: u32,
     shadow_layer_views: [wgpu::TextureView; SHADOW_CASCADE_COUNT],
     _local_shadow_texture: wgpu::Texture,
     local_shadow_view: wgpu::TextureView,
