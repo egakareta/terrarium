@@ -205,6 +205,10 @@ pub struct CameraController {
     pub mouse_delta: (f32, f32),
     /// Mouse button that activates drag-to-look.
     pub mouse_drag_button: MouseButton,
+    /// Whether mouse-look input is processed.
+    pub mouse_enabled: bool,
+    /// Whether keyboard movement input is processed.
+    pub keyboard_enabled: bool,
     mouse_dragging: bool,
     last_cursor_position: Option<(f64, f64)>,
 }
@@ -240,9 +244,65 @@ impl CameraController {
             sprint: false,
             mouse_delta: (0.0, 0.0),
             mouse_drag_button: MouseButton::Left,
+            mouse_enabled: true,
+            keyboard_enabled: true,
             mouse_dragging: false,
             last_cursor_position: None,
         }
+    }
+
+    /// Enables or disables all camera input (both keyboard and mouse).
+    ///
+    /// When set to `false`, any currently held movement keys, accumulated
+    /// mouse deltas, and active mouse dragging states are cleared immediately.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.set_keyboard_enabled(enabled);
+        self.set_mouse_enabled(enabled);
+    }
+
+    /// Enables or disables keyboard movement input.
+    ///
+    /// When set to `false`, any currently held movement keys are cleared immediately.
+    pub fn set_keyboard_enabled(&mut self, enabled: bool) {
+        self.keyboard_enabled = enabled;
+        if !enabled {
+            self.clear_keyboard_input();
+        }
+    }
+
+    /// Enables or disables mouse-look input.
+    ///
+    /// When set to `false`, accumulated mouse deltas and active mouse dragging
+    /// states are cleared immediately.
+    pub fn set_mouse_enabled(&mut self, enabled: bool) {
+        self.mouse_enabled = enabled;
+        if !enabled {
+            self.mouse_delta = (0.0, 0.0);
+            self.stop_mouse_drag();
+        }
+    }
+
+    /// Returns `true` if any camera input (keyboard or mouse) is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.keyboard_enabled || self.mouse_enabled
+    }
+
+    /// Sets whether all camera input is enabled, returning `self` for chaining.
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.set_enabled(enabled);
+        self
+    }
+
+    /// Sets whether keyboard movement input is enabled, returning `self` for chaining.
+    pub fn with_keyboard_enabled(mut self, enabled: bool) -> Self {
+        self.set_keyboard_enabled(enabled);
+        self
+    }
+
+    /// Sets whether mouse-look input is enabled, returning `self` for chaining.
+    pub fn with_mouse_enabled(mut self, enabled: bool) -> Self {
+        self.set_mouse_enabled(enabled);
+        self
     }
 
     /// Feeds a winit window event into the controller. Returns true when it was used.
@@ -253,6 +313,9 @@ impl CameraController {
     pub fn process_window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
+                if !self.keyboard_enabled {
+                    return false;
+                }
                 let PhysicalKey::Code(key) = event.physical_key else {
                     return false;
                 };
@@ -260,11 +323,18 @@ impl CameraController {
                 self.process_key(key, pressed)
             }
             WindowEvent::MouseInput { state, button, .. } if *button == self.mouse_drag_button => {
+                if !self.mouse_enabled {
+                    return false;
+                }
                 self.mouse_dragging = *state == ElementState::Pressed;
                 self.last_cursor_position = None;
                 true
             }
             WindowEvent::CursorMoved { position, .. } if self.mouse_dragging => {
+                if !self.mouse_enabled {
+                    self.stop_mouse_drag();
+                    return false;
+                }
                 if let Some((last_x, last_y)) = self.last_cursor_position {
                     self.process_mouse_motion((
                         (position.x - last_x) as f32,
@@ -309,7 +379,7 @@ impl CameraController {
             return;
         }
 
-        if egui_wants_keyboard_input {
+        if !self.keyboard_enabled || egui_wants_keyboard_input {
             self.clear_keyboard_input();
         } else {
             let key_down = |binding: &[KeyCode]| {
@@ -327,8 +397,9 @@ impl CameraController {
             self.sprint = key_down(&self.key_bindings.sprint);
         }
 
-        if egui_wants_pointer_input {
+        if !self.mouse_enabled || egui_wants_pointer_input {
             self.mouse_delta = (0.0, 0.0);
+            self.stop_mouse_drag();
         } else if let Some(button) = eframe_button(self.mouse_drag_button)
             && input.pointer.button_down(button)
         {
@@ -338,6 +409,9 @@ impl CameraController {
     }
 
     fn process_key(&mut self, key: KeyCode, pressed: bool) -> bool {
+        if !self.keyboard_enabled {
+            return false;
+        }
         if self.key_bindings.forward.contains(&key) {
             set_key(&mut self.forward, pressed)
         } else if self.key_bindings.backward.contains(&key) {
@@ -360,6 +434,9 @@ impl CameraController {
     /// Feeds raw device events into the controller for mouse-look.
     /// Accumulates a raw mouse-motion event for the next camera update.
     pub fn process_device_event(&mut self, event: &DeviceEvent) {
+        if !self.mouse_enabled {
+            return;
+        }
         if let DeviceEvent::MouseMotion { delta } = event {
             self.process_mouse_motion((delta.0 as f32, delta.1 as f32));
         }
@@ -367,6 +444,9 @@ impl CameraController {
 
     /// Accumulates a mouse-motion delta for the next camera update.
     pub fn process_mouse_motion(&mut self, delta: (f32, f32)) {
+        if !self.mouse_enabled {
+            return;
+        }
         self.mouse_delta.0 += delta.0;
         self.mouse_delta.1 += delta.1;
     }
@@ -382,6 +462,13 @@ impl CameraController {
     /// orientation is rebuilt from yaw/pitch every update so no roll can
     /// accumulate.
     pub fn update_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
+        if !self.mouse_enabled {
+            self.mouse_delta = (0.0, 0.0);
+        }
+        if !self.keyboard_enabled {
+            self.clear_keyboard_input();
+        }
+
         let delta_seconds = delta_seconds.min(0.1);
 
         // Rebuild a roll-free orientation from yaw/pitch every frame.
@@ -580,5 +667,74 @@ mod tests {
         controller.process_eframe_input_with_capture(&input, true, false);
 
         assert_eq!(controller.mouse_delta, (0.0, 0.0));
+    }
+
+    #[test]
+    fn keyboard_disabled_suppresses_movement_and_keys() {
+        let mut controller = CameraController::default().with_keyboard_enabled(false);
+        assert!(!controller.keyboard_enabled);
+
+        let mut input = crate::egui::InputState::default();
+        input.focused = true;
+        input.keys_down.insert(crate::egui::Key::W);
+
+        controller.process_eframe_input_with_capture(&input, false, false);
+        assert!(!controller.forward);
+
+        assert!(!controller.process_key(KeyCode::KeyW, true));
+        assert!(!controller.forward);
+
+        let mut camera = Camera::default();
+        let initial_position = camera.pivot().w_axis.truncate();
+        controller.forward = true; // Even if force-set, update_camera clears disabled keyboard input
+        controller.update_camera(&mut camera, 1.0 / 60.0);
+        assert_eq!(camera.pivot().w_axis.truncate(), initial_position);
+        assert!(!controller.forward);
+    }
+
+    #[test]
+    fn mouse_disabled_suppresses_look_and_motion() {
+        let mut controller = CameraController::default().with_mouse_enabled(false);
+        assert!(!controller.mouse_enabled);
+
+        controller.process_mouse_motion((10.0, -5.0));
+        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+
+        controller.process_device_event(&DeviceEvent::MouseMotion {
+            delta: (10.0, -5.0),
+        });
+        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+
+        let mut camera = Camera::default();
+        let initial_forward = camera.forward();
+        controller.mouse_delta = (5.0, 5.0); // Force-set delta should be ignored if disabled
+        controller.update_camera(&mut camera, 1.0 / 60.0);
+        assert_eq!(camera.forward(), initial_forward);
+        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+    }
+
+    #[test]
+    fn disabling_input_clears_active_state_and_builder_methods_work() {
+        let mut controller = CameraController {
+            forward: true,
+            mouse_delta: (3.0, 4.0),
+            ..Default::default()
+        };
+        assert!(controller.is_enabled());
+
+        controller.set_enabled(false);
+        assert!(!controller.keyboard_enabled);
+        assert!(!controller.mouse_enabled);
+        assert!(!controller.is_enabled());
+        assert!(!controller.forward);
+        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+
+        let controller = controller
+            .with_enabled(true)
+            .with_keyboard_enabled(false)
+            .with_mouse_enabled(true);
+        assert!(!controller.keyboard_enabled);
+        assert!(controller.mouse_enabled);
+        assert!(controller.is_enabled());
     }
 }

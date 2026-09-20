@@ -479,6 +479,22 @@ mod tests {
     }
 
     #[test]
+    fn camera_controller_input_can_be_disabled_through_workspace() {
+        let mut workspace = Workspace::new();
+        assert!(workspace.camera_controller().is_enabled());
+
+        workspace.camera_controller_mut().set_enabled(false);
+        assert!(!workspace.camera_controller().keyboard_enabled);
+        assert!(!workspace.camera_controller().mouse_enabled);
+        assert!(!workspace.camera_controller().is_enabled());
+
+        workspace.camera_controller_mut().set_mouse_enabled(true);
+        assert!(!workspace.camera_controller().keyboard_enabled);
+        assert!(workspace.camera_controller().mouse_enabled);
+        assert!(workspace.camera_controller().is_enabled());
+    }
+
+    #[test]
     fn workspace_textures_can_be_replaced_and_edited_in_place() {
         use crate::TextureError;
 
