@@ -1,3 +1,23 @@
+# Terrarium
+
+## Structure
+
+- This is one Rust crate, not a Cargo workspace.
+- The main runtime path is `Terrarium -> Engine -> Workspace/Renderer`: `Workspace` owns the scene tree, camera, lighting, textures, meshes, and optional physics; `Renderer` is the eframe/WGPU renderer.
+- `src/lib.rs` has `#![deny(missing_docs)]`; document every new public item.
+
+## Toolchain And Commands
+
+- `mise run check` is the CI lint/format gate. It runs `cargo clippy --all-targets --all-features --workspace -- -D warnings`, then Rust and Oxfmt checks.
+- `mise run format` modifies files; `mise run format:cargo` formats Rust and `mise run format:oxfmt` formats TOML/YAML. The pre-commit hook runs `mise run format` and stages formatter changes.
+- `mise run test` runs `cargo test --all-targets --all-features`. For focused checks, use `cargo test --all-features --lib <filter>`, `cargo test --all-features --example app app_loads`, or `cargo test --all-features --test gpu <filter>`.
+- Render tests need a working Vulkan implementation. In CI they run with `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, lavapipe, and `xvfb-run -a`; reproduce that environment locally when GPU tests fail due to display or adapter setup.
+
+## Features And Entrypoints
+
+- Default features are `meshpart`, `physics`, `default-skybox`, `default-fonts`, and `eframe-default-fonts`; use `--all-features` for parity with CI.
+- Run the native demo with `mise run:examples:app` (`cargo run --example app`). The web entrypoint is `assets/web/index.html`; root `Trunk.toml` selects example `app` and writes to `examples/dist`, so use `trunk serve` or `trunk build` from the repository root.
+
 ## Test Implementation Rules
 
 Tests exist to detect regressions in externally observable behavior.
