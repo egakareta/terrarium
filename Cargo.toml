@@ -52,6 +52,10 @@ name = "gltf"
 required-features = ["meshpart"]
 
 [[example]]
+name = "viewport"
+required-features = ["meshpart"]
+
+[[example]]
 name = "physics"
 required-features = ["physics"]
 

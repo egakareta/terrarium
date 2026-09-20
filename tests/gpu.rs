@@ -77,6 +77,26 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn multiple_viewports_keep_independent_egui_textures() -> Result<(), AppCreationError> {
+    Terrarium::new()
+        .with_size([128, 128])
+        .with_headless(Some(0))
+        .run(|engine| {
+            let first = Viewport::new([16, 16]);
+            let second = Viewport::new([32, 16]);
+            let first_texture = engine.render_viewport(&first)?;
+            let second_texture = engine.render_viewport(&second)?;
+
+            assert_ne!(first_texture.id(), second_texture.id());
+            assert_eq!(first_texture, engine.render_viewport(&first)?);
+            assert_eq!(second_texture, engine.render_viewport(&second)?);
+            Ok::<(), AppCreationError>(())
+        })?
+        .expect("native headless mode returns the engine");
+    Ok(())
+}
+
+#[test]
 fn basepart_transparency_blends_front_geometry_with_background()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let engine = Terrarium::new()

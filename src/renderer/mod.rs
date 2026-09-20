@@ -9,6 +9,8 @@ use web_time::Instant;
 
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
+#[cfg(feature = "meshpart")]
+use crate::egui;
 use crate::{
     BasePart, Camera, Color3, Face, Instance, InstanceId, Mesh, OutlineMode, Part, PartShape,
     PointLight, Skybox, SkyboxError, SpotLight, SurfaceLight, Vertex, Workspace,
@@ -24,9 +26,13 @@ mod mesh;
 mod scene;
 mod skybox;
 mod texture;
+#[cfg(feature = "meshpart")]
+mod viewport;
 use helpers::*;
 use lighting::*;
 pub use material::*;
+#[cfg(feature = "meshpart")]
+pub use viewport::*;
 #[cfg(test)]
 mod tests;
 
@@ -417,6 +423,16 @@ struct EframeSceneTarget {
     pipeline: wgpu::RenderPipeline,
 }
 
+#[cfg(feature = "meshpart")]
+struct ViewportTarget {
+    _color_texture: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    _depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+    size: [u32; 2],
+    texture_id: Option<egui::TextureId>,
+}
+
 /// The eframe WGPU state and built-in PBR mesh pipeline.
 pub struct Renderer {
     device: wgpu::Device,
@@ -444,6 +460,8 @@ pub struct Renderer {
     stencil_mask_pipeline: wgpu::RenderPipeline,
     stencil_outline_pipeline: wgpu::RenderPipeline,
     eframe_scene: EframeSceneTarget,
+    #[cfg(feature = "meshpart")]
+    viewport_targets: HashMap<InstanceId, ViewportTarget>,
     skybox_pipeline: wgpu::RenderPipeline,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_uniform_buffer: wgpu::Buffer,

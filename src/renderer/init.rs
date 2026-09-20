@@ -914,6 +914,8 @@ impl Renderer {
             stencil_mask_pipeline,
             stencil_outline_pipeline,
             eframe_scene,
+            #[cfg(feature = "meshpart")]
+            viewport_targets: HashMap::new(),
             skybox_pipeline,
             skybox_bind_group_layout,
             skybox_uniform_buffer,

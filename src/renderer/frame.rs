@@ -59,36 +59,52 @@ impl Renderer {
     /// Pixels are returned in row-major order with a top-left origin.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn read_pixels(&self) -> Result<Vec<[u8; 4]>, RendererError> {
-        let unpadded_bytes_per_row = u64::from(self.width) * 4;
+        self.read_texture_pixels(
+            &self.eframe_scene._texture,
+            self.width,
+            self.height,
+            self.eframe_scene.format,
+        )
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn read_texture_pixels(
+        &self,
+        texture: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Result<Vec<[u8; 4]>, RendererError> {
+        let unpadded_bytes_per_row = u64::from(width) * 4;
         let bytes_per_row = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let padded_bytes_per_row = unpadded_bytes_per_row
             .div_ceil(u64::from(bytes_per_row))
             .checked_mul(u64::from(bytes_per_row))
             .ok_or_else(|| RendererError::PixelReadback("row size overflow".to_owned()))?;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("eframe scene pixel readback"),
-            size: padded_bytes_per_row * u64::from(self.height),
+            label: Some("render target pixel readback"),
+            size: padded_bytes_per_row * u64::from(height),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("eframe scene pixel readback encoder"),
+                label: Some("render target pixel readback encoder"),
             });
         encoder.copy_texture_to_buffer(
-            self.eframe_scene._texture.as_image_copy(),
+            texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row as u32),
-                    rows_per_image: Some(self.height),
+                    rows_per_image: Some(height),
                 },
             },
             wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
+                width,
+                height,
                 depth_or_array_layers: 1,
             },
         );
@@ -114,10 +130,16 @@ impl Renderer {
             .get_mapped_range()
             .map_err(|error| RendererError::PixelReadback(error.to_string()))?;
         let row_bytes = unpadded_bytes_per_row as usize;
-        let mut pixels = Vec::with_capacity(self.width as usize * self.height as usize);
+        let mut pixels = Vec::with_capacity(width as usize * height as usize);
         for row in mapped.chunks_exact(padded_bytes_per_row as usize) {
             for pixel in row[..row_bytes].chunks_exact(4) {
-                pixels.push(pixel.try_into().expect("one RGBA8 pixel is four bytes"));
+                let pixel: [u8; 4] = pixel.try_into().expect("one RGBA8 pixel is four bytes");
+                pixels.push(match format {
+                    wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                        [pixel[2], pixel[1], pixel[0], pixel[3]]
+                    }
+                    _ => pixel,
+                });
             }
         }
         drop(mapped);
@@ -237,13 +259,14 @@ impl Renderer {
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
         depth_view: &wgpu::TextureView,
+        clear_color: wgpu::Color,
     ) {
         let color_attachment = wgpu::RenderPassColorAttachment {
             view: color_view,
             depth_slice: None,
             resolve_target: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(self.clear_color),
+                load: wgpu::LoadOp::Clear(clear_color),
                 store: wgpu::StoreOp::Store,
             },
         };
@@ -401,7 +424,12 @@ impl Renderer {
                 label: Some("eframe scene command encoder"),
             });
         self.encode_shadow_pass(&mut encoder);
-        self.encode_scene_pass(&mut encoder, &self.scene_view, &self.depth_view);
+        self.encode_scene_pass(
+            &mut encoder,
+            &self.scene_view,
+            &self.depth_view,
+            self.clear_color,
+        );
         self.encode_outline_mask_pass(&mut encoder);
         self.encode_stencil_outline_passes(&mut encoder);
         self.encode_outline_composite_pass(&mut encoder);
