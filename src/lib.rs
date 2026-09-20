@@ -1,4 +1,3 @@
-//! Terrarium is a small, cross-platform 3D engine.
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
