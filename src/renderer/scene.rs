@@ -483,7 +483,9 @@ impl Renderer {
                 continue;
             }
 
-            let mesh = self.meshpart_mesh(meshpart)?;
+            let Some(mesh) = self.meshpart_mesh(meshpart)? else {
+                continue;
+            };
             let has_custom_textures = visibility_mask & 1 != 0
                 && meshpart
                     .material_slots

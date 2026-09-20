@@ -44,13 +44,18 @@ impl Renderer {
     pub(super) fn meshpart_mesh(
         &mut self,
         meshpart: &MeshPart,
-    ) -> Result<GpuMeshHandle, RendererError> {
+    ) -> Result<Option<GpuMeshHandle>, RendererError> {
         use crate::HasMeshPart;
 
         if let Some(cached) = self.meshpart_meshes.get(&meshpart.id())
             && cached.revision == meshpart.mesh_revision()
         {
-            return Ok(cached.handle);
+            return Ok(Some(cached.handle));
+        }
+        if (meshpart.mesh().vertices.is_empty() || meshpart.mesh().indices.is_empty())
+            && meshpart.mesh_handle().gltf().is_some()
+        {
+            return Ok(None);
         }
 
         let gpu_mesh = self.create_gpu_mesh(meshpart.mesh())?;
@@ -72,7 +77,7 @@ impl Renderer {
                 handle,
             },
         );
-        Ok(handle)
+        Ok(Some(handle))
     }
     pub(super) fn ensure_instance_capacity(&mut self, instance_count: usize) {
         let required_size =

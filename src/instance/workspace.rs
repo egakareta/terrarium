@@ -53,12 +53,11 @@ impl Workspace {
         }
     }
 
-    /// Takes ownership of mesh data or imports a glTF document and returns its mesh handle.
+    /// Takes ownership of mesh data or losslessly imports a glTF document.
     ///
     /// A handle can be cloned and passed to multiple [`MeshPart`] values. Each
     /// part gets independent transforms and material overrides while sharing
-    /// the registered geometry. Imported glTF materials are copied into each
-    /// part when it is constructed.
+    /// the registered asset.
     #[cfg(feature = "meshpart")]
     pub fn add_mesh<'a>(
         &mut self,
@@ -72,7 +71,8 @@ impl Workspace {
         Ok(handle)
     }
 
-    /// Returns the geometry referenced by a mesh handle owned by this workspace.
+    /// Returns the renderer-ready geometry referenced by a mesh handle owned by
+    /// this workspace.
     #[cfg(feature = "meshpart")]
     pub fn get_mesh(&self, handle: &MeshHandle) -> Option<&crate::Mesh> {
         self.meshes

@@ -9,16 +9,16 @@ use crate::{
     glam::{Mat4, Vec2, Vec3},
 };
 
-/// Errors produced while importing a glTF asset as a [`MeshPart`].
+/// Errors produced while decoding a glTF asset or deriving its render view.
 #[derive(Debug, Error)]
 pub enum GltfError {
     /// The glTF document, its buffers, or one of its images could not be decoded.
     #[error("could not import glTF data: {0}")]
     Import(#[from] gltf::Error),
-    /// The document did not define a default or fallback scene.
+    /// The document did not define a default or fallback scene for its render view.
     #[error("glTF document contains no scene")]
     NoScene,
-    /// The selected scene did not contain any mesh geometry.
+    /// The selected scene did not contain any mesh geometry for its render view.
     #[error("glTF scene contains no mesh geometry")]
     NoMesh,
     /// A mesh primitive did not contain the required `POSITION` attribute.
@@ -95,6 +95,15 @@ pub enum MeshSource<'a> {
     Gltf(&'a [u8]),
 }
 
+/// The source stored by a [`MeshHandle`].
+#[derive(Clone, Copy, Debug)]
+pub enum MeshSourceRef<'a> {
+    /// Caller-provided.
+    Data(&'a Mesh),
+    /// The parsed glTF asset.
+    Gltf(&'a GltfAsset),
+}
+
 impl<'a> From<Mesh> for MeshSource<'a> {
     fn from(mesh: Mesh) -> Self {
         Self::Data(mesh)
@@ -113,8 +122,57 @@ impl<'a, const N: usize> From<&'a [u8; N]> for MeshSource<'a> {
     }
 }
 
+/// A glTF document and its decoded resources.
+#[derive(Debug)]
+pub struct GltfAsset {
+    source: Arc<[u8]>,
+    document: gltf::Document,
+    buffers: Vec<gltf::buffer::Data>,
+    images: Vec<gltf::image::Data>,
+}
+
+impl GltfAsset {
+    fn import(bytes: &[u8]) -> Result<Self, GltfError> {
+        let source = Arc::<[u8]>::from(bytes);
+        let (document, buffers, images) = gltf::import_slice(bytes)?;
+        Ok(Self {
+            source,
+            document,
+            buffers,
+            images,
+        })
+    }
+
+    /// Returns the exact bytes passed to [`crate::Workspace::add_mesh`].
+    pub fn source_bytes(&self) -> &[u8] {
+        &self.source
+    }
+
+    /// Returns the complete parsed glTF document.
+    pub fn document(&self) -> &gltf::Document {
+        &self.document
+    }
+
+    /// Returns decoded buffer payloads in document order.
+    pub fn buffers(&self) -> &[gltf::buffer::Data] {
+        &self.buffers
+    }
+
+    /// Returns decoded image payloads in document order.
+    pub fn images(&self) -> &[gltf::image::Data] {
+        &self.images
+    }
+}
+
+#[derive(Clone, Debug)]
+enum MeshAssetSource {
+    Data(Mesh),
+    Gltf(Arc<GltfAsset>),
+}
+
 #[derive(Clone, Debug)]
 struct MeshAsset {
+    source: MeshAssetSource,
     mesh: Mesh,
     material_slots: MeshMaterialSlots,
 }
@@ -129,14 +187,42 @@ pub struct MeshHandle(Arc<MeshAsset>);
 impl MeshHandle {
     fn from_parts(mesh: Mesh, material_slots: MeshMaterialSlots) -> Self {
         Self(Arc::new(MeshAsset {
+            source: MeshAssetSource::Data(mesh.clone()),
             mesh,
             material_slots,
         }))
     }
 
-    /// Returns the CPU-side geometry in this mesh asset.
+    fn from_gltf(asset: Arc<GltfAsset>, mesh: Mesh, material_slots: MeshMaterialSlots) -> Self {
+        Self(Arc::new(MeshAsset {
+            source: MeshAssetSource::Gltf(asset),
+            mesh,
+            material_slots,
+        }))
+    }
+
+    /// Returns the renderer-ready geometry derived from this mesh asset.
+    ///
+    /// For glTF sources this is a compatibility view. The lossless source is
+    /// available through [`Self::source`] and [`Self::gltf`].
     pub fn mesh(&self) -> &Mesh {
         &self.0.mesh
+    }
+
+    /// Returns the lossless source represented by this handle.
+    pub fn source(&self) -> MeshSourceRef<'_> {
+        match &self.0.source {
+            MeshAssetSource::Data(mesh) => MeshSourceRef::Data(mesh),
+            MeshAssetSource::Gltf(asset) => MeshSourceRef::Gltf(asset),
+        }
+    }
+
+    /// Returns the lossless glTF source, if this handle was created from glTF.
+    pub fn gltf(&self) -> Option<&GltfAsset> {
+        match &self.0.source {
+            MeshAssetSource::Data(_) => None,
+            MeshAssetSource::Gltf(asset) => Some(asset),
+        }
     }
 
     pub(crate) fn same_asset(&self, other: &Self) -> bool {
@@ -176,46 +262,47 @@ impl MeshPart {
         bytes: &[u8],
         workspace: &mut Workspace,
     ) -> Result<MeshHandle, GltfError> {
-        let (document, buffers, images) = gltf::import_slice(bytes)?;
-        let scene = document
-            .default_scene()
-            .or_else(|| document.scenes().next())
-            .ok_or(GltfError::NoScene)?;
+        let asset = Arc::new(GltfAsset::import(bytes)?);
+        let document = asset.document();
+        let buffers = asset.buffers();
+        let images = asset.images();
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
         let mut material_keys = Vec::new();
 
-        for node in scene.nodes() {
-            append_node(
-                node,
-                Mat4::IDENTITY,
-                &buffers,
-                &mut vertices,
-                &mut indices,
-                &mut material_keys,
-            )?;
-        }
-        if vertices.is_empty() || indices.is_empty() {
-            return Err(GltfError::NoMesh);
+        if let Some(scene) = document
+            .default_scene()
+            .or_else(|| document.scenes().next())
+        {
+            for node in scene.nodes() {
+                // The source asset is retained even when a primitive cannot be
+                // represented by the built-in compatibility renderer.
+                let _ = append_node(
+                    node,
+                    Mat4::IDENTITY,
+                    buffers,
+                    &mut vertices,
+                    &mut indices,
+                    &mut material_keys,
+                );
+            }
         }
 
         let mut texture_cache = HashMap::new();
         let mut materials = Vec::with_capacity(material_keys.len());
         for key in material_keys {
             let source = key.and_then(|index| document.materials().nth(index));
-            materials.push(import_material(
-                source,
-                &images,
-                workspace,
-                &mut texture_cache,
-            )?);
+            materials.push(
+                import_material(source, images, workspace, &mut texture_cache).unwrap_or_default(),
+            );
         }
 
         let mut material_slots = MeshMaterialSlots::default();
         for (slot, material) in Face::ALL.into_iter().zip(materials) {
             material_slots.set(slot, material);
         }
-        Ok(MeshHandle::from_parts(
+        Ok(MeshHandle::from_gltf(
+            asset,
             Mesh::new(vertices, indices),
             material_slots,
         ))
@@ -333,7 +420,7 @@ fn append_node(
     if let Some(mesh) = node.mesh() {
         let mesh_index = mesh.index();
         for primitive in mesh.primitives() {
-            append_primitive(
+            let _ = append_primitive(
                 primitive,
                 mesh_index,
                 transform,
@@ -341,11 +428,11 @@ fn append_node(
                 vertices,
                 indices,
                 material_keys,
-            )?;
+            );
         }
     }
     for child in node.children() {
-        append_node(child, transform, buffers, vertices, indices, material_keys)?;
+        let _ = append_node(child, transform, buffers, vertices, indices, material_keys);
     }
     Ok(())
 }
@@ -443,14 +530,12 @@ fn append_primitive(
     let material_slot =
         if let Some(index) = material_keys.iter().position(|key| *key == material_key) {
             index
-        } else {
-            if material_keys.len() == MATERIAL_SLOT_COUNT {
-                return Err(GltfError::TooManyMaterials {
-                    count: material_keys.len() + 1,
-                });
-            }
+        } else if material_keys.len() < MATERIAL_SLOT_COUNT {
             material_keys.push(material_key);
             material_keys.len() - 1
+        } else {
+            // The six-slot renderer cannot represent every glTF material
+            material_key.unwrap_or_default() % MATERIAL_SLOT_COUNT
         } as u32;
 
     let base_vertex = vertices.len() as u32;
@@ -604,8 +689,10 @@ fn import_material(
         .with_roughness(pbr.roughness_factor())
         .with_emissive(source.emissive_factor());
 
-    if let Some(info) = pbr.base_color_texture() {
-        require_tex_coord_zero(info.tex_coord())?;
+    if let Some(info) = pbr
+        .base_color_texture()
+        .filter(|info| info.tex_coord() == 0)
+    {
         material = material.with_base_color_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Srgb,
@@ -615,8 +702,7 @@ fn import_material(
         )?);
         material = material.with_filter(import_filter(info.texture().sampler()));
     }
-    if let Some(info) = source.normal_texture() {
-        require_tex_coord_zero(info.tex_coord())?;
+    if let Some(info) = source.normal_texture().filter(|info| info.tex_coord() == 0) {
         material = material.with_normal_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Linear,
@@ -628,8 +714,10 @@ fn import_material(
             material = material.with_filter(import_filter(info.texture().sampler()));
         }
     }
-    if let Some(info) = pbr.metallic_roughness_texture() {
-        require_tex_coord_zero(info.tex_coord())?;
+    if let Some(info) = pbr
+        .metallic_roughness_texture()
+        .filter(|info| info.tex_coord() == 0)
+    {
         material = material.with_metallic_roughness_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Linear,
@@ -641,8 +729,10 @@ fn import_material(
             material = material.with_filter(import_filter(info.texture().sampler()));
         }
     }
-    if let Some(info) = source.emissive_texture() {
-        require_tex_coord_zero(info.tex_coord())?;
+    if let Some(info) = source
+        .emissive_texture()
+        .filter(|info| info.tex_coord() == 0)
+    {
         material = material.with_emissive_texture(import_texture(
             info.texture().source().index(),
             TextureColorSpace::Srgb,
@@ -658,14 +748,6 @@ fn import_material(
         }
     }
     Ok(material)
-}
-
-fn require_tex_coord_zero(set: u32) -> Result<(), GltfError> {
-    if set == 0 {
-        Ok(())
-    } else {
-        Err(GltfError::UnsupportedTextureCoordinates { set })
-    }
 }
 
 fn import_filter(sampler: gltf::texture::Sampler<'_>) -> TextureFilter {
@@ -898,5 +980,34 @@ mod tests {
             assert_eq!(variant.mesh().vertices.len(), vertex_count);
             assert!(workspace.get_mesh(&mesh_handle).is_some());
         }
+    }
+
+    #[test]
+    fn add_mesh_retains_the_lossless_gltf_source() {
+        let bytes = include_bytes!("../../assets/DamagedHelmet.glb");
+        let mut workspace = Workspace::new();
+        let handle = workspace.add_mesh(bytes).unwrap();
+        let source = handle.gltf().expect("glTF source should be retained");
+
+        assert_eq!(source.source_bytes(), bytes);
+        assert_eq!(source.buffers().len(), source.document().buffers().count());
+        assert_eq!(source.images().len(), source.document().images().count());
+        assert!(source.document().scenes().next().is_some());
+
+        match handle.source() {
+            MeshSourceRef::Gltf(source) => assert_eq!(source.source_bytes(), bytes),
+            MeshSourceRef::Data(_) => panic!("expected a glTF source"),
+        }
+    }
+
+    #[test]
+    fn add_mesh_accepts_a_valid_gltf_without_a_renderable_scene() {
+        let bytes = br#"{"asset":{"version":"2.0"},"scenes":[]}"#;
+        let mut workspace = Workspace::new();
+        let handle = workspace.add_mesh(bytes).unwrap();
+
+        assert_eq!(handle.gltf().unwrap().source_bytes(), bytes);
+        assert!(handle.mesh().vertices.is_empty());
+        assert!(handle.mesh().indices.is_empty());
     }
 }
