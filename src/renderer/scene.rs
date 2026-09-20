@@ -197,9 +197,10 @@ impl Renderer {
                 exposure: [exposure * (0.08 + daylight * 0.92), 0.0, 0.0, 0.0],
             }),
         );
-        if self.skybox_revision != Some(lighting.skybox_revision()) {
+        let skybox_key = (workspace.id(), lighting.skybox_revision());
+        if self.skybox_revision != Some(skybox_key) {
             self.sync_skybox(lighting.skybox())?;
-            self.skybox_revision = Some(lighting.skybox_revision());
+            self.skybox_revision = Some(skybox_key);
         }
         let light_planes = light_vps.map(frustum_planes);
         let default_textures = self.default_material_textures;
