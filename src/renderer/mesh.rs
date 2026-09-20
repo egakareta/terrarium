@@ -111,16 +111,11 @@ impl Renderer {
     pub(super) fn draw_batches<'a>(
         &self,
         pass: &mut wgpu::RenderPass<'a>,
-        pipeline: &wgpu::RenderPipeline,
-        camera_bind_group: &wgpu::BindGroup,
-        dynamic_offsets: &[wgpu::DynamicOffset],
-        use_materials: bool,
-        visibility_bit: u16,
-        transparent: bool,
+        options: DrawBatchOptions<'_>,
     ) {
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, camera_bind_group, dynamic_offsets);
-        if use_materials {
+        pass.set_pipeline(options.pipeline);
+        pass.set_bind_group(0, options.camera_bind_group, options.dynamic_offsets);
+        if options.use_materials {
             pass.set_bind_group(2, &self.material_factors_bind_group, &[]);
         }
         let mut bound_mesh = None;
@@ -129,20 +124,20 @@ impl Renderer {
         while index < self.prepared_batches.len() {
             let batch = &self.prepared_batches[index];
             if batch.instance_count == 0
-                || batch.transparent != transparent
-                || batch.visibility_mask & visibility_bit == 0
+                || batch.transparent != options.transparent
+                || batch.visibility_mask & options.visibility_bit == 0
             {
                 index += 1;
                 continue;
             }
             let mut instance_count = batch.instance_count;
             let mut next = index + 1;
-            if !transparent {
+            if !options.transparent {
                 while let Some(candidate) = self.prepared_batches.get(next) {
-                    if candidate.visibility_mask & visibility_bit == 0
-                        || candidate.transparent != transparent
+                    if candidate.visibility_mask & options.visibility_bit == 0
+                        || candidate.transparent != options.transparent
                         || candidate.mesh != batch.mesh
-                        || (use_materials
+                        || (options.use_materials
                             && (candidate.packed_textures != batch.packed_textures
                                 || candidate.filters != batch.filters))
                         || candidate.instance_start
@@ -169,7 +164,7 @@ impl Renderer {
                 instance_start + instance_count as u64 * std::mem::size_of::<InstanceRaw>() as u64;
             pass.set_vertex_buffer(1, self.instance_buffer.slice(instance_start..instance_end));
             let batch_material = (batch.packed_textures, batch.filters);
-            if use_materials
+            if options.use_materials
                 && bound_material != Some(batch_material)
                 && let Some(bind_group) = self.material_bind_groups.get(&batch_material)
             {
@@ -185,21 +180,25 @@ impl Renderer {
         self.draw_skybox(pass);
         self.draw_batches(
             pass,
-            &self.pipeline,
-            &self.camera_bind_group,
-            &[],
-            true,
-            1,
-            false,
+            DrawBatchOptions {
+                pipeline: &self.pipeline,
+                camera_bind_group: &self.camera_bind_group,
+                dynamic_offsets: &[],
+                use_materials: true,
+                visibility_bit: 1,
+                transparent: false,
+            },
         );
         self.draw_batches(
             pass,
-            &self.transparent_pipeline,
-            &self.camera_bind_group,
-            &[],
-            true,
-            1,
-            true,
+            DrawBatchOptions {
+                pipeline: &self.transparent_pipeline,
+                camera_bind_group: &self.camera_bind_group,
+                dynamic_offsets: &[],
+                use_materials: true,
+                visibility_bit: 1,
+                transparent: true,
+            },
         );
     }
 
@@ -261,12 +260,14 @@ impl Renderer {
     ) {
         self.draw_batches(
             pass,
-            &self.shadow_pipeline,
-            &self.shadow_camera_bind_group,
-            &[uniform_index as u32 * self.shadow_camera_stride],
-            false,
-            visibility_bit,
-            false,
+            DrawBatchOptions {
+                pipeline: &self.shadow_pipeline,
+                camera_bind_group: &self.shadow_camera_bind_group,
+                dynamic_offsets: &[uniform_index as u32 * self.shadow_camera_stride],
+                use_materials: false,
+                visibility_bit,
+                transparent: false,
+            },
         );
     }
 }

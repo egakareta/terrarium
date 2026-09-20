@@ -161,6 +161,15 @@ struct RenderBatch {
     instance_start: usize,
 }
 
+struct DrawBatchOptions<'a> {
+    pipeline: &'a wgpu::RenderPipeline,
+    camera_bind_group: &'a wgpu::BindGroup,
+    dynamic_offsets: &'a [wgpu::DynamicOffset],
+    use_materials: bool,
+    visibility_bit: u16,
+    transparent: bool,
+}
+
 struct PreparedRenderBatch {
     mesh: GpuMeshHandle,
     packed_textures: PackedMaterialTextures,
