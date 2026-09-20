@@ -453,7 +453,7 @@ pub struct Renderer {
     skybox_texture: Option<wgpu::Texture>,
     skybox_view: Option<wgpu::TextureView>,
     skybox_bind_group: Option<wgpu::BindGroup>,
-    skybox_revision: Option<u64>,
+    skybox_revision: Option<(InstanceId, u64)>,
     camera_buffer: wgpu::Buffer,
     local_lights_buffer: wgpu::Buffer,
     outline_uniform_buffer: wgpu::Buffer,
