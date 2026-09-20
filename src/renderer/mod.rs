@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use std::{cell::RefCell, rc::Rc};
 use std::{
     collections::{HashMap, HashSet},
     sync::OnceLock,
@@ -107,6 +109,9 @@ pub enum RendererError {
     /// Reading a render-target pixel failed.
     #[error("could not read render-target pixel: {0}")]
     PixelReadback(String),
+    /// A web pixel readback was requested but no completed capture is available yet.
+    #[error("render-target pixels are still being read back")]
+    PixelReadbackPending,
 }
 
 #[repr(C)]
@@ -423,6 +428,15 @@ struct EframeSceneTarget {
     pipeline: wgpu::RenderPipeline,
 }
 
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct WebPixelReadbackState {
+    latest: Option<Vec<[u8; 4]>>,
+    error: Option<String>,
+    generation: u64,
+    in_flight_generation: Option<u64>,
+}
+
 #[cfg(feature = "meshpart")]
 struct ViewportTarget {
     _color_texture: wgpu::Texture,
@@ -460,6 +474,8 @@ pub struct Renderer {
     stencil_mask_pipeline: wgpu::RenderPipeline,
     stencil_outline_pipeline: wgpu::RenderPipeline,
     eframe_scene: EframeSceneTarget,
+    #[cfg(target_arch = "wasm32")]
+    web_pixel_readback: Rc<RefCell<WebPixelReadbackState>>,
     #[cfg(feature = "meshpart")]
     viewport_targets: HashMap<InstanceId, ViewportTarget>,
     skybox_pipeline: wgpu::RenderPipeline,

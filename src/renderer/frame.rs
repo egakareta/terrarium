@@ -39,7 +39,10 @@ impl Renderer {
     /// Reads an RGBA8 pixel from the most recently prepared eframe scene.
     ///
     /// Coordinates use a top-left origin.
-    #[cfg(not(target_arch = "wasm32"))]
+    ///
+    /// On web, this starts an asynchronous capture when one is not already in
+    /// flight and returns the latest completed capture. The first call returns
+    /// [`RendererError::PixelReadbackPending`].
     pub fn read_pixel(&self, x: u32, y: u32) -> Result<[u8; 4], RendererError> {
         if x >= self.width || y >= self.height {
             return Err(RendererError::InvalidPixel {
@@ -57,14 +60,36 @@ impl Renderer {
     /// Reads all RGBA8 pixels from the most recently prepared eframe scene.
     ///
     /// Pixels are returned in row-major order with a top-left origin.
-    #[cfg(not(target_arch = "wasm32"))]
+    ///
+    /// On web, this starts an asynchronous capture when one is not already in
+    /// flight and returns the latest completed capture. The first call returns
+    /// [`RendererError::PixelReadbackPending`], and completed captures may be
+    /// several frames old.
     pub fn read_pixels(&self) -> Result<Vec<[u8; 4]>, RendererError> {
-        self.read_texture_pixels(
-            &self.eframe_scene._texture,
-            self.width,
-            self.height,
-            self.eframe_scene.format,
-        )
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.read_texture_pixels(
+                &self.eframe_scene._texture,
+                self.width,
+                self.height,
+                self.eframe_scene.format,
+            )
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let (latest, error) = {
+                let mut readback = self.web_pixel_readback.borrow_mut();
+                (readback.latest.clone(), readback.error.take())
+            };
+
+            self.start_web_pixel_readback()?;
+
+            if let Some(error) = error {
+                return Err(RendererError::PixelReadback(error));
+            }
+            latest.ok_or(RendererError::PixelReadbackPending)
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -75,15 +100,11 @@ impl Renderer {
         height: u32,
         format: wgpu::TextureFormat,
     ) -> Result<Vec<[u8; 4]>, RendererError> {
-        let unpadded_bytes_per_row = u64::from(width) * 4;
-        let bytes_per_row = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = unpadded_bytes_per_row
-            .div_ceil(u64::from(bytes_per_row))
-            .checked_mul(u64::from(bytes_per_row))
-            .ok_or_else(|| RendererError::PixelReadback("row size overflow".to_owned()))?;
+        let (unpadded_bytes_per_row, padded_bytes_per_row, buffer_size) =
+            pixel_readback_layout(width, height)?;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("render target pixel readback"),
-            size: padded_bytes_per_row * u64::from(height),
+            size: buffer_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -129,22 +150,109 @@ impl Renderer {
             .slice(..)
             .get_mapped_range()
             .map_err(|error| RendererError::PixelReadback(error.to_string()))?;
-        let row_bytes = unpadded_bytes_per_row as usize;
-        let mut pixels = Vec::with_capacity(width as usize * height as usize);
-        for row in mapped.chunks_exact(padded_bytes_per_row as usize) {
-            for pixel in row[..row_bytes].chunks_exact(4) {
-                let pixel: [u8; 4] = pixel.try_into().expect("one RGBA8 pixel is four bytes");
-                pixels.push(match format {
-                    wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
-                        [pixel[2], pixel[1], pixel[0], pixel[3]]
-                    }
-                    _ => pixel,
-                });
-            }
-        }
+        let pixels = decode_pixel_readback(
+            &mapped,
+            width,
+            height,
+            unpadded_bytes_per_row,
+            padded_bytes_per_row,
+            format,
+        );
         drop(mapped);
         buffer.unmap();
         Ok(pixels)
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_web_pixel_readback(&self) -> Result<(), RendererError> {
+        let (unpadded_bytes_per_row, padded_bytes_per_row, buffer_size) =
+            pixel_readback_layout(self.width, self.height)?;
+        let generation = {
+            let mut readback = self.web_pixel_readback.borrow_mut();
+            if readback.in_flight_generation.is_some() {
+                return Ok(());
+            }
+            let generation = readback.generation;
+            readback.in_flight_generation = Some(generation);
+            generation
+        };
+
+        let buffer = Rc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("web render target pixel readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }));
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("web render target pixel readback encoder"),
+            });
+        encoder.copy_texture_to_buffer(
+            self.eframe_scene._texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: buffer.as_ref(),
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row as u32),
+                    rows_per_image: Some(self.height),
+                },
+            },
+            wgpu::Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let callback_buffer = Rc::clone(&buffer);
+        let readback = Rc::clone(&self.web_pixel_readback);
+        let width = self.width;
+        let height = self.height;
+        let format = self.eframe_scene.format;
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let pixels = match result {
+                    Ok(()) => match callback_buffer.slice(..).get_mapped_range() {
+                        Ok(mapped) => {
+                            let pixels = decode_pixel_readback(
+                                &mapped,
+                                width,
+                                height,
+                                unpadded_bytes_per_row,
+                                padded_bytes_per_row,
+                                format,
+                            );
+                            drop(mapped);
+                            callback_buffer.unmap();
+                            Ok(pixels)
+                        }
+                        Err(error) => {
+                            callback_buffer.unmap();
+                            Err(error.to_string())
+                        }
+                    },
+                    Err(error) => Err(error.to_string()),
+                };
+
+                let mut readback = readback.borrow_mut();
+                if readback.in_flight_generation == Some(generation) {
+                    readback.in_flight_generation = None;
+                }
+                if readback.generation != generation {
+                    return;
+                }
+                match pixels {
+                    Ok(pixels) => {
+                        readback.latest = Some(pixels);
+                        readback.error = None;
+                    }
+                    Err(error) => readback.error = Some(error),
+                }
+            });
+        Ok(())
     }
 
     /// Resizes the eframe scene and depth buffer for a new non-zero size.
@@ -154,6 +262,14 @@ impl Renderer {
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 {
             return;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut readback = self.web_pixel_readback.borrow_mut();
+            readback.generation = readback.generation.wrapping_add(1);
+            readback.in_flight_generation = None;
+            readback.latest = None;
+            readback.error = None;
         }
         self.width = width;
         self.height = height;
@@ -445,4 +561,41 @@ impl Renderer {
             self.fps_timer = Instant::now();
         }
     }
+}
+
+fn pixel_readback_layout(width: u32, height: u32) -> Result<(u64, u64, u64), RendererError> {
+    let unpadded_bytes_per_row = u64::from(width) * 4;
+    let alignment = u64::from(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let padded_bytes_per_row = unpadded_bytes_per_row
+        .div_ceil(alignment)
+        .checked_mul(alignment)
+        .ok_or_else(|| RendererError::PixelReadback("row size overflow".to_owned()))?;
+    let buffer_size = padded_bytes_per_row
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| RendererError::PixelReadback("buffer size overflow".to_owned()))?;
+    Ok((unpadded_bytes_per_row, padded_bytes_per_row, buffer_size))
+}
+
+fn decode_pixel_readback(
+    mapped: &[u8],
+    width: u32,
+    height: u32,
+    unpadded_bytes_per_row: u64,
+    padded_bytes_per_row: u64,
+    format: wgpu::TextureFormat,
+) -> Vec<[u8; 4]> {
+    let row_bytes = unpadded_bytes_per_row as usize;
+    let mut pixels = Vec::with_capacity(width as usize * height as usize);
+    for row in mapped.chunks_exact(padded_bytes_per_row as usize) {
+        for pixel in row[..row_bytes].chunks_exact(4) {
+            let pixel: [u8; 4] = pixel.try_into().expect("one RGBA8 pixel is four bytes");
+            pixels.push(match format {
+                wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb => {
+                    [pixel[2], pixel[1], pixel[0], pixel[3]]
+                }
+                _ => pixel,
+            });
+        }
+    }
+    pixels
 }

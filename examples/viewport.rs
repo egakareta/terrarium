@@ -2,7 +2,8 @@
 
 use terrarium::{
     App, AppCreationError, Color3, Engine, GltfError, HasBasePart, HasPVInstance, Instance, Mesh,
-    MeshPart, Part, Terrarium, Viewport, ViewportTexture, eframe, egui, glam::Vec3, push_triangle,
+    MeshPart, Part, RendererError, Terrarium, Viewport, ViewportTexture, eframe, egui, glam::Vec3,
+    push_triangle,
 };
 
 struct ViewportApp {
@@ -11,7 +12,7 @@ struct ViewportApp {
 }
 
 impl App for ViewportApp {
-    fn ui(&mut self, _engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Window::new("Viewport").show(ui, |ui| {
             ui.label("This is an image :)");
             let [width, height] = self.texture1.size();
@@ -20,10 +21,18 @@ impl App for ViewportApp {
             let [width, height] = self.texture2.size();
             ui.image((self.texture2.id(), egui::vec2(width as f32, height as f32)));
 
-            // TODO get this working on wasm
-            // let pixels = engine.renderer().read_pixels().unwrap();
-            // let red_pixels = pixels.iter().filter(|pixel| pixel[0] > 180).count();
-            // ui.label(format!("Red pixels: {}", red_pixels));
+            match engine.renderer().read_pixels() {
+                Ok(pixels) => {
+                    let red_pixels = pixels.iter().filter(|pixel| pixel[0] > 180).count();
+                    ui.label(format!("Red pixels: {red_pixels}"));
+                }
+                Err(RendererError::PixelReadbackPending) => {
+                    ui.label("Reading pixels...");
+                }
+                Err(error) => {
+                    ui.label(format!("Pixel readback failed: {error}"));
+                }
+            }
         });
     }
 }

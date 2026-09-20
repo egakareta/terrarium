@@ -914,6 +914,8 @@ impl Renderer {
             stencil_mask_pipeline,
             stencil_outline_pipeline,
             eframe_scene,
+            #[cfg(target_arch = "wasm32")]
+            web_pixel_readback: Rc::new(RefCell::new(WebPixelReadbackState::default())),
             #[cfg(feature = "meshpart")]
             viewport_targets: HashMap::new(),
             skybox_pipeline,
