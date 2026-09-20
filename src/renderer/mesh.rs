@@ -116,6 +116,7 @@ impl Renderer {
         dynamic_offsets: &[wgpu::DynamicOffset],
         use_materials: bool,
         visibility_bit: u16,
+        transparent: bool,
     ) {
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, camera_bind_group, dynamic_offsets);
@@ -127,24 +128,31 @@ impl Renderer {
         let mut index = 0;
         while index < self.prepared_batches.len() {
             let batch = &self.prepared_batches[index];
-            if batch.instance_count == 0 || batch.visibility_mask & visibility_bit == 0 {
+            if batch.instance_count == 0
+                || batch.transparent != transparent
+                || batch.visibility_mask & visibility_bit == 0
+            {
                 index += 1;
                 continue;
             }
             let mut instance_count = batch.instance_count;
             let mut next = index + 1;
-            while let Some(candidate) = self.prepared_batches.get(next) {
-                if candidate.visibility_mask & visibility_bit == 0
-                    || candidate.mesh != batch.mesh
-                    || (use_materials
-                        && (candidate.packed_textures != batch.packed_textures
-                            || candidate.filters != batch.filters))
-                    || candidate.instance_start != batch.instance_start + instance_count as usize
-                {
-                    break;
+            if !transparent {
+                while let Some(candidate) = self.prepared_batches.get(next) {
+                    if candidate.visibility_mask & visibility_bit == 0
+                        || candidate.transparent != transparent
+                        || candidate.mesh != batch.mesh
+                        || (use_materials
+                            && (candidate.packed_textures != batch.packed_textures
+                                || candidate.filters != batch.filters))
+                        || candidate.instance_start
+                            != batch.instance_start + instance_count as usize
+                    {
+                        break;
+                    }
+                    instance_count += candidate.instance_count;
+                    next += 1;
                 }
-                instance_count += candidate.instance_count;
-                next += 1;
             }
             let Some(mesh) = self.meshes.get(batch.mesh.0) else {
                 index = next;
@@ -175,7 +183,24 @@ impl Renderer {
 
     pub(super) fn draw_scene<'a>(&self, pass: &mut wgpu::RenderPass<'a>) {
         self.draw_skybox(pass);
-        self.draw_batches(pass, &self.pipeline, &self.camera_bind_group, &[], true, 1);
+        self.draw_batches(
+            pass,
+            &self.pipeline,
+            &self.camera_bind_group,
+            &[],
+            true,
+            1,
+            false,
+        );
+        self.draw_batches(
+            pass,
+            &self.transparent_pipeline,
+            &self.camera_bind_group,
+            &[],
+            true,
+            1,
+            true,
+        );
     }
 
     pub(super) fn draw_outline_batches<'a>(
@@ -241,6 +266,7 @@ impl Renderer {
             &[uniform_index as u32 * self.shadow_camera_stride],
             false,
             visibility_bit,
+            false,
         );
     }
 }

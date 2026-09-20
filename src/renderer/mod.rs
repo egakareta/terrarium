@@ -155,6 +155,8 @@ struct RenderBatch {
     textures: MaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u16,
+    transparent: bool,
+    sort_depth: f32,
     instances: Vec<InstanceRaw>,
     instance_start: usize,
 }
@@ -164,6 +166,7 @@ struct PreparedRenderBatch {
     packed_textures: PackedMaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
     visibility_mask: u16,
+    transparent: bool,
     instance_start: usize,
     instance_count: u32,
 }
@@ -424,6 +427,7 @@ pub struct Renderer {
     local_shadow_layer_views: [wgpu::TextureView; MAX_LOCAL_SHADOW_LAYERS],
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
+    transparent_pipeline: wgpu::RenderPipeline,
     shadow_pipeline: wgpu::RenderPipeline,
     outline_composite_pipeline: wgpu::RenderPipeline,
     toon_mask_pipeline: wgpu::RenderPipeline,

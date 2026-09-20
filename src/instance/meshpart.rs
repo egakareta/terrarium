@@ -872,6 +872,13 @@ mod tests {
     }
 
     #[test]
+    fn meshpart_exposes_basepart_transparency() {
+        let meshpart = MeshPart::new(Mesh::block(1.0, [1.0; 4])).with_transparency(0.4);
+
+        assert_eq!(meshpart.transparency(), 0.4);
+    }
+
+    #[test]
     fn mesh_part_builder_replaces_geometry_through_has_mesh_part() {
         let replacement = Mesh::new(
             vec![

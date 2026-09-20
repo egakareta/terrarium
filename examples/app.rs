@@ -1,37 +1,35 @@
-use terrarium::{
-    App, Color3, Easing, Engine, Face, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart,
-    HasPointLight, HasSpotLight, Instance, Material, Part, PartShape, PointLight, RendererError,
-    Repeat, SpotLight, Terrarium, Texture, TextureColorSpace, TextureFilter, Tween, eframe, egui,
-    glam::Vec3,
-};
+use terrarium::{TextureFilter, egui::*, glam::*, *};
 
 struct SceneApp;
 
 impl App for SceneApp {
-    fn after_update(
-        &mut self,
-        engine: &mut Engine,
-        context: &egui::Context,
-        _frame: &mut eframe::Frame,
-    ) {
+    fn after_update(&mut self, engine: &mut Engine, context: &Context, _frame: &mut eframe::Frame) {
         let delta_seconds = context.input(|input| input.stable_dt.min(0.1));
         engine.lighting.advance_clock_time(delta_seconds, 0.25);
     }
 
-    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, engine: &mut Engine, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let fps = engine.renderer().fps();
-        egui::Area::new("fps_counter".into())
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-16.0, 16.0))
-            .order(egui::Order::Foreground)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::new()
-                    .fill(egui::Color32::from_black_alpha(180))
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .inner_margin(egui::Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.label(format!("FPS: {fps:.0}"));
-                    });
+        let mut clock_time = engine.lighting.clock_time();
+        Panel::top("options").resizable(false).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("FPS: {fps:.0}"));
+                ui.separator();
+                ui.scope(|ui| {
+                    ui.style_mut().override_font_id = Some(egui::FontId::monospace(14.0));
+
+                    ui.label(
+                        RichText::new(engine.lighting.time_of_day()).font(FontId::monospace(14.0)),
+                    );
+                    if ui
+                        .add(Slider::new(&mut clock_time, 0.0..=24.0).suffix("h"))
+                        .changed()
+                    {
+                        engine.lighting.with_clock_time(clock_time);
+                    }
+                });
             });
+        });
     }
 }
 
@@ -175,6 +173,25 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_size(Vec3::new(1.8, 1.2, 1.8))
             .with_color(Color3::new(0.10, 0.48, 0.47))
             .with_orientation(Vec3::new(0.0, -46.0, 0.0)),
+    );
+
+    engine.add_child(
+        Part::new()
+            .with_name("CyanGlass")
+            .with_position(Vec3::new(0.0, 1.45, -10.15))
+            .with_size(Vec3::new(2.4, 2.2, 0.14))
+            .with_color(Color3::CYAN)
+            .with_transparency(0.45)
+            .with_can_collide(false),
+    );
+    engine.add_child(
+        Part::new()
+            .with_name("AmberGlass")
+            .with_position(Vec3::new(0.0, 1.45, -10.75))
+            .with_size(Vec3::new(0.14, 2.2, 2.4))
+            .with_color(Color3::ORANGE)
+            .with_transparency(0.55)
+            .with_can_collide(false),
     );
 
     let platform_position = Tween::path(

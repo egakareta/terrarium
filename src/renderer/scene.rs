@@ -225,7 +225,8 @@ impl Renderer {
         let mut batches = std::mem::take(&mut self.batch_scratch);
         let mut batch_indices = std::mem::take(&mut self.batch_indices_scratch);
         batches.retain(|batch| {
-            batch.textures == default_textures
+            !batch.transparent
+                && batch.textures == default_textures
                 && ((self.primitive_meshes.contains(&batch.mesh)
                     && usize::from(batch.visibility_mask) < VISIBILITY_MASK_COUNT)
                     || (usize::from(batch.visibility_mask) >= VISIBILITY_MASK_COUNT
@@ -261,6 +262,8 @@ impl Renderer {
                 }
             }
         }
+        let camera_position = workspace.current_camera.pivot().w_axis.truncate();
+        let camera_forward = workspace.current_camera.forward();
         let mut parts = workspace.get_all::<Part>();
         let mut group = Vec::with_capacity(CULL_GROUP_SIZE);
         loop {
@@ -330,7 +333,18 @@ impl Renderer {
             for candidate in &group {
                 let part = candidate.part;
                 let pivot = candidate.pivot;
-                let visibility_mask = candidate.visibility_mask;
+                let transparency = finite_or(part.transparency(), 0.0).clamp(0.0, 1.0);
+                let opacity = 1.0 - transparency;
+                if opacity <= 0.0 {
+                    continue;
+                }
+                let transparent = transparency > 0.0;
+                let mut visibility_mask = candidate.visibility_mask;
+                if transparent {
+                    // Transparent geometry is blended after opaque geometry and
+                    // must not write to or appear in shadow depth buffers.
+                    visibility_mask &= 1;
+                }
                 if visibility_mask == 0 {
                     continue;
                 }
@@ -356,7 +370,21 @@ impl Renderer {
                 } else {
                     None
                 };
-                let batch_index = if let Some(textures) = custom_textures {
+                let sort_depth = (candidate.center - camera_position).dot(camera_forward);
+                let batch_index = if transparent {
+                    let batch_index = batches.len();
+                    batches.push(RenderBatch {
+                        mesh: self.primitive_meshes[part.shape().index()],
+                        textures: custom_textures.unwrap_or(default_textures),
+                        filters: custom_filters.unwrap_or(default_filters),
+                        visibility_mask,
+                        transparent: true,
+                        sort_depth,
+                        instances: Vec::new(),
+                        instance_start: 0,
+                    });
+                    batch_index
+                } else if let Some(textures) = custom_textures {
                     let filters = custom_filters.unwrap_or(default_filters);
                     let mesh = self.primitive_meshes[part.shape().index()];
                     let key = (mesh, textures, filters, visibility_mask);
@@ -370,6 +398,8 @@ impl Renderer {
                             textures,
                             filters,
                             visibility_mask,
+                            transparent: false,
+                            sort_depth: 0.0,
                             instances: Vec::new(),
                             instance_start: 0,
                         });
@@ -390,6 +420,8 @@ impl Renderer {
                                 textures: default_textures,
                                 filters: default_filters,
                                 visibility_mask,
+                                transparent: false,
+                                sort_depth: 0.0,
                                 instances: Vec::new(),
                                 instance_start: 0,
                             });
@@ -407,6 +439,8 @@ impl Renderer {
                                 textures: default_textures,
                                 filters: default_filters,
                                 visibility_mask,
+                                transparent: false,
+                                sort_depth: 0.0,
                                 instances: Vec::new(),
                                 instance_start: 0,
                             });
@@ -421,9 +455,11 @@ impl Renderer {
                     pivot.w_axis,
                 );
                 let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
+                    let mut tint = part.color().rgba();
+                    tint[3] = opacity;
                     (
                         normal_scales_from_model(&model),
-                        part.color().rgba(),
+                        tint,
                         self.material_set_index(&part.material_slots),
                     )
                 } else {
@@ -441,7 +477,7 @@ impl Renderer {
                     material_set,
                 };
                 batches[batch_index].instances.push(instance);
-                if visibility_mask & 1 != 0 {
+                if visibility_mask & 1 != 0 && opacity > 0.0 {
                     append_outline_instance(
                         &mut outline_batches,
                         &outline_targets,
@@ -457,6 +493,12 @@ impl Renderer {
         for meshpart in workspace.get_all::<MeshPart>() {
             let pivot = meshpart.pivot();
             let center = pivot.w_axis.truncate();
+            let transparency = finite_or(meshpart.transparency(), 0.0).clamp(0.0, 1.0);
+            let opacity = 1.0 - transparency;
+            if opacity <= 0.0 {
+                continue;
+            }
+            let transparent = transparency > 0.0;
             let radius = meshpart.bounding_radius() * meshpart.size().abs().max_element() * 1.01;
             let mut visibility_mask = 0;
             if sphere_visible(&camera_planes, center, radius) {
@@ -478,6 +520,14 @@ impl Renderer {
                 {
                     visibility_mask |= 1 << (LOCAL_SHADOW_VISIBILITY_OFFSET + layer);
                 }
+            }
+            if visibility_mask == 0 {
+                continue;
+            }
+            if transparent {
+                // Transparent geometry is blended after opaque geometry and
+                // must not write to or appear in shadow depth buffers.
+                visibility_mask &= 1;
             }
             if visibility_mask == 0 {
                 continue;
@@ -508,8 +558,22 @@ impl Renderer {
             } else {
                 Self::material_filters(&meshpart.material_slots)
             };
+            let sort_depth = (center - camera_position).dot(camera_forward);
             let key = (mesh, textures, filters, visibility_mask);
-            let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
+            let batch_index = if transparent {
+                let batch_index = batches.len();
+                batches.push(RenderBatch {
+                    mesh,
+                    textures,
+                    filters,
+                    visibility_mask,
+                    transparent: true,
+                    sort_depth,
+                    instances: Vec::new(),
+                    instance_start: 0,
+                });
+                batch_index
+            } else if let Some(&batch_index) = batch_indices.get(&key) {
                 batch_index
             } else {
                 let batch_index = batches.len();
@@ -519,6 +583,8 @@ impl Renderer {
                     textures,
                     filters,
                     visibility_mask,
+                    transparent: false,
+                    sort_depth: 0.0,
                     instances: Vec::new(),
                     instance_start: 0,
                 });
@@ -531,9 +597,11 @@ impl Renderer {
                 pivot.w_axis,
             );
             let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
+                let mut tint = meshpart.color().rgba();
+                tint[3] = opacity;
                 (
                     normal_scales_from_model(&model),
-                    meshpart.color().rgba(),
+                    tint,
                     self.material_set_index(&meshpart.material_slots),
                 )
             } else {
@@ -564,7 +632,15 @@ impl Renderer {
 
         let total_instances: usize = batches.iter().map(|batch| batch.instances.len()).sum();
         self.upload_material_factors();
-        batches.sort_unstable_by_key(|batch| (batch.mesh.0, batch.visibility_mask));
+        batches.sort_unstable_by(|left, right| {
+            left.transparent.cmp(&right.transparent).then_with(|| {
+                if left.transparent {
+                    right.sort_depth.total_cmp(&left.sort_depth)
+                } else {
+                    (left.mesh.0, left.visibility_mask).cmp(&(right.mesh.0, right.visibility_mask))
+                }
+            })
+        });
         let mut instance_start = 0;
         for batch in &mut batches {
             batch.instance_start = instance_start;
@@ -617,6 +693,7 @@ impl Renderer {
                 packed_textures: packed,
                 filters: batch.filters,
                 visibility_mask: batch.visibility_mask,
+                transparent: batch.transparent,
                 instance_start: batch.instance_start,
                 instance_count: batch.instances.len() as u32,
             });

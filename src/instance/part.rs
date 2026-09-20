@@ -14,19 +14,21 @@ pub struct BasePart {
     pub(crate) pv_instance: PVInstance,
     size: Vec3,
     color: Color3,
+    transparency: f32,
     anchored: bool,
     can_collide: bool,
 }
 
 impl BasePart {
-    /// Creates a base part with identity transform, unit size, white tint, and
-    /// collision metadata enabled.
+    /// Creates a base part with identity transform, unit size, white tint,
+    /// opaque rendering, and collision metadata enabled.
     pub fn new() -> Self {
         Self {
             instance: InstanceData::new("BasePart"),
             pv_instance: PVInstance::new(),
             size: Vec3::ONE,
             color: Color3::WHITE,
+            transparency: 0.0,
             anchored: true,
             can_collide: true,
         }
@@ -69,6 +71,11 @@ pub trait HasBasePart {
         self.base_part().color
     }
 
+    /// Returns the transparency, where `0.0` is opaque and `1.0` is invisible.
+    fn transparency(&self) -> f32 {
+        self.base_part().transparency
+    }
+
     /// Whether a physics system should treat this part as immovable.
     ///
     /// The default physics integration creates a fixed body when this is `true`
@@ -100,6 +107,19 @@ pub trait HasBasePart {
         Self: Sized,
     {
         self.base_part_mut().color = color;
+        self
+    }
+
+    /// Sets the transparency, where `0.0` is opaque and `1.0` is invisible.
+    fn with_transparency(mut self, transparency: f32) -> Self
+    where
+        Self: Sized,
+    {
+        self.base_part_mut().transparency = if transparency.is_finite() {
+            transparency.clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         self
     }
 
@@ -376,5 +396,14 @@ mod tests {
             assert_eq!(part.material_slot(slot), &material);
         }
         assert_eq!(part.material(), Some(&material));
+    }
+
+    #[test]
+    fn transparency_is_available_on_base_part_subtypes() {
+        let part = Part::new().with_transparency(0.35);
+        assert_eq!(part.transparency(), 0.35);
+
+        let part = Part::new().with_transparency(2.0);
+        assert_eq!(part.transparency(), 1.0);
     }
 }

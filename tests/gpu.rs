@@ -77,6 +77,42 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn basepart_transparency_blends_front_geometry_with_background()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let engine = Terrarium::new()
+        .with_size([128, 128])
+        .with_headless(Some(1))
+        .run(|engine| {
+            engine.lighting.clear_skybox();
+            engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+            engine.workspace.current_camera =
+                Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+            engine.add_child(
+                Part::new()
+                    .with_position(Vec3::new(0.0, 1.0, -1.0))
+                    .with_size(Vec3::splat(3.0))
+                    .with_color(Color3::RED),
+            );
+            engine.add_child(
+                Part::new()
+                    .with_position(Vec3::new(0.0, 1.0, 1.0))
+                    .with_size(Vec3::splat(3.0))
+                    .with_color(Color3::BLUE)
+                    .with_transparency(0.5),
+            );
+            Ok::<(), AppCreationError>(())
+        })?
+        .unwrap();
+
+    let center = engine.renderer().read_pixel(64, 64)?;
+    assert!(
+        center[0] > 0 && center[2] > 0,
+        "transparent foreground should preserve both background and foreground color: {center:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
     for mode in [
         OutlineMode::Toon,

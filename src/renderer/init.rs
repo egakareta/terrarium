@@ -434,55 +434,63 @@ impl Renderer {
             ],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("PBR mesh pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &shader_constants,
-                    ..Default::default()
+        let create_mesh_pipeline = |label, depth_write_enabled, blend| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &shader_constants,
+                        ..Default::default()
+                    },
+                    buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
                 },
-                buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                // All primitive meshes are closed solids, so backfaces never
-                // contribute a visible pixel: they are always behind a front
-                // face and depth-rejected after shading. Culling them skips
-                // roughly half the fragment work with identical output.
-                cull_mode: Some(wgpu::Face::Back),
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Less),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions {
-                    constants: &shader_constants,
-                    ..Default::default()
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    // All primitive meshes are closed solids, so backfaces never
+                    // contribute a visible pixel: they are always behind a front
+                    // face and depth-rejected after shading. Culling them skips
+                    // roughly half the fragment work with identical output.
+                    cull_mode: Some(wgpu::Face::Back),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
                 },
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(depth_write_enabled),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &shader_constants,
+                        ..Default::default()
+                    },
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(blend),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipeline = create_mesh_pipeline("PBR mesh pipeline", true, wgpu::BlendState::REPLACE);
+        let transparent_pipeline = create_mesh_pipeline(
+            "transparent PBR mesh pipeline",
+            false,
+            wgpu::BlendState::ALPHA_BLENDING,
+        );
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("shadow pipeline layout"),
@@ -898,6 +906,7 @@ impl Renderer {
             local_shadow_layer_views,
             _shadow_sampler: shadow_sampler,
             pipeline,
+            transparent_pipeline,
             shadow_pipeline,
             outline_composite_pipeline,
             toon_mask_pipeline,
