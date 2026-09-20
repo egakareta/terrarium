@@ -56,6 +56,11 @@ override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
 const SHADOW_CASCADE_COUNT: u32 = 7u;
 const SHADOW_FILTER_OFFSETS = array<f32, 3>(-1.0, 0.0, 1.0);
 const SHADOW_FILTER_WEIGHTS = array<f32, 3>(1.0, 2.0, 1.0);
+// Keep receiver comparisons a few quantization steps in front of the
+// Depth16Unorm shadow map. The world-space normal offset contributes almost no
+// depth at a low sun angle, so the tiny epsilon alone allows ground receivers
+// to self-shadow into a jagged second silhouette.
+const DIRECTIONAL_SHADOW_DEPTH_BIAS: f32 = 0.0001;
 
 @group(0) @binding(0)
 var<uniform> camera: Camera;
@@ -348,7 +353,13 @@ fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
         return 1.0;
     }
 
-    let texel_size = camera.lighting_params.z / f32(textureDimensions(shadow_map).x);
+    let softness = clamp(camera.lighting_params.z, 0.0, 1.0);
+    // Map softness 0..1 to a 0.5..2.5 texel filter radius. A radius well
+    // below one texel leaves grazing sun shadows stair-stepped: one shadow
+    // texel then covers many screen pixels along the ground. The 0.5 texel
+    // floor keeps the hard end anti-aliased while preserving its look.
+    let filter_radius = 0.5 + softness * 2.0;
+    let texel_size = filter_radius / f32(textureDimensions(shadow_map).x);
     var visibility = 0.0;
     for (var x = 0u; x < 3u; x = x + 1u) {
         for (var y = 0u; y < 3u; y = y + 1u) {
@@ -360,7 +371,7 @@ fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
                 shadow_sampler,
                 shadow_uv + offset,
                 i32(cascade),
-                projected.z - 1e-6,
+                projected.z - DIRECTIONAL_SHADOW_DEPTH_BIAS,
             ) * weight;
         }
     }
