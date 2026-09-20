@@ -43,7 +43,7 @@ run = "cargo bench --benches"
 [tasks."serve:examples:app"]
 description = "Serve the example app with Trunk"
 dir = "{{config_root}}"
-run = "trunk serve --config examples/Trunk.app.toml"
+run = "trunk serve"
 
 [tasks."run:examples:app"]
 description = "Run the example app natively"
