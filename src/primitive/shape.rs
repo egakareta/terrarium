@@ -56,9 +56,6 @@ impl PartShape {
     pub(crate) fn mesh(self, color: [f32; 4]) -> Mesh {
         match self {
             Self::Block => Mesh::block(1.0, color),
-            // 12x18 sphere: shading uses analytic normals so lighting is
-            // smooth; only the silhouette differs from 16x24 by ~1% of radius
-            // (subpixel at typical multi-object distances) for 44% fewer tris.
             Self::Ball => Mesh::ball(0.5, 12, 18, color),
             Self::Cylinder => Mesh::cylinder(0.5, 1.0, 24, color),
             Self::Wedge => Mesh::wedge(color),
