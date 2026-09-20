@@ -1,3 +1,5 @@
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
 use std::{
@@ -64,6 +66,91 @@ const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Uno
 const SHADOW_DISTANCE: f32 = 80.0;
 const SHADOW_CASTER_MARGIN: f32 = 20.0;
 const SHADOW_RECEIVER_MARGIN: f32 = 5.0;
+
+#[derive(Clone)]
+struct RendererShaders {
+    mesh: wgpu::ShaderModule,
+    blit: wgpu::ShaderModule,
+    outline: wgpu::ShaderModule,
+    skybox: wgpu::ShaderModule,
+    copy: wgpu::ShaderModule,
+}
+
+impl RendererShaders {
+    fn new(device: &wgpu::Device) -> Self {
+        let create = |label: &'static str, source: &'static str| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(label),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            })
+        };
+        Self {
+            mesh: create("PBR mesh shader", include_str!("shader.wgsl")),
+            blit: create("outline composite shader", include_str!("blit.wgsl")),
+            outline: create("outline geometry shader", include_str!("outline.wgsl")),
+            skybox: create("skybox shader", include_str!("skybox.wgsl")),
+            copy: create("eframe scene composite shader", include_str!("copy.wgsl")),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn renderer_shaders(device: &wgpu::Device) -> RendererShaders {
+    static SHADERS: OnceLock<Mutex<Option<(wgpu::Device, RendererShaders)>>> = OnceLock::new();
+    let mut shaders = SHADERS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("renderer shader cache lock poisoned");
+    if let Some((cached_device, cached_shaders)) = shaders.as_ref()
+        && cached_device == device
+    {
+        return cached_shaders.clone();
+    }
+
+    let created = RendererShaders::new(device);
+    *shaders = Some((device.clone(), created.clone()));
+    created
+}
+
+#[cfg(target_arch = "wasm32")]
+fn renderer_shaders(device: &wgpu::Device) -> RendererShaders {
+    RendererShaders::new(device)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn renderer_pipeline_cache(device: &wgpu::Device) -> Option<wgpu::PipelineCache> {
+    if !device.features().contains(wgpu::Features::PIPELINE_CACHE) {
+        return None;
+    }
+
+    static CACHE: OnceLock<Mutex<Option<(wgpu::Device, wgpu::PipelineCache)>>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("renderer pipeline cache lock poisoned");
+    if let Some((cached_device, pipeline_cache)) = cache.as_ref()
+        && cached_device == device
+    {
+        return Some(pipeline_cache.clone());
+    }
+
+    // No initial cache data is supplied, so the unsafe data-validity precondition is satisfied.
+    let created = unsafe {
+        device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+            label: Some("terrarium renderer pipeline cache"),
+            data: None,
+            fallback: true,
+        })
+    };
+    *cache = Some((device.clone(), created.clone()));
+    Some(created)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn renderer_pipeline_cache(_device: &wgpu::Device) -> Option<wgpu::PipelineCache> {
+    None
+}
+
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
 pub enum RendererError {

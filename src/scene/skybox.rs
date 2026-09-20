@@ -1,4 +1,6 @@
-use std::f32::consts::PI;
+#[cfg(feature = "default-skybox")]
+use std::sync::OnceLock;
+use std::{f32::consts::PI, sync::Arc};
 
 use thiserror::Error;
 
@@ -62,7 +64,7 @@ pub enum SkyboxError {
 /// Faces are sampled as sRGB color data.
 #[derive(Clone, Debug)]
 pub struct Skybox {
-    faces: [Image; 6],
+    faces: Arc<[Image; 6]>,
 }
 
 /// Embedded default skybox: a 4x3 cross layout with 512-pixel faces.
@@ -94,7 +96,9 @@ impl Skybox {
                 });
             }
         }
-        Ok(Self { faces })
+        Ok(Self {
+            faces: Arc::new(faces),
+        })
     }
 
     /// Builds a skybox by splitting a cross-layout image into six faces.
@@ -144,14 +148,14 @@ impl Skybox {
         ];
         let mut faces = tiles.into_iter();
         Ok(Self {
-            faces: [
+            faces: Arc::new([
                 faces.next().expect("six cross tiles"),
                 faces.next().expect("six cross tiles"),
                 faces.next().expect("six cross tiles"),
                 faces.next().expect("six cross tiles"),
                 faces.next().expect("six cross tiles"),
                 faces.next().expect("six cross tiles"),
-            ],
+            ]),
         })
     }
 
@@ -184,7 +188,9 @@ impl Skybox {
             Image::from_rgba8(face_size, face_size, pixels)
                 .expect("converted skybox face has valid dimensions")
         });
-        Ok(Self { faces })
+        Ok(Self {
+            faces: Arc::new(faces),
+        })
     }
 
     /// Returns the face image looking in `face`'s direction.
@@ -194,7 +200,7 @@ impl Skybox {
 
     /// Returns all six face images in [`Face::ALL_CUBEMAP`] order.
     pub fn faces(&self) -> &[Image; 6] {
-        &self.faces
+        self.faces.as_ref()
     }
 
     /// Returns the square edge length of each face in pixels.
@@ -207,7 +213,12 @@ impl Skybox {
 impl Default for Skybox {
     /// Returns an embedded default skybox.
     fn default() -> Self {
-        Self::from_cross(Image::from_bytes(DEFAULT_SKYBOX_CROSS_BYTES).unwrap()).unwrap()
+        static DEFAULT_SKYBOX: OnceLock<Skybox> = OnceLock::new();
+        DEFAULT_SKYBOX
+            .get_or_init(|| {
+                Self::from_cross(Image::from_bytes(DEFAULT_SKYBOX_CROSS_BYTES).unwrap()).unwrap()
+            })
+            .clone()
     }
 }
 

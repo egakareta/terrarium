@@ -13,6 +13,8 @@ impl Renderer {
         let height = size[1].max(1);
         let device = render_state.device.clone();
         let queue = render_state.queue.clone();
+        let shaders = renderer_shaders(&device);
+        let pipeline_cache = renderer_pipeline_cache(&device);
         let (depth_texture, depth_view) = create_depth_texture(&device, width, height);
         let scene_texture = create_eframe_scene_texture(&device, format, width, height);
         let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -414,10 +416,7 @@ impl Renderer {
             metallic_roughness: [GpuTextureHandle(2); MATERIAL_SLOT_COUNT],
             emissive: [GpuTextureHandle(3); MATERIAL_SLOT_COUNT],
         };
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("PBR mesh shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
-        });
+        let shader = shaders.mesh;
         let shader_constants = [
             (
                 "FRAMEBUFFER_IS_SRGB",
@@ -482,7 +481,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: pipeline_cache.as_ref(),
             })
         };
         let pipeline = create_mesh_pipeline("PBR mesh pipeline", true, wgpu::BlendState::REPLACE);
@@ -534,16 +533,10 @@ impl Renderer {
             multisample: wgpu::MultisampleState::default(),
             fragment: None,
             multiview_mask: None,
-            cache: None,
+            cache: pipeline_cache.as_ref(),
         });
-        let blit_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outline composite shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("blit.wgsl").into()),
-        });
-        let outline_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("outline geometry shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("outline.wgsl").into()),
-        });
+        let blit_shader = shaders.blit;
+        let outline_shader = shaders.outline;
         let outline_composite_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("outline composite pipeline layout"),
@@ -574,7 +567,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: pipeline_cache.as_ref(),
             });
         let outline_mask_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -622,7 +615,7 @@ impl Renderer {
                 targets: &toon_mask_targets,
             }),
             multiview_mask: None,
-            cache: None,
+            cache: pipeline_cache.as_ref(),
         });
         let silhouette_mask_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -647,7 +640,7 @@ impl Renderer {
                     targets: &silhouette_mask_targets,
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: pipeline_cache.as_ref(),
             });
         let stencil_mask_pipeline =
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -697,7 +690,7 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: pipeline_cache.as_ref(),
             });
         let stencil_outline_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -756,12 +749,9 @@ impl Renderer {
                     })],
                 }),
                 multiview_mask: None,
-                cache: None,
+                cache: pipeline_cache.as_ref(),
             });
-        let skybox_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("skybox shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
-        });
+        let skybox_shader = shaders.skybox;
         let skybox_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("skybox bind group layout"),
@@ -868,7 +858,7 @@ impl Renderer {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: pipeline_cache.as_ref(),
         });
         let eframe_scene = EframeSceneTarget::new(&device, format, width, height);
         let outline_bind_group = create_outline_bind_group(

@@ -80,9 +80,23 @@ fn default_headless_render_state(
     options: &egui_wgpu::WgpuConfiguration,
 ) -> Result<egui_wgpu::RenderState, eframe::Error> {
     let cached = DEFAULT_HEADLESS_RENDER_STATE.get_or_init(|| {
+        let mut options = options.clone();
+        if let egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+            let device_descriptor = setup.device_descriptor.clone();
+            setup.device_descriptor = Arc::new(move |adapter| {
+                let mut descriptor = device_descriptor(adapter);
+                if adapter
+                    .features()
+                    .contains(egui_wgpu::wgpu::Features::PIPELINE_CACHE)
+                {
+                    descriptor.required_features |= egui_wgpu::wgpu::Features::PIPELINE_CACHE;
+                }
+                descriptor
+            });
+        }
         let instance = pollster::block_on(options.wgpu_setup.new_instance());
         pollster::block_on(egui_wgpu::RenderState::create(
-            options,
+            &options,
             &instance,
             None,
             egui_wgpu::RendererOptions::default(),

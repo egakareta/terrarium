@@ -775,6 +775,10 @@ fn downsample_rgba8(
     source: &[u8],
     color_space: TextureColorSpace,
 ) -> Vec<u8> {
+    if width.checked_mul(2) == Some(source_width) && height.checked_mul(2) == Some(source_height) {
+        return downsample_rgba8_2x(source_width, width, height, source, color_space);
+    }
+
     let mut pixels = vec![0; width as usize * height as usize * 4];
     for y in 0..height {
         let source_y_start = (y as u64 * source_height as u64 / height as u64) as u32;
@@ -807,6 +811,51 @@ fn downsample_rgba8(
             let destination_index = (y as usize * width as usize + x as usize) * 4;
             for channel in 0..4 {
                 let value = sums[channel] / sample_count;
+                pixels[destination_index + channel] =
+                    if color_space == TextureColorSpace::Srgb && channel < 3 {
+                        linear_to_srgb(value)
+                    } else {
+                        (value * 255.0).round() as u8
+                    };
+            }
+        }
+    }
+    pixels
+}
+
+fn downsample_rgba8_2x(
+    source_width: u32,
+    width: u32,
+    height: u32,
+    source: &[u8],
+    color_space: TextureColorSpace,
+) -> Vec<u8> {
+    let mut pixels = vec![0; width as usize * height as usize * 4];
+    let source_stride = source_width as usize * 4;
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let top_left = y * 2 * source_stride + x * 2 * 4;
+            let source_indices = [
+                top_left,
+                top_left + 4,
+                top_left + source_stride,
+                top_left + source_stride + 4,
+            ];
+            let mut sums = [0.0; 4];
+            for source_index in source_indices {
+                for channel in 0..4 {
+                    let value = source[source_index + channel];
+                    sums[channel] += if color_space == TextureColorSpace::Srgb && channel < 3 {
+                        srgb_to_linear(value)
+                    } else {
+                        value as f32 / 255.0
+                    };
+                }
+            }
+
+            let destination_index = (y * width as usize + x) * 4;
+            for channel in 0..4 {
+                let value = sums[channel] / 4.0;
                 pixels[destination_index + channel] =
                     if color_space == TextureColorSpace::Srgb && channel < 3 {
                         linear_to_srgb(value)
@@ -935,6 +984,21 @@ mod tests {
         assert_eq!(levels.len(), 2);
         assert_eq!((levels[1].width, levels[1].height), (1, 1));
         assert_eq!(levels[1].pixels, vec![25, 35, 45, 55]);
+    }
+
+    #[test]
+    fn texture_mip_levels_downsample_power_of_two_dimensions() {
+        let texture = Texture::linear(
+            2,
+            2,
+            vec![
+                0, 10, 20, 30, 10, 20, 30, 40, 20, 30, 40, 50, 30, 40, 50, 60,
+            ],
+        )
+        .unwrap();
+
+        let levels = texture.mip_levels().unwrap();
+        assert_eq!(levels[1].pixels, vec![15, 25, 35, 45]);
     }
 
     #[test]

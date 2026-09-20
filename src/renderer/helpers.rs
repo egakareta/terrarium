@@ -42,10 +42,8 @@ impl EframeSceneTarget {
             anisotropy_clamp: 1,
             border_color: None,
         });
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("eframe scene composite shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("copy.wgsl").into()),
-        });
+        let shader = renderer_shaders(device).copy;
+        let pipeline_cache = renderer_pipeline_cache(device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("eframe scene composite pipeline layout"),
             bind_group_layouts: &[Some(&bind_group_layout)],
@@ -74,7 +72,7 @@ impl EframeSceneTarget {
                 })],
             }),
             multiview_mask: None,
-            cache: None,
+            cache: pipeline_cache.as_ref(),
         });
         let texture = create_eframe_scene_texture(device, format, width, height);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
