@@ -26,7 +26,7 @@ pub struct Workspace {
     texture_revision: u64,
     /// Scene-wide lighting configuration.
     pub lighting: Lighting,
-    lookup: Rc<InstanceLookup>,
+    pub(crate) lookup: Rc<InstanceLookup>,
 }
 
 impl Workspace {

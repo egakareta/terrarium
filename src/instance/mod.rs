@@ -73,6 +73,7 @@ fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
 pub struct InstanceLookup {
     instances: RefCell<InstanceMap<NonNull<dyn Instance>>>,
     root: Cell<Option<(InstanceId, NonNull<InstanceData>)>>,
+    generation: Cell<u64>,
 }
 
 impl InstanceLookup {
@@ -82,10 +83,21 @@ impl InstanceLookup {
         self.instances
             .borrow_mut()
             .insert(instance.id(), NonNull::from(instance));
+        self.generation.set(self.generation.get().wrapping_add(1));
     }
 
     pub(crate) fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
+        self.generation.set(self.generation.get().wrapping_add(1));
+    }
+
+    /// Returns a counter bumped on every structural add/remove in the workspace.
+    ///
+    /// Property mutations (pivot, color, etc.) do not bump this, so a cached
+    /// scan for zero outlines/lights can be safely skipped while the
+    /// generation is unchanged: no new instances could have appeared.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.get()
     }
 
     pub(crate) fn get(&self, id: InstanceId) -> Option<NonNull<dyn Instance>> {

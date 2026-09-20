@@ -95,11 +95,21 @@ impl Renderer {
         let index = (self.material_factor_vec4s.len() / MATERIAL_VEC4S_PER_SET) as u32;
         self.material_factor_vec4s.extend(key.vec4s());
         self.material_factor_indices.insert(key, index);
+        self.material_factors_dirty = true;
         index
     }
 
     pub(super) fn upload_material_factors(&mut self) {
         if self.material_factor_vec4s.is_empty() {
+            return;
+        }
+        // Skip re-upload while the set list is unchanged: the texture already
+        // holds these factors from a previous frame. New sets mark dirty via
+        // material_set_index_uncached above.
+        if !self.material_factors_dirty
+            && self.material_factors_texture.height()
+                >= (self.material_factor_vec4s.len() / MATERIAL_VEC4S_PER_SET).max(1) as u32
+        {
             return;
         }
         let required_height =
@@ -136,6 +146,7 @@ impl Renderer {
                 depth_or_array_layers: 1,
             },
         );
+        self.material_factors_dirty = false;
     }
 
     pub(super) fn upload_workspace_texture(
@@ -257,7 +268,7 @@ impl Renderer {
             .copied()
             .collect();
         let mut recreated = Vec::new();
-        let mut refreshed = HashSet::new();
+        let mut refreshed = HashSet::default();
         for textures in affected {
             let packed = self.packed_material_textures[&textures];
             for (slot, packed_handle) in packed.textures.into_iter().enumerate() {
@@ -413,7 +424,7 @@ impl Renderer {
         }
 
         let mut packed_textures = [PackedTextureHandle(usize::MAX); MATERIAL_SLOT_COUNT];
-        let mut packed_slots = HashMap::new();
+        let mut packed_slots = HashMap::default();
         for (slot, packed_texture) in packed_textures.iter_mut().enumerate() {
             let slot_textures = (
                 textures.base_color[slot],

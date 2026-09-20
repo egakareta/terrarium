@@ -364,7 +364,7 @@ impl Renderer {
                 label: Some("material bind group layout"),
                 entries: &material_bind_group_entries,
             });
-        let mut material_samplers = HashMap::new();
+        let mut material_samplers = HashMap::default();
         for filter in TextureFilter::ALL {
             material_samplers.insert(filter, create_material_sampler(&device, filter));
         }
@@ -407,7 +407,7 @@ impl Renderer {
                 source: default_emissive.clone(),
             },
         ];
-        let mut texture_dedup = HashMap::new();
+        let mut texture_dedup = HashMap::default();
         texture_dedup.insert(default_base_color, GpuTextureHandle(0));
         texture_dedup.insert(default_normal, GpuTextureHandle(1));
         texture_dedup.insert(default_metallic_roughness, GpuTextureHandle(2));
@@ -905,7 +905,7 @@ impl Renderer {
             #[cfg(target_arch = "wasm32")]
             web_pixel_readback: Rc::new(RefCell::new(WebPixelReadbackState::default())),
             #[cfg(feature = "meshpart")]
-            viewport_targets: HashMap::new(),
+            viewport_targets: HashMap::default(),
             skybox_pipeline,
             skybox_bind_group_layout,
             skybox_uniform_buffer,
@@ -937,22 +937,23 @@ impl Renderer {
             material_factors_view,
             material_factors_bind_group,
             material_factor_vec4s: Vec::new(),
-            material_factor_indices: HashMap::new(),
+            material_factor_indices: HashMap::default(),
+            material_factors_dirty: true,
             material_factor_last: None,
             material_factor_last_uniform: None,
             textures,
-            workspace_texture_handles: HashMap::new(),
+            workspace_texture_handles: HashMap::default(),
             texture_dedup,
             default_material_textures,
             default_material_filters: [TextureFilter::default(); MATERIAL_SLOT_COUNT],
-            packed_material_textures: HashMap::new(),
+            packed_material_textures: HashMap::default(),
             gpu_material_textures: Vec::new(),
             instance_buffer,
             outline_instance_buffers,
             meshes: Vec::new(),
             primitive_meshes: [GpuMeshHandle(usize::MAX); PartShape::COUNT],
             #[cfg(feature = "meshpart")]
-            meshpart_meshes: HashMap::new(),
+            meshpart_meshes: HashMap::default(),
             #[cfg(feature = "meshpart")]
             free_meshpart_meshes: Vec::new(),
             clear_color: wgpu::Color {
@@ -971,8 +972,15 @@ impl Renderer {
             outline_batches: std::array::from_fn(|_| Vec::new()),
             local_light_scratch: Vec::new(),
             batch_scratch: Vec::new(),
-            batch_indices_scratch: HashMap::new(),
-            material_bind_groups: HashMap::new(),
+            batch_indices_scratch: HashMap::default(),
+            material_bind_groups: HashMap::default(),
+            outline_revision: u64::MAX,
+            outline_had_any: true,
+            light_revision: u64::MAX,
+            light_had_any: true,
+            transparent_sort_depths: Vec::new(),
+            transparent_sort_indices: Vec::new(),
+            transparent_sort_tmp: Vec::new(),
         };
         for shape in PartShape::ALL {
             let mesh = renderer.add_mesh(&shape.mesh([1.0; 4]))?;

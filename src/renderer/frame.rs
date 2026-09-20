@@ -553,16 +553,30 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("eframe scene command encoder"),
             });
+        // Skip outline passes when no outlines exist: the mask would stay
+        // cleared and the composite would be a plain copy. Rendering the
+        // scene directly to the eframe target preserves pixels while saving
+        // two full-screen passes.
+        let has_outlines = self.outline_batches.iter().any(|b| !b.is_empty());
         self.encode_shadow_pass(&mut encoder);
-        self.encode_scene_pass(
-            &mut encoder,
-            &self.scene_view,
-            &self.depth_view,
-            self.clear_color,
-        );
-        self.encode_outline_mask_pass(&mut encoder);
-        self.encode_stencil_outline_passes(&mut encoder);
-        self.encode_outline_composite_pass(&mut encoder);
+        if has_outlines {
+            self.encode_scene_pass(
+                &mut encoder,
+                &self.scene_view,
+                &self.depth_view,
+                self.clear_color,
+            );
+            self.encode_outline_mask_pass(&mut encoder);
+            self.encode_stencil_outline_passes(&mut encoder);
+            self.encode_outline_composite_pass(&mut encoder);
+        } else {
+            self.encode_scene_pass(
+                &mut encoder,
+                &self.eframe_scene.view,
+                &self.depth_view,
+                self.clear_color,
+            );
+        }
         self.queue.submit(Some(encoder.finish()));
     }
 

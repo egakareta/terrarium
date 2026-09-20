@@ -1,13 +1,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Mutex;
+use std::sync::OnceLock;
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
-use std::{
-    collections::{HashMap, HashSet},
-    sync::OnceLock,
-};
 
 use bytemuck::{Pod, Zeroable};
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 use web_time::Instant;
 
@@ -298,6 +296,7 @@ struct PartCandidate<'a> {
     center: Vec3,
     radius: f32,
     visibility_mask: u16,
+    transparent: bool,
 }
 
 #[repr(C)]
@@ -599,6 +598,7 @@ pub struct Renderer {
     material_factors_bind_group: wgpu::BindGroup,
     material_factor_vec4s: Vec<[f32; 4]>,
     material_factor_indices: HashMap<MaterialSetKey, u32>,
+    material_factors_dirty: bool,
     /// Hot cache for consecutive parts sharing one material set.
     material_factor_last: Option<(MaterialSetKey, u32)>,
     /// Hot cache for the override-free case, comparing only the 9
@@ -641,6 +641,13 @@ pub struct Renderer {
     >,
     material_bind_groups:
         HashMap<(PackedMaterialTextures, [TextureFilter; MATERIAL_SLOT_COUNT]), wgpu::BindGroup>,
+    outline_revision: u64,
+    outline_had_any: bool,
+    light_revision: u64,
+    light_had_any: bool,
+    transparent_sort_depths: Vec<f32>,
+    transparent_sort_indices: Vec<usize>,
+    transparent_sort_tmp: Vec<InstanceRaw>,
 }
 
 #[repr(C)]
