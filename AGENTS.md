@@ -11,7 +11,6 @@
 - `mise run check` is the CI lint/format gate. It runs `cargo clippy --all-targets --all-features --workspace -- -D warnings`, then Rust and Oxfmt checks.
 - `mise run format` modifies files; `mise run format:cargo` formats Rust and `mise run format:oxfmt` formats TOML/YAML. The pre-commit hook runs `mise run format` and stages formatter changes.
 - `mise run test` runs `cargo test --all-targets --all-features`. For focused checks, use `cargo test --all-features --lib <filter>`, `cargo test --all-features --example app app_loads`, or `cargo test --all-features --test gpu <filter>`.
-- Render tests need a working Vulkan implementation. In CI they run with `LIBGL_ALWAYS_SOFTWARE=1`, `WGPU_BACKEND=vulkan`, lavapipe, and `xvfb-run -a`; reproduce that environment locally when GPU tests fail due to display or adapter setup.
 
 ## Features And Entrypoints
 
