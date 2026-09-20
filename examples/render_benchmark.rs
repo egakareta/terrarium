@@ -201,6 +201,7 @@ impl Benchmark {
                     .with_size(
                         base.size() * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35),
                     )
+                    .with_transparency(time.sin().max(0.0))
                     .with_color(Color3::new(
                         (base.color().r + color_shift.sin() * 0.18).clamp(0.0, 1.0),
                         (base.color().g + (color_shift + 2.1).sin() * 0.18).clamp(0.0, 1.0),
