@@ -4,7 +4,17 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["meshpart", "physics", "default-skybox", "default-fonts", "eframe-default-fonts"]
+default = [
+  "meshpart",
+  "physics",
+  "default-skybox",
+  "default-fonts",
+  "eframe-default-fonts",
+  "javascript",
+  "hot-reload",
+]
+javascript = ["dep:rquickjs"]
+hot-reload = ["javascript", "dep:notify"]
 meshpart = ["dep:gltf"]
 physics = ["dep:rapier3d"]
 default-skybox = []
@@ -21,6 +31,7 @@ image = { version = "0.25" }
 log = "0.4"
 rapier3d = { version = "0.35", optional = true }
 rustc-hash = "2"
+rquickjs = { version = "0.14", optional = true }
 serde = "1"
 serde_json = "1"
 slotmap = "1"
@@ -37,13 +48,23 @@ bevy_tasks = "0.19"
 bevy_time = "0.19"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+notify = { version = "8", optional = true }
 pollster = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
+web-sys = { version = "0.3", features = [
+  "Document",
+  "Element",
+  "HtmlCanvasElement",
+  "Request",
+  "RequestCache",
+  "RequestInit",
+  "Response",
+  "Window",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
