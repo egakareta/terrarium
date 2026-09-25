@@ -12,5 +12,5 @@ command_arguments = ["setup"]
 "cross-origin-opener-policy" = "same-origin"
 "cross-origin-resource-policy" = "same-site"
 
-[watch]
-ignore = ["scripts"]
+[serve]
+no_autoreload = true

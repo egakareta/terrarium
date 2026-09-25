@@ -68,17 +68,17 @@ declare class Instance {
 /** Lifecycle implemented by the default-exported class of a script module. */
 interface TerrariumScript {
   /** Runs once after the module class is constructed. */
-  onInit?(): void;
+  onInit?(): void | Promise<void>;
   /** Runs once after initialization and before the first update. */
-  onLoad?(): void;
+  onLoad?(): void | Promise<void>;
   /** Runs once per Terrarium update with the frame delta in seconds. */
   onUpdate?(deltaTime: number): void;
   /** Runs before a hot reload replaces this module. */
-  onBeforeReload?(): void;
+  onBeforeReload?(): void | Promise<void>;
   /** Runs when the module is unloaded or replaced. */
-  onUnload?(): void;
+  onUnload?(): void | Promise<void>;
   /** Runs on the replacement module after a successful hot reload. */
-  onReload?(): void;
+  onReload?(): void | Promise<void>;
 }
 
 /** Elapsed Terrarium runtime time in seconds. */

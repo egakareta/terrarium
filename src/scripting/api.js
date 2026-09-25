@@ -11,17 +11,23 @@ globalThis.Instance = ((
   setTransparency,
   setAnchored,
   setCanCollide,
+  isActive,
 ) =>
   class Instance {
     constructor(type, options) {
       this._handle = create(type, options);
-      this._destroyed = false;
+      this._destroyedFlag = false;
+    }
+
+    get _destroyed() {
+      if (this._destroyedFlag) this._destroyedFlag = !isActive(this._handle);
+      return this._destroyedFlag;
     }
 
     destroy() {
       if (!this._destroyed) {
         destroy(this._handle);
-        this._destroyed = true;
+        this._destroyedFlag = true;
       }
     }
 
@@ -75,6 +81,7 @@ globalThis.Instance = ((
   __terrarium_set_transparency,
   __terrarium_set_anchored,
   __terrarium_set_can_collide,
+  __terrarium_is_active,
 );
 
 delete globalThis.__terrarium_create_instance;
@@ -87,3 +94,4 @@ delete globalThis.__terrarium_set_name;
 delete globalThis.__terrarium_set_transparency;
 delete globalThis.__terrarium_set_anchored;
 delete globalThis.__terrarium_set_can_collide;
+delete globalThis.__terrarium_is_active;

@@ -14,7 +14,7 @@ use std::{
 
 use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
 #[cfg(feature = "javascript")]
-use crate::{ScriptDirectories, ScriptHost, ScriptOptions};
+use crate::{ScriptDirectories, ScriptHost, scripting::DiscoveredScripts};
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
@@ -81,7 +81,7 @@ type RendererHandle = Arc<Mutex<Renderer>>;
 type EngineSlot = Rc<RefCell<Option<Engine>>>;
 
 #[cfg(feature = "javascript")]
-type PreloadedScripts = Rc<RefCell<Option<Result<Vec<ScriptOptions>, String>>>>;
+type PreloadedScripts = Rc<RefCell<Option<Result<DiscoveredScripts, String>>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
 static DEFAULT_HEADLESS_RENDER_STATE: OnceLock<Result<egui_wgpu::RenderState, String>> =
@@ -273,37 +273,14 @@ impl Engine {
         &self.scripts
     }
 
-    /// Loads a JavaScript module and applies instances created by its initialization hooks.
-    ///
-    /// [`crate::ScriptOptions`] can provide inline source, a native file, a web URL, or both
-    /// platform-specific locations in one configuration.
     #[cfg(feature = "javascript")]
-    pub fn load_script(&mut self, options: crate::ScriptOptions) -> crate::JavaScriptResult<()> {
+    pub(crate) fn load_script(
+        &mut self,
+        options: crate::ScriptOptions,
+    ) -> crate::JavaScriptResult<()> {
         let result = self.scripts.load_module(options);
         self.scripts.apply_commands(&mut self.workspace);
         result
-    }
-
-    /// Reloads a JavaScript module and applies any scene changes from its lifecycle hooks.
-    #[cfg(feature = "javascript")]
-    pub fn reload_script(&mut self, name: &str, source: &str) -> crate::JavaScriptResult<()> {
-        let result = self.scripts.reload_module(name, source);
-        self.scripts.apply_commands(&mut self.workspace);
-        result
-    }
-
-    /// Unloads a JavaScript module and applies any scene changes from its `onUnload` hook.
-    #[cfg(feature = "javascript")]
-    pub fn unload_script(&mut self, name: &str) -> crate::JavaScriptResult<bool> {
-        let result = self.scripts.unload_module(name);
-        self.scripts.apply_commands(&mut self.workspace);
-        result
-    }
-
-    /// Stops hot reloading a JavaScript module.
-    #[cfg(all(feature = "javascript", feature = "hot-reload"))]
-    pub fn stop_script_watch(&mut self, name: &str) -> crate::JavaScriptResult<()> {
-        self.scripts.stop_module_watch(name)
     }
 
     /// Returns the color eframe should use to clear the window.
@@ -359,7 +336,13 @@ impl Engine {
                     .take_last_update_error_module()
                     .unwrap_or_else(|| "unknown module".to_owned());
                 let detail = self.scripts.format_error(&error);
+                #[cfg(not(target_arch = "wasm32"))]
                 log::error!("JavaScript update failed in `{module}`:\n{detail}");
+                #[cfg(target_arch = "wasm32")]
+                console_error(
+                    &format!("JavaScript update failed in `{module}`:\n{detail}"),
+                    &wasm_bindgen::JsValue::NULL,
+                );
             }
             self.scripts.apply_commands(&mut self.workspace);
         }
@@ -405,9 +388,12 @@ impl Engine {
         app_creator: eframe::AppCreator<'static>,
         #[cfg(feature = "javascript")] _preloaded_scripts: PreloadedScripts,
     ) -> eframe::Result {
+        #[cfg(not(target_arch = "wasm32"))]
         if config.env_logger {
             let _ = env_logger::try_init();
         }
+        #[cfg(target_arch = "wasm32")]
+        let _ = config.env_logger;
 
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
         (config.wgpu_options)(&mut wgpu_options);
@@ -500,7 +486,10 @@ impl Engine {
                             .web_options()
                             .await
                             .map_err(|error| error.to_string()),
-                        None => Ok(Vec::new()),
+                        None => Ok(DiscoveredScripts {
+                            entries: Vec::new(),
+                            sources: Vec::new(),
+                        }),
                     };
                     *_preloaded_scripts.borrow_mut() = Some(scripts);
                 }
@@ -773,23 +762,26 @@ impl<'a> Terrarium<'a> {
             #[cfg(feature = "javascript")]
             {
                 #[cfg(target_arch = "wasm32")]
-                let options = app_preloaded_scripts
+                let discovered = app_preloaded_scripts
                     .borrow_mut()
                     .take()
                     .expect("web script preload should complete before app creation")
                     .map_err(std::io::Error::other)?;
 
                 #[cfg(not(target_arch = "wasm32"))]
-                let options = match &app_scripts_dir {
+                let discovered = match &app_scripts_dir {
                     Some(directory) => directory
                         .native_options()
                         .map_err(|error| -> AppCreationError { error.into() })?,
-                    None => Vec::new(),
+                    None => DiscoveredScripts {
+                        entries: Vec::new(),
+                        sources: Vec::new(),
+                    },
                 };
 
                 with_engine(&app_engine_slot, |engine| {
-                    engine.scripts.register_sources(&options);
-                    for options in options {
+                    engine.scripts.register_sources(&discovered.sources);
+                    for options in discovered.entries {
                         let name = options.identity();
                         if let Err(error) = engine.load_script(options) {
                             let detail = engine.scripts.format_error(&error);
