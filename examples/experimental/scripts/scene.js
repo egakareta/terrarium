@@ -1,7 +1,7 @@
 import { orbitPosition } from "./ring.js";
 import { towerLevels } from "./tower.js";
 
-/** @implements {TerrariumScript} */
+/** @implements {Component} */
 export default class Scene {
   onInit() {
     log("scene initialized");

@@ -2,7 +2,7 @@ export function orbitPosition(angle, radius) {
   return [Math.cos(angle) * radius, 0.35, Math.sin(angle) * radius];
 }
 
-/** @implements {TerrariumScript} */
+/** @implements {Component} */
 export default class Ring {
   onLoad() {
     this.parts = Array.from({ length: 8 }, (_, index) => {

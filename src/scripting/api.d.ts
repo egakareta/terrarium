@@ -67,7 +67,7 @@ declare class Instance {
 }
 
 /** Lifecycle implemented by the default-exported class of a script module. */
-interface TerrariumScript {
+interface Component {
   /** Runs once after the module class is constructed. */
   onInit?(): void | Promise<void>;
   /** Runs once after initialization and before the first update. */

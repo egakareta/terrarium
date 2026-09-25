@@ -1,6 +1,6 @@
 export const towerLevels = 5;
 
-/** @implements {TerrariumScript} */
+/** @implements {Component} */
 export default class Tower {
   onLoad() {
     this.blocks = Array.from({ length: towerLevels }, (_, index) => {
