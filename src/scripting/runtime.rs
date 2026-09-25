@@ -14,7 +14,7 @@ use rquickjs::{
 use super::{JavaScriptResult, ScriptOptions};
 
 /// Owns a QuickJS runtime and evaluates JavaScript source in its context.
-pub struct JavaScriptRuntime {
+pub(super) struct JavaScriptRuntime {
     context: Context,
     sources: Arc<Mutex<HashMap<String, String>>>,
     _runtime: Runtime,
@@ -67,24 +67,28 @@ impl Loader for ScriptLoader {
         name: &str,
         _attributes: Option<ImportAttributes<'js>>,
     ) -> JavaScriptResult<Module<'js>> {
+        let source = self
+            .sources
+            .lock()
+            .expect("script sources lock poisoned")
+            .get(name)
+            .cloned();
+        if let Some(source) = source {
+            return Module::declare(ctx.clone(), name, source);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if Path::new(name).is_absolute() {
             let source = fs::read_to_string(name)
                 .map_err(|error| Error::new_loading_message(name, error.to_string()))?;
             return Module::declare(ctx.clone(), name, source);
         }
-
-        let sources = self.sources.lock().expect("script sources lock poisoned");
-        let source = sources
-            .get(name)
-            .ok_or_else(|| Error::new_loading_message(name, "script was not preloaded"))?;
-        Module::declare(ctx.clone(), name, source.as_str())
+        Err(Error::new_loading_message(name, "script was not preloaded"))
     }
 }
 
 impl JavaScriptRuntime {
     /// Creates an isolated JavaScript runtime.
-    pub fn new() -> JavaScriptResult<Self> {
+    pub(super) fn new() -> JavaScriptResult<Self> {
         let runtime = Runtime::new()?;
         let sources = Arc::new(Mutex::new(HashMap::new()));
         runtime.set_loader(
@@ -102,11 +106,6 @@ impl JavaScriptRuntime {
             sources,
             _runtime: runtime,
         })
-    }
-
-    /// Evaluates a JavaScript program.
-    pub fn run(&self, source: &str) -> JavaScriptResult<()> {
-        self.with_context(|ctx| ctx.eval::<(), _>(source))
     }
 
     pub(super) fn register_sources(&self, options: &[ScriptOptions]) {
@@ -141,7 +140,7 @@ impl JavaScriptRuntime {
     }
 
     /// Formats a JavaScript error, including the pending exception's message and stack trace.
-    pub fn format_error(&self, error: &Error) -> String {
+    pub(super) fn format_error(&self, error: &Error) -> String {
         self.with_context(|ctx| {
             if !error.is_exception() {
                 return error.to_string();

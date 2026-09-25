@@ -16,17 +16,24 @@ enum Command {
         /// Directory in which to install the project files.
         #[arg(value_name = "DIRECTORY", default_value = ".")]
         directory: PathBuf,
+        /// Script directory relative to the project directory.
+        #[arg(long, default_value = "scripts")]
+        scripts_dir: PathBuf,
     },
 }
 
 fn main() -> ExitCode {
-    let Some(Command::Setup { directory }) = Cli::parse().command else {
+    let Some(Command::Setup {
+        directory,
+        scripts_dir,
+    }) = Cli::parse().command
+    else {
         Cli::command().print_help().expect("failed to print help");
         return ExitCode::SUCCESS;
     };
 
     #[cfg(feature = "javascript")]
-    match terrarium::setup_script_project(&directory) {
+    match terrarium::setup_script_project(&directory, &scripts_dir) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("failed to set up {}: {error}", directory.display());
@@ -36,7 +43,7 @@ fn main() -> ExitCode {
 
     #[cfg(not(feature = "javascript"))]
     {
-        let _ = directory;
+        let _ = (directory, scripts_dir);
         eprintln!("the `setup` command requires the `javascript` feature");
         ExitCode::from(1)
     }

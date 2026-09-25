@@ -15,17 +15,16 @@ use crate::{InstanceId, Workspace};
 mod scene_bridge;
 use scene_bridge::{EngineCommand, apply_command, install_instance_bridge};
 mod discovery;
-pub(crate) use discovery::DiscoveredScripts;
+pub(crate) use discovery::{DiscoveredScripts, ScriptOptions};
 #[cfg(test)]
 use discovery::{SCRIPT_MANIFEST_FILE, parse_script_manifest};
-pub use discovery::{SCRIPTING_TYPES, ScriptDirectories, ScriptOptions, setup_script_project};
+pub use discovery::{SCRIPTING_TYPES, ScriptProject, setup_script_project};
 
 /// The result type returned by JavaScript runtime operations.
-pub type JavaScriptResult<T> = Result<T, Error>;
+pub(crate) type JavaScriptResult<T> = Result<T, Error>;
 
 mod runtime;
-pub use runtime::JavaScriptRuntime;
-use runtime::{BuiltModule, build_module};
+use runtime::{BuiltModule, JavaScriptRuntime, build_module};
 
 struct ScriptModule {
     instance: Persistent<Object<'static>>,
@@ -58,13 +57,13 @@ struct ScriptHostInner {
 
 /// Hosts JavaScript modules and applies their scene commands to a workspace.
 #[derive(Clone)]
-pub struct ScriptHost {
+pub(crate) struct ScriptHost {
     inner: Rc<RefCell<ScriptHostInner>>,
 }
 
 impl ScriptHost {
     /// Creates a JavaScript host with the built-in Terrarium API installed.
-    pub fn new() -> JavaScriptResult<Self> {
+    pub(crate) fn new() -> JavaScriptResult<Self> {
         let commands = Rc::new(RefCell::new(Vec::new()));
         let next_handle = Rc::new(Cell::new(1));
         let live_handles = Rc::new(RefCell::new(HashSet::new()));
@@ -103,7 +102,7 @@ impl ScriptHost {
     }
 
     /// Loads and initializes a JavaScript module.
-    pub fn load_module(&self, options: ScriptOptions) -> JavaScriptResult<()> {
+    pub(crate) fn load_module(&self, options: ScriptOptions) -> JavaScriptResult<()> {
         let name = options.identity();
         let mut inner = self.inner.borrow_mut();
         if inner.modules.contains_key(&name) {
@@ -135,13 +134,15 @@ impl ScriptHost {
     }
 
     /// Reloads a module while retaining the previous scene and module when a hook fails.
-    pub fn reload_module(&self, name: &str, source: &str) -> JavaScriptResult<()> {
+    #[cfg(test)]
+    pub(crate) fn reload_module(&self, name: &str, source: &str) -> JavaScriptResult<()> {
         let mut inner = self.inner.borrow_mut();
         with_command_rollback(&mut inner, |inner| reload_inner(inner, name, source, None))
     }
 
     /// Unloads a module and invokes its unload hook.
-    pub fn unload_module(&self, name: &str) -> JavaScriptResult<bool> {
+    #[cfg(test)]
+    pub(crate) fn unload_module(&self, name: &str) -> JavaScriptResult<bool> {
         let mut inner = self.inner.borrow_mut();
         if !inner.modules.contains_key(name) {
             return Ok(false);
@@ -155,15 +156,8 @@ impl ScriptHost {
     }
 
     /// Stops polling a module's native file or web URL for changes.
-    pub fn stop_module_watch(&self, name: &str) -> JavaScriptResult<()> {
-        if let Some(module) = self.inner.borrow_mut().modules.get_mut(name) {
-            module.watch = false;
-        }
-        Ok(())
-    }
-
     /// Runs module update hooks and reloads changed native files or web sources.
-    pub fn update(&self, delta_time: f32) -> JavaScriptResult<()> {
+    pub(crate) fn update(&self, delta_time: f32) -> JavaScriptResult<()> {
         let mut inner = self.inner.borrow_mut();
         inner.last_update_error_module = None;
         inner.time += delta_time;
@@ -244,7 +238,7 @@ impl ScriptHost {
     }
 
     /// Applies queued JavaScript scene commands to a workspace.
-    pub fn apply_commands(&self, workspace: &mut Workspace) {
+    pub(crate) fn apply_commands(&self, workspace: &mut Workspace) {
         let mut inner = self.inner.borrow_mut();
         let commands = inner.commands.borrow_mut().drain(..).collect::<Vec<_>>();
         let live_handles = Rc::clone(&inner.live_handles);
@@ -461,9 +455,33 @@ mod tests {
     use std::path::Path;
 
     use glam::Vec3;
+    use rquickjs::Ctx;
 
     use super::*;
     use crate::{HasPVInstance, Instance, Part};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn embedded_scripts_resolve_imports_without_files() {
+        static BUNDLE: include_dir::Dir<'static> =
+            include_dir::include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/scripts");
+        let scripts = ScriptProject::embedded(&BUNDLE, "tests/fixtures/scripts")
+            .native_options()
+            .unwrap();
+
+        let host = ScriptHost::new().unwrap();
+        host.register_sources(&scripts.sources);
+        for entry in scripts.entries {
+            host.load_module(entry).unwrap();
+        }
+        let mut workspace = Workspace::new();
+        host.apply_commands(&mut workspace);
+        let names = workspace
+            .get_all::<Part>()
+            .map(Instance::name)
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["embedded helper"]);
+    }
 
     #[test]
     fn setup_generates_a_sorted_script_manifest() {
@@ -497,7 +515,7 @@ mod tests {
         .unwrap();
         fs::write(scripts.join("notes.txt"), "not a script").unwrap();
 
-        setup_script_project(&directory).unwrap();
+        setup_script_project(&directory, "scripts").unwrap();
 
         let manifest =
             parse_script_manifest(&fs::read_to_string(scripts.join(SCRIPT_MANIFEST_FILE)).unwrap())
@@ -515,8 +533,7 @@ mod tests {
             ["helpers/other.js", "math.js", "notes.js"]
         );
         assert_eq!(
-            ScriptDirectories::new()
-                .with_native_directory(&scripts)
+            ScriptProject::development(&scripts, "./scripts")
                 .native_options()
                 .unwrap()
                 .entries
@@ -525,6 +542,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["alpha", "zeta"]
         );
+
+        let custom_scripts = directory.join("assets/scripts");
+        fs::create_dir_all(&custom_scripts).unwrap();
+        fs::write(
+            custom_scripts.join("custom.js"),
+            "export default class Custom {}",
+        )
+        .unwrap();
+        setup_script_project(&directory, "assets/scripts").unwrap();
+        let custom_manifest = parse_script_manifest(
+            &fs::read_to_string(custom_scripts.join(SCRIPT_MANIFEST_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(custom_manifest.scripts[0].path, "custom.js");
 
         for path in [
             directory.join("terrarium.d.ts"),
@@ -535,7 +566,7 @@ mod tests {
             permissions.set_readonly(true);
             fs::set_permissions(path, permissions).unwrap();
         }
-        setup_script_project(&directory).unwrap();
+        setup_script_project(&directory, "scripts").unwrap();
 
         fs::remove_dir_all(directory).unwrap();
     }
@@ -543,19 +574,25 @@ mod tests {
     #[test]
     fn runtime_keeps_global_state_between_evaluations() {
         let runtime = JavaScriptRuntime::new().expect("runtime should initialize");
+
         runtime
-            .run("globalThis.counter = (globalThis.counter || 0) + 1;")
+            .with_context(|ctx: Ctx<'_>| {
+                ctx.eval::<(), _>("globalThis.counter = (globalThis.counter || 0) + 1;")
+            })
             .unwrap();
         runtime
-            .run("if (globalThis.counter !== 1) throw new Error('state was lost');")
+            .with_context(|ctx: Ctx<'_>| {
+                ctx.eval::<(), _>(
+                    "if (globalThis.counter !== 1) throw new Error('state was lost');",
+                )
+            })
             .unwrap();
     }
 
     #[test]
     fn instance_api_applies_creation_and_update_commands() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "scene",
+        host.load_module(ScriptOptions::new("scene").with_source(
             r#"
                 export default class Scene {
                     onLoad() {
@@ -585,8 +622,7 @@ mod tests {
     #[test]
     fn reload_runs_the_replacement_load_hook() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "reload",
+        host.load_module(ScriptOptions::new("reload").with_source(
             r#"
                 export default class Scene {
                     onLoad() {
@@ -667,8 +703,7 @@ mod tests {
     #[test]
     fn failed_update_is_disabled_until_module_reload() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "failing",
+        host.load_module(ScriptOptions::new("failing").with_source(
             r#"
                 export default class Scene {
                     onUpdate() {
@@ -698,8 +733,7 @@ mod tests {
     #[test]
     fn same_module_constructor_dependencies_are_injected() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "dependency",
+        host.load_module(ScriptOptions::new("dependency").with_source(
             r#"
                 export class Factory {
                     constructor() {
@@ -731,8 +765,7 @@ mod tests {
     #[test]
     fn reload_failure_keeps_the_previous_module_running() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "reload",
+        host.load_module(ScriptOptions::new("reload").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'old' }); } }",
         ))
         .unwrap();
@@ -749,15 +782,13 @@ mod tests {
     #[test]
     fn failed_load_discards_scene_commands_and_allows_a_retry() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "already loaded",
+        host.load_module(ScriptOptions::new("already loaded").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'kept' }); } }",
         ))
         .unwrap();
         let mut workspace = Workspace::new();
         assert!(
-            host.load_module(ScriptOptions::inline(
-                "scene",
+            host.load_module(ScriptOptions::new("scene").with_source(
                 "export default class Scene { onLoad() { new Instance('Part'); throw new Error('failed'); } }",
             ))
             .is_err()
@@ -771,8 +802,7 @@ mod tests {
             ["kept"]
         );
 
-        host.load_module(ScriptOptions::inline(
-            "scene",
+        host.load_module(ScriptOptions::new("scene").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'retry' }); } }",
         ))
         .unwrap();
@@ -795,15 +825,14 @@ mod tests {
             throw new Error('module failed');
         "#;
         let error = host
-            .load_module(ScriptOptions::inline("scene", failing))
+            .load_module(ScriptOptions::new("scene").with_source(failing))
             .unwrap_err();
         assert!(host.format_error(&error).contains("module failed"));
         let mut workspace = Workspace::new();
         host.apply_commands(&mut workspace);
         assert_eq!(workspace.get_all::<Part>().count(), 0);
 
-        host.load_module(ScriptOptions::inline(
-            "scene",
+        host.load_module(ScriptOptions::new("scene").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'old' }); } }",
         ))
         .unwrap();
@@ -823,8 +852,7 @@ mod tests {
     fn failed_load_discards_module_jobs_before_the_next_scene_load() {
         let host = ScriptHost::new().unwrap();
         assert!(
-            host.load_module(ScriptOptions::inline(
-                "failing",
+            host.load_module(ScriptOptions::new("failing").with_source(
                 r#"export default class Scene {
                     onLoad() { throw new Error('failed'); }
                 }
@@ -834,8 +862,7 @@ mod tests {
         );
         let mut workspace = Workspace::new();
         host.apply_commands(&mut workspace);
-        host.load_module(ScriptOptions::inline(
-            "working",
+        host.load_module(ScriptOptions::new("working").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'working' }); } }",
         ))
         .unwrap();
@@ -853,8 +880,7 @@ mod tests {
     fn failed_hook_discards_its_pending_jobs_before_the_next_scene_load() {
         let host = ScriptHost::new().unwrap();
         let error = host
-            .load_module(ScriptOptions::inline(
-                "failing",
+            .load_module(ScriptOptions::new("failing").with_source(
                 r#"export default class Scene {
                     onLoad() {
                         Promise.resolve().then(() => new Instance('Part', { name: 'late' }));
@@ -866,8 +892,7 @@ mod tests {
         assert!(host.format_error(&error).contains("load failed"));
         let mut workspace = Workspace::new();
         host.apply_commands(&mut workspace);
-        host.load_module(ScriptOptions::inline(
-            "working",
+        host.load_module(ScriptOptions::new("working").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'working' }); } }",
         ))
         .unwrap();
@@ -885,8 +910,7 @@ mod tests {
     fn rejected_async_load_does_not_create_a_scene_part() {
         let host = ScriptHost::new().unwrap();
         let error = host
-            .load_module(ScriptOptions::inline(
-                "async scene",
+            .load_module(ScriptOptions::new("async scene").with_source(
                 r#"export default class Scene {
                     async onLoad() {
                         new Instance('Part', { name: 'orphan' });
@@ -905,8 +929,7 @@ mod tests {
     #[test]
     fn failed_reload_preserves_old_scene_and_running_module() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "scene",
+        host.load_module(ScriptOptions::new("scene").with_source(
             r#"export default class Scene {
                 onLoad() { this.part = new Instance('Part', { name: 'old' }); }
                 onUnload() { this.part.destroy(); }
@@ -953,14 +976,12 @@ mod tests {
     #[test]
     fn duplicate_load_keeps_the_existing_module_and_scene() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "scene",
+        host.load_module(ScriptOptions::new("scene").with_source(
             "export default class Scene { onLoad() { new Instance('Part', { name: 'original' }); } }",
         ))
         .unwrap();
         assert!(
-            host.load_module(ScriptOptions::inline(
-                "scene",
+            host.load_module(ScriptOptions::new("scene").with_source(
                 "export default class Scene { onLoad() { new Instance('Part', { name: 'duplicate' }); } }",
             ))
             .is_err()
@@ -979,8 +1000,7 @@ mod tests {
     #[test]
     fn throwing_unload_does_not_apply_partial_teardown_or_replacement() {
         let host = ScriptHost::new().unwrap();
-        host.load_module(ScriptOptions::inline(
-            "scene",
+        host.load_module(ScriptOptions::new("scene").with_source(
             r#"export default class Scene {
                 onLoad() { this.part = new Instance('Part', { name: 'old' }); }
                 async onUnload() {
@@ -1050,10 +1070,9 @@ mod tests {
             "import { label } from './math.js'; import { suffix } from './helpers/suffix.js'; export default class Scene { onLoad() { new Instance('Part', { name: `${label} ${suffix}` }); } }",
         )
         .unwrap();
-        setup_script_project(project).unwrap();
+        setup_script_project(project, "scripts").unwrap();
 
-        let options = ScriptDirectories::new()
-            .with_native_directory(directory)
+        let options = ScriptProject::development(directory, "./scripts")
             .native_options()
             .unwrap();
         assert_eq!(options.entries.len(), 1);

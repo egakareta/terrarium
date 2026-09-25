@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use include_dir::Dir;
 use rquickjs::Error;
 use serde::{Deserialize, Serialize};
 use web_time::Duration;
@@ -27,21 +28,18 @@ const SCRIPTING_JSCONFIG: &str = r#"{
 /// The editor declaration file installed by [`setup_script_project`].
 pub const SCRIPTING_TYPES: &str = include_str!("api.d.ts");
 
-/// Installs Terrarium JavaScript editor support in a consumer script directory.
+/// Installs Terrarium editor support and a manifest for a custom script directory.
 ///
-/// The generated `terrarium.d.ts` supplies global declarations for `Instance`,
-/// `time`, and `log`. The generated `jsconfig.json` makes those declarations
-/// available to every JavaScript file below `directory`, without requiring
-/// per-file reference directives. A sorted `scripts/manifest.json` is also
-/// generated from JavaScript files below `directory/scripts`. Top-level files
-/// declaring `export default class` are startup scripts; other `.js` files,
-/// including files in subdirectories, are importable modules and are not
-/// initialized independently.
-pub fn setup_script_project(directory: impl AsRef<Path>) -> io::Result<()> {
+/// `scripts_path` is relative to `directory` and should match the path passed to
+/// [`crate::scripts!`].
+pub fn setup_script_project(
+    directory: impl AsRef<Path>,
+    scripts_path: impl AsRef<Path>,
+) -> io::Result<()> {
     let directory = directory.as_ref();
     let declarations = directory.join("terrarium.d.ts");
     let config = directory.join("jsconfig.json");
-    let scripts_directory = directory.join("scripts");
+    let scripts_directory = directory.join(scripts_path);
     fs::create_dir_all(directory)?;
     fs::create_dir_all(&scripts_directory)?;
     write_if_changed(&declarations, SCRIPTING_TYPES.as_bytes())?;
@@ -213,11 +211,12 @@ pub(super) fn parse_script_manifest(source: &str) -> JavaScriptResult<ScriptMani
     Ok(manifest)
 }
 
-/// Resolves a script name to native and web locations.
-#[derive(Clone, Debug, Default)]
-pub struct ScriptDirectories {
+/// A script project selected by [`crate::scripts!`].
+#[derive(Clone, Debug)]
+pub struct ScriptProject {
     native_directory: Option<PathBuf>,
     web_directory: Option<String>,
+    bundle: Option<(&'static Dir<'static>, &'static str)>,
 }
 
 pub(crate) struct DiscoveredScripts {
@@ -225,26 +224,28 @@ pub(crate) struct DiscoveredScripts {
     pub(crate) sources: Vec<ScriptOptions>,
 }
 
-impl ScriptDirectories {
-    /// Creates an empty set of script directories.
-    pub fn new() -> Self {
-        Self::default()
+impl ScriptProject {
+    /// Creates the development configuration used by [`crate::scripts!`].
+    #[doc(hidden)]
+    pub fn development(directory: impl Into<PathBuf>, web_directory: impl Into<String>) -> Self {
+        Self {
+            native_directory: Some(directory.into()),
+            web_directory: Some(web_directory.into()),
+            bundle: None,
+        }
     }
 
-    /// Sets the directory used to load scripts on native targets.
-    pub fn with_native_directory(mut self, directory: impl Into<PathBuf>) -> Self {
-        self.native_directory = Some(directory.into());
-        self
+    /// Creates the release configuration used by [`crate::scripts!`].
+    #[doc(hidden)]
+    pub fn embedded(bundle: &'static Dir<'static>, path: &'static str) -> Self {
+        Self {
+            native_directory: None,
+            web_directory: None,
+            bundle: Some((bundle, path)),
+        }
     }
 
-    /// Sets the URL prefix used to load scripts on web targets.
-    pub fn with_web_directory(mut self, directory: impl Into<String>) -> Self {
-        self.web_directory = Some(directory.into());
-        self
-    }
-
-    /// Creates options for a file relative to these directories.
-    pub fn options(&self, file_name: impl AsRef<Path>) -> ScriptOptions {
+    fn options(&self, file_name: impl AsRef<Path>) -> ScriptOptions {
         let file_name = file_name.as_ref();
         let name = file_name
             .file_stem()
@@ -266,6 +267,7 @@ impl ScriptDirectories {
             source: None,
             native_file,
             web_url,
+            embedded_path: None,
             watch: true,
             poll_interval: Duration::from_millis(250),
         }
@@ -273,6 +275,9 @@ impl ScriptDirectories {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn native_options(&self) -> JavaScriptResult<DiscoveredScripts> {
+        if let Some((bundle, path)) = self.bundle {
+            return embedded_options(bundle, path);
+        }
         let directory = self.native_directory.as_ref().ok_or_else(|| {
             Error::new_from_js_message(
                 "script directory",
@@ -314,6 +319,9 @@ impl ScriptDirectories {
 
     #[cfg(target_arch = "wasm32")]
     pub(crate) async fn web_options(&self) -> JavaScriptResult<DiscoveredScripts> {
+        if let Some((bundle, path)) = self.bundle {
+            return embedded_options(bundle, path);
+        }
         let manifest_url = self.web_url(SCRIPT_MANIFEST_FILE)?;
         let source = fetch_text(&manifest_url, "script manifest").await?;
         let manifest = parse_script_manifest(&source)?;
@@ -354,6 +362,52 @@ impl ScriptDirectories {
             Ok(format!("{directory}/{file_name}"))
         }
     }
+}
+
+fn embedded_options(bundle: &Dir<'_>, root: &str) -> JavaScriptResult<DiscoveredScripts> {
+    fn collect(dir: &Dir<'_>, entries: &mut Vec<(String, String, bool)>) -> JavaScriptResult<()> {
+        for file in dir.files() {
+            let path = file.path();
+            if path.extension().and_then(|extension| extension.to_str()) != Some("js") {
+                continue;
+            }
+            let source = file.contents_utf8().ok_or_else(|| {
+                Error::new_from_js_message(
+                    "embedded script",
+                    "UTF-8 source",
+                    path.display().to_string(),
+                )
+            })?;
+            let path = path.to_string_lossy().replace('\\', "/");
+            let entry = !path.contains('/') && declares_default_class(source);
+            entries.push((path, source.to_owned(), entry));
+        }
+        for subdirectory in dir.dirs() {
+            collect(subdirectory, entries)?;
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect(bundle, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut entries = Vec::new();
+    let mut sources = Vec::new();
+    for (path, source, entry) in files {
+        let option = ScriptOptions::new(
+            Path::new(&path)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("script"),
+        )
+        .with_source(source)
+        .with_module_path(format!("{root}/{path}"));
+        if entry {
+            entries.push(option.clone());
+        }
+        sources.push(option);
+    }
+    Ok(DiscoveredScripts { entries, sources })
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -427,47 +481,45 @@ pub(super) async fn fetch_text(url: &str, resource: &str) -> JavaScriptResult<St
 
 /// Describes one JavaScript module source and its optional reload locations.
 #[derive(Clone, Debug)]
-pub struct ScriptOptions {
+pub(crate) struct ScriptOptions {
     pub(super) name: Option<String>,
     pub(super) source: Option<String>,
     pub(super) native_file: Option<PathBuf>,
     pub(super) web_url: Option<String>,
+    pub(super) embedded_path: Option<String>,
     pub(super) watch: bool,
     pub(super) poll_interval: Duration,
 }
 
 impl ScriptOptions {
     /// Creates options for a named inline module.
-    pub fn new(name: impl Into<String>) -> Self {
+    pub(crate) fn new(name: impl Into<String>) -> Self {
         Self {
             name: Some(name.into()),
             source: None,
             native_file: None,
             web_url: None,
+            embedded_path: None,
             watch: false,
             poll_interval: Duration::from_millis(250),
         }
     }
 
-    /// Creates options for an inline module.
-    pub fn inline(name: impl Into<String>, source: impl Into<String>) -> Self {
-        Self::new(name).with_source(source)
-    }
-
     /// Overrides the module identity.
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+    pub(crate) fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
     /// Sets inline module source.
-    pub fn with_source(mut self, source: impl Into<String>) -> Self {
+    pub(crate) fn with_source(mut self, source: impl Into<String>) -> Self {
         self.source = Some(source.into());
         self
     }
 
     /// Sets the native file used as the module source.
-    pub fn with_native_file(mut self, path: impl Into<PathBuf>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_native_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.native_file = Some(path.into());
         self
     }
@@ -477,20 +529,28 @@ impl ScriptOptions {
     /// The synchronous module loader does not fetch URLs. On web, supply source
     /// with [`Self::with_source`] (the directory-based startup loader fetches it).
     /// Watched modules are fetched again asynchronously during updates.
-    pub fn with_web_url(mut self, url: impl Into<String>) -> Self {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn with_web_url(mut self, url: impl Into<String>) -> Self {
         self.web_url = Some(url.into());
         self
     }
 
     /// Enables or disables source polling for reloads (native files or web URLs).
-    pub fn with_watch(mut self, watch: bool) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_watch(mut self, watch: bool) -> Self {
         self.watch = watch;
         self
     }
 
     /// Sets the source polling interval.
-    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_poll_interval(mut self, interval: Duration) -> Self {
         self.poll_interval = interval;
+        self
+    }
+
+    fn with_module_path(mut self, path: String) -> Self {
+        self.embedded_path = Some(path);
         self
     }
 
@@ -507,6 +567,9 @@ impl ScriptOptions {
     }
 
     pub(super) fn module_path(&self) -> String {
+        if let Some(path) = &self.embedded_path {
+            return path.clone();
+        }
         #[cfg(target_arch = "wasm32")]
         let path = self.web_url.clone();
         #[cfg(not(target_arch = "wasm32"))]

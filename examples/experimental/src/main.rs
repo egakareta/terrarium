@@ -1,12 +1,4 @@
-use std::{path::Path, sync::LazyLock};
-
-use terrarium::{App, AppCreationError, Engine, ScriptDirectories, Terrarium, egui};
-
-static SCRIPT_DIRECTORIES: LazyLock<ScriptDirectories> = LazyLock::new(|| {
-    ScriptDirectories::new()
-        .with_native_directory(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts"))
-        .with_web_directory("./scripts")
-});
+use terrarium::{App, AppCreationError, Engine, Terrarium, egui};
 
 struct GameApp;
 
@@ -31,17 +23,23 @@ fn initialize(engine: &mut Engine) -> Result<GameApp, AppCreationError> {
 
 fn main() {
     Terrarium::new()
-        .with_scripts_dir(SCRIPT_DIRECTORIES.clone())
+        .with_scripts(terrarium::scripts!("scripts"))
         .run(initialize)
         .unwrap();
 }
 
 #[test]
 fn app_loads() -> Result<(), terrarium::AppCreationError> {
+    use terrarium::{Instance, Part};
+
     Terrarium::new()
         .with_size([32, 32])
         .with_headless(Some(1))
-        .with_scripts_dir(SCRIPT_DIRECTORIES.clone())
-        .run(initialize)?;
+        .with_scripts(terrarium::scripts!("scripts"))
+        .run(|engine| {
+            let app = initialize(engine)?;
+            assert!(engine.workspace.get_all::<Part>().any(|part| part.name() == "Orb"));
+            Ok::<_, AppCreationError>(app)
+        })?;
     Ok(())
 }

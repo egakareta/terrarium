@@ -13,7 +13,7 @@ default = [
   "javascript",
   "hot-reload",
 ]
-javascript = ["dep:rquickjs"]
+javascript = ["dep:rquickjs", "dep:include_dir"]
 hot-reload = ["javascript", "dep:notify"]
 meshpart = ["dep:gltf"]
 physics = ["dep:rapier3d"]
@@ -29,6 +29,7 @@ env_logger = "0.11"
 glam = "0.33"
 gltf = { version = "1", optional = true }
 image = { version = "0.25" }
+include_dir = { version = "0.7", optional = true }
 log = "0.4"
 rapier3d = { version = "0.35", optional = true }
 rustc-hash = "2"
