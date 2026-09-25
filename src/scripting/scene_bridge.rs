@@ -32,7 +32,7 @@ pub(super) fn install_instance_bridge(
         let create_next_handle = Rc::clone(&next_handle);
         let create_live_handles = Rc::clone(&live_handles);
         ctx.globals().set(
-            "__terrarium_create_instance",
+            "__internal_create_instance",
             Function::new(
                 ctx.clone(),
                 move |type_name: String, options: Option<Object<'_>>| {
@@ -56,7 +56,7 @@ pub(super) fn install_instance_bridge(
 
         let active_commands = Rc::clone(&commands);
         ctx.globals().set(
-            "__terrarium_is_active",
+            "__internal_is_active",
             Function::new(ctx.clone(), move |handle: u64| {
                 Ok::<_, Error>(
                     live_handles.borrow().contains(&handle)
@@ -69,20 +69,20 @@ pub(super) fn install_instance_bridge(
 
         install_instance_function(
             &ctx,
-            "__terrarium_destroy_instance",
+            "__internal_destroy_instance",
             Rc::clone(&commands),
             EngineCommand::RemoveInstance,
         )?;
         install_instance_vec3_function(
             &ctx,
-            "__terrarium_set_position",
+            "__internal_set_position",
             Rc::clone(&commands),
             |handle, position| EngineCommand::SetPosition { handle, position },
             "position",
         )?;
         install_instance_vec3_function(
             &ctx,
-            "__terrarium_set_orientation",
+            "__internal_set_orientation",
             Rc::clone(&commands),
             |handle, orientation| EngineCommand::SetOrientation {
                 handle,
@@ -92,14 +92,14 @@ pub(super) fn install_instance_bridge(
         )?;
         install_instance_vec3_function(
             &ctx,
-            "__terrarium_set_size",
+            "__internal_set_size",
             Rc::clone(&commands),
             |handle, size| EngineCommand::SetSize { handle, size },
             "size",
         )?;
         install_instance_vec3_function(
             &ctx,
-            "__terrarium_set_color",
+            "__internal_set_color",
             Rc::clone(&commands),
             |handle, value| EngineCommand::SetColor {
                 handle,
@@ -110,7 +110,7 @@ pub(super) fn install_instance_bridge(
 
         let name_commands = Rc::clone(&commands);
         ctx.globals().set(
-            "__terrarium_set_name",
+            "__internal_set_name",
             Function::new(ctx.clone(), move |handle: u64, name: String| {
                 name_commands
                     .borrow_mut()
@@ -120,7 +120,7 @@ pub(super) fn install_instance_bridge(
         )?;
         let transparency_commands = Rc::clone(&commands);
         ctx.globals().set(
-            "__terrarium_set_transparency",
+            "__internal_set_transparency",
             Function::new(ctx.clone(), move |handle: u64, value: f32| {
                 transparency_commands
                     .borrow_mut()
@@ -133,7 +133,7 @@ pub(super) fn install_instance_bridge(
         )?;
         let anchored_commands = Rc::clone(&commands);
         ctx.globals().set(
-            "__terrarium_set_anchored",
+            "__internal_set_anchored",
             Function::new(ctx.clone(), move |handle: u64, value: bool| {
                 anchored_commands
                     .borrow_mut()
@@ -146,7 +146,7 @@ pub(super) fn install_instance_bridge(
         )?;
         let collision_commands = Rc::clone(&commands);
         ctx.globals().set(
-            "__terrarium_set_can_collide",
+            "__internal_set_can_collide",
             Function::new(ctx.clone(), move |handle: u64, value: bool| {
                 collision_commands
                     .borrow_mut()

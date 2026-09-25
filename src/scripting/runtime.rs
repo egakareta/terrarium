@@ -206,7 +206,7 @@ fn construct_class<'js>(
     for dependency in dependencies {
         values.push(construct_class(ctx, namespace, source, &dependency, cache)?);
     }
-    let construct: Function = ctx.globals().get("__terrarium_construct")?;
+    let construct: Function = ctx.globals().get("__internal_construct")?;
     let instance: Object = construct.call((constructor, values))?;
     cache.insert(class_name.to_owned(), instance.clone());
     Ok(instance)

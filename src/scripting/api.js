@@ -1,4 +1,4 @@
-globalThis.__terrarium_construct = (constructor, args) => Reflect.construct(constructor, args);
+globalThis.__internal_construct = (constructor, args) => Reflect.construct(constructor, args);
 
 globalThis.Instance = ((
   create,
@@ -71,27 +71,27 @@ globalThis.Instance = ((
       return this;
     }
   })(
-  __terrarium_create_instance,
-  __terrarium_destroy_instance,
-  __terrarium_set_position,
-  __terrarium_set_orientation,
-  __terrarium_set_size,
-  __terrarium_set_color,
-  __terrarium_set_name,
-  __terrarium_set_transparency,
-  __terrarium_set_anchored,
-  __terrarium_set_can_collide,
-  __terrarium_is_active,
+  __internal_create_instance,
+  __internal_destroy_instance,
+  __internal_set_position,
+  __internal_set_orientation,
+  __internal_set_size,
+  __internal_set_color,
+  __internal_set_name,
+  __internal_set_transparency,
+  __internal_set_anchored,
+  __internal_set_can_collide,
+  __internal_is_active,
 );
 
-delete globalThis.__terrarium_create_instance;
-delete globalThis.__terrarium_destroy_instance;
-delete globalThis.__terrarium_set_position;
-delete globalThis.__terrarium_set_orientation;
-delete globalThis.__terrarium_set_size;
-delete globalThis.__terrarium_set_color;
-delete globalThis.__terrarium_set_name;
-delete globalThis.__terrarium_set_transparency;
-delete globalThis.__terrarium_set_anchored;
-delete globalThis.__terrarium_set_can_collide;
-delete globalThis.__terrarium_is_active;
+delete globalThis.__internal_create_instance;
+delete globalThis.__internal_destroy_instance;
+delete globalThis.__internal_set_position;
+delete globalThis.__internal_set_orientation;
+delete globalThis.__internal_set_size;
+delete globalThis.__internal_set_color;
+delete globalThis.__internal_set_name;
+delete globalThis.__internal_set_transparency;
+delete globalThis.__internal_set_anchored;
+delete globalThis.__internal_set_can_collide;
+delete globalThis.__internal_is_active;
