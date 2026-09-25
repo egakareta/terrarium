@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>this is terrarium</title>
+    <!-- rquickjs setup -->
+    <script type="importmap">
+      {
+        "imports": {
+          "env": "data:text/javascript,export function __rquickjs_host_now_us(){return Date.now()*1000};export const memory=new WebAssembly.Memory({initial:95,maximum:16384,shared:true})"
+        }
+      }
+    </script>
+    <link data-trunk rel="rust" href="Cargo.toml" />
+    <link data-trunk rel="copy-dir" href="scripts" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #101014;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="app"></canvas>
+  </body>
+</html>

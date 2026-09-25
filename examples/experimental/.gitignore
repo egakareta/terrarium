@@ -1,0 +1,7 @@
+# terrarium setup output
+terrarium.d.ts
+jsconfig.json
+scripts/manifest.json
+
+# rust
+target

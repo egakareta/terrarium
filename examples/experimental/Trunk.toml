@@ -1,0 +1,16 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[[hooks]]
+stage = "pre_build"
+command = "terrarium"
+command_arguments = ["setup"]
+
+[serve.headers]
+"cross-origin-embedder-policy" = "require-corp"
+"cross-origin-opener-policy" = "same-origin"
+"cross-origin-resource-policy" = "same-site"
+
+[watch]
+ignore = ["scripts"]

@@ -145,6 +145,10 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.name()
             }
 
+            fn set_name(&mut self, name: String) {
+                self.$data $(.$data_tail)*.set_name(name);
+            }
+
             fn with_name(mut self, name: impl Into<String>) -> Self {
                 self.$data $(.$data_tail)*.set_name(name.into());
                 self
@@ -418,6 +422,9 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// This is the class name e.g. `"Part"`, `"PointLight"` if
     /// not explicitly set.
     fn name(&self) -> &str;
+
+    /// Replaces this instance's display name in place.
+    fn set_name(&mut self, name: String);
 
     /// Returns this instance with its display name set.
     fn with_name(self, name: impl Into<String>) -> Self

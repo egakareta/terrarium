@@ -23,6 +23,7 @@ eframe-default-fonts = ["eframe/default_fonts"]
 
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 eframe = { version = "0.36", default-features = false, features = ["wayland", "wgpu", "x11"] }
 env_logger = "0.11"
 glam = "0.33"
@@ -31,8 +32,8 @@ image = { version = "0.25" }
 log = "0.4"
 rapier3d = { version = "0.35", optional = true }
 rustc-hash = "2"
-rquickjs = { version = "0.14", optional = true }
-serde = "1"
+rquickjs = { version = "0.14", features = ["loader"], optional = true }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slotmap = "1"
 thiserror = "2"
@@ -84,3 +85,7 @@ required-features = ["physics"]
 [[test]]
 name = "gpu"
 required-features = ["meshpart"]
+
+[[test]]
+name = "javascript"
+required-features = ["javascript"]

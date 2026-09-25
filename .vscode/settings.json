@@ -1,5 +1,6 @@
 {
   "rust-analyzer.testExplorer": true,
+  "rust-analyzer.linkedProjects": ["./Cargo.toml", "./examples/experimental/Cargo.toml"],
   "json.schemaDownload.trustedDomains": {
     "https://raw.githubusercontent.com/oxc-project/oxc/refs/heads/main/npm/oxfmt/configuration_schema.json": true
   },

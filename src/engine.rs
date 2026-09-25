@@ -13,6 +13,15 @@ use std::{
 };
 
 use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
+#[cfg(feature = "javascript")]
+use crate::{ScriptDirectories, ScriptHost, ScriptOptions};
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+unsafe extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(message: &str, error: &wasm_bindgen::JsValue);
+}
 
 const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
 
@@ -70,6 +79,9 @@ type RendererHandle = Rc<RefCell<Renderer>>;
 type RendererHandle = Arc<Mutex<Renderer>>;
 
 type EngineSlot = Rc<RefCell<Option<Engine>>>;
+
+#[cfg(feature = "javascript")]
+type PreloadedScripts = Rc<RefCell<Option<Result<Vec<ScriptOptions>, String>>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
 static DEFAULT_HEADLESS_RENDER_STATE: OnceLock<Result<egui_wgpu::RenderState, String>> =
@@ -188,6 +200,8 @@ pub struct Engine {
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
     clear_color: [f32; 4],
+    #[cfg(feature = "javascript")]
+    scripts: ScriptHost,
 }
 
 impl Engine {
@@ -217,6 +231,9 @@ impl Engine {
         #[cfg(not(target_arch = "wasm32"))]
         let renderer = Arc::new(Mutex::new(renderer));
 
+        #[cfg(feature = "javascript")]
+        let scripts = ScriptHost::new()?;
+
         #[cfg(target_arch = "wasm32")]
         let renderer_id = register_renderer(&renderer);
 
@@ -227,6 +244,8 @@ impl Engine {
             #[cfg(target_arch = "wasm32")]
             renderer_id,
             clear_color: DEFAULT_CLEAR_COLOR,
+            #[cfg(feature = "javascript")]
+            scripts,
         })
     }
 
@@ -246,6 +265,45 @@ impl Engine {
     /// app-creation callback returns.
     pub fn creation_context(&self) -> &eframe::CreationContext<'_> {
         &self.creation_context
+    }
+
+    /// Returns the JavaScript host associated with this engine.
+    #[cfg(feature = "javascript")]
+    pub fn scripts(&self) -> &ScriptHost {
+        &self.scripts
+    }
+
+    /// Loads a JavaScript module and applies instances created by its initialization hooks.
+    ///
+    /// [`crate::ScriptOptions`] can provide inline source, a native file, a web URL, or both
+    /// platform-specific locations in one configuration.
+    #[cfg(feature = "javascript")]
+    pub fn load_script(&mut self, options: crate::ScriptOptions) -> crate::JavaScriptResult<()> {
+        let result = self.scripts.load_module(options);
+        self.scripts.apply_commands(&mut self.workspace);
+        result
+    }
+
+    /// Reloads a JavaScript module and applies any scene changes from its lifecycle hooks.
+    #[cfg(feature = "javascript")]
+    pub fn reload_script(&mut self, name: &str, source: &str) -> crate::JavaScriptResult<()> {
+        let result = self.scripts.reload_module(name, source);
+        self.scripts.apply_commands(&mut self.workspace);
+        result
+    }
+
+    /// Unloads a JavaScript module and applies any scene changes from its `onUnload` hook.
+    #[cfg(feature = "javascript")]
+    pub fn unload_script(&mut self, name: &str) -> crate::JavaScriptResult<bool> {
+        let result = self.scripts.unload_module(name);
+        self.scripts.apply_commands(&mut self.workspace);
+        result
+    }
+
+    /// Stops hot reloading a JavaScript module.
+    #[cfg(all(feature = "javascript", feature = "hot-reload"))]
+    pub fn stop_script_watch(&mut self, name: &str) -> crate::JavaScriptResult<()> {
+        self.scripts.stop_module_watch(name)
     }
 
     /// Returns the color eframe should use to clear the window.
@@ -293,6 +351,18 @@ impl Engine {
                 )
         });
         self.workspace.update(delta);
+        #[cfg(feature = "javascript")]
+        {
+            if let Err(error) = self.scripts.update(delta) {
+                let module = self
+                    .scripts
+                    .take_last_update_error_module()
+                    .unwrap_or_else(|| "unknown module".to_owned());
+                let detail = self.scripts.format_error(&error);
+                log::error!("JavaScript update failed in `{module}`:\n{detail}");
+            }
+            self.scripts.apply_commands(&mut self.workspace);
+        }
         context.request_repaint();
     }
 
@@ -330,7 +400,11 @@ impl Engine {
         Ok(())
     }
 
-    fn start(config: Terrarium<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+    fn start(
+        config: Terrarium<'_>,
+        app_creator: eframe::AppCreator<'static>,
+        #[cfg(feature = "javascript")] _preloaded_scripts: PreloadedScripts,
+    ) -> eframe::Result {
         if config.env_logger {
             let _ = env_logger::try_init();
         }
@@ -415,7 +489,22 @@ impl Engine {
 
             let canvas_id = config.canvas_id.to_owned();
 
+            #[cfg(feature = "javascript")]
+            let scripts_dir = config.scripts_dir.clone();
+
             wasm_bindgen_futures::spawn_local(async move {
+                #[cfg(feature = "javascript")]
+                {
+                    let scripts = match scripts_dir {
+                        Some(directory) => directory
+                            .web_options()
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Ok(Vec::new()),
+                    };
+                    *_preloaded_scripts.borrow_mut() = Some(scripts);
+                }
+
                 let canvas = web_sys::window()
                     .and_then(|window| window.document())
                     .and_then(|document| document.get_element_by_id(&canvas_id))
@@ -428,10 +517,12 @@ impl Engine {
                     ..Default::default()
                 };
 
-                eframe::WebRunner::new()
+                if let Err(error) = eframe::WebRunner::new()
                     .start(canvas, web_options, app_creator)
                     .await
-                    .expect("failed to start eframe");
+                {
+                    console_error("failed to start eframe:", &error);
+                }
             });
 
             Ok(())
@@ -606,6 +697,8 @@ pub struct Terrarium<'a> {
     #[cfg(target_arch = "wasm32")]
     console_error_panic_hook: bool,
     bundle_fonts: bool,
+    #[cfg(feature = "javascript")]
+    scripts_dir: Option<ScriptDirectories>,
 }
 
 impl<'a> Default for Terrarium<'a> {
@@ -623,6 +716,8 @@ impl<'a> Default for Terrarium<'a> {
             #[cfg(target_arch = "wasm32")]
             console_error_panic_hook: true,
             bundle_fonts: cfg!(feature = "default-fonts"),
+            #[cfg(feature = "javascript")]
+            scripts_dir: None,
         }
     }
 }
@@ -657,24 +752,69 @@ impl<'a> Terrarium<'a> {
         let is_bundled_fonts = self.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
 
+        #[cfg(feature = "javascript")]
+        let preloaded_scripts: PreloadedScripts = Rc::new(RefCell::new(None));
+        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "javascript")]
+        let app_preloaded_scripts = Rc::clone(&preloaded_scripts);
+        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(feature = "javascript")]
+        let app_scripts_dir = self.scripts_dir.clone();
+
         let app_engine_slot = engine_slot.clone();
-        Engine::start(
-            self,
-            Box::new(move |creation_context| {
-                #[cfg(feature = "default-fonts")]
-                if is_bundled_fonts {
-                    creation_context.egui_ctx.set_fonts(font_definitions());
-                }
-                let engine = Engine::new(creation_context, size)?;
-                store_engine(&app_engine_slot, engine);
-                let app = with_engine(&app_engine_slot, initialize)
-                    .map_err(|error| -> AppCreationError { error.into() })?;
-                Ok(Box::new(AppAdapter {
-                    engine: app_engine_slot.clone(),
-                    app,
-                }))
-            }),
-        )?;
+        let app_creator: eframe::AppCreator<'static> = Box::new(move |creation_context| {
+            #[cfg(feature = "default-fonts")]
+            if is_bundled_fonts {
+                creation_context.egui_ctx.set_fonts(font_definitions());
+            }
+            let engine = Engine::new(creation_context, size)?;
+            store_engine(&app_engine_slot, engine);
+
+            #[cfg(feature = "javascript")]
+            {
+                #[cfg(target_arch = "wasm32")]
+                let options = app_preloaded_scripts
+                    .borrow_mut()
+                    .take()
+                    .expect("web script preload should complete before app creation")
+                    .map_err(std::io::Error::other)?;
+
+                #[cfg(not(target_arch = "wasm32"))]
+                let options = match &app_scripts_dir {
+                    Some(directory) => directory
+                        .native_options()
+                        .map_err(|error| -> AppCreationError { error.into() })?,
+                    None => Vec::new(),
+                };
+
+                with_engine(&app_engine_slot, |engine| {
+                    engine.scripts.register_sources(&options);
+                    for options in options {
+                        let name = options.identity();
+                        if let Err(error) = engine.load_script(options) {
+                            let detail = engine.scripts.format_error(&error);
+                            return Err(std::io::Error::other(format!(
+                                "failed to load script `{name}`: {detail}"
+                            ))
+                            .into());
+                        }
+                    }
+                    Ok::<_, AppCreationError>(())
+                })?;
+            }
+
+            let app = with_engine(&app_engine_slot, initialize)
+                .map_err(|error| -> AppCreationError { error.into() })?;
+            Ok(Box::new(AppAdapter {
+                engine: app_engine_slot.clone(),
+                app,
+            }) as Box<dyn eframe::App>)
+        });
+
+        #[cfg(feature = "javascript")]
+        Engine::start(self, app_creator, preloaded_scripts)?;
+        #[cfg(not(feature = "javascript"))]
+        Engine::start(self, app_creator)?;
 
         Ok(take_engine(engine_slot))
     }
@@ -713,6 +853,17 @@ impl<'a> Terrarium<'a> {
     /// The window size on native platforms.
     pub fn with_size(mut self, size: [u32; 2]) -> Self {
         self.size = size;
+        self
+    }
+
+    /// Configures the directory containing JavaScript scripts and its generated manifest.
+    ///
+    /// The manifest is generated by [`crate::setup_script_project`]. Native applications can
+    /// still discover scripts when the manifest has not been generated yet; web applications
+    /// require the manifest to be included in the copied directory.
+    #[cfg(feature = "javascript")]
+    pub fn with_scripts_dir(mut self, scripts_dir: ScriptDirectories) -> Self {
+        self.scripts_dir = Some(scripts_dir);
         self
     }
 
