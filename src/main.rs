@@ -27,10 +27,7 @@ fn main() -> ExitCode {
 
     #[cfg(feature = "javascript")]
     match terrarium::setup_script_project(&directory) {
-        Ok(()) => {
-            println!("terrarium installed into {}", directory.display());
-            ExitCode::SUCCESS
-        }
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("failed to set up {}: {error}", directory.display());
             ExitCode::from(1)
