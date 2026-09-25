@@ -1,8 +1,15 @@
 import { orbitPosition } from "./ring.js";
 import { towerLevels } from "./tower.js";
+// oxlint-disable-next-line no-unused-vars
+import Ring from "./ring.js";
 
 /** @implements {Component} */
 export default class Scene {
+  /** @param {Ring} ring */
+  constructor(ring) {
+    this.ring = ring;
+  }
+
   onInit() {
     log("scene initialized");
   }

@@ -24,10 +24,10 @@ pub use discovery::{SCRIPTING_TYPES, ScriptProject, setup_script_project};
 pub(crate) type JavaScriptResult<T> = Result<T, Error>;
 
 mod runtime;
-use runtime::{BuiltModule, JavaScriptRuntime, build_module};
+use runtime::{BuiltModule, BuiltScriptNode, JavaScriptRuntime, build_module};
 
 struct ScriptModule {
-    instance: Persistent<Object<'static>>,
+    constructors: Vec<Persistent<Function<'static>>>,
     module_path: String,
     native_file: Option<PathBuf>,
     #[cfg(target_arch = "wasm32")]
@@ -43,8 +43,83 @@ struct ScriptModule {
     last_poll: Instant,
 }
 
+struct ScriptDependencyNode {
+    instance: Persistent<Object<'static>>,
+    owners: Vec<String>,
+}
+
+#[derive(Default)]
+struct ScriptDependencyGraph {
+    nodes: HashMap<Persistent<Function<'static>>, ScriptDependencyNode>,
+    order: Vec<Persistent<Function<'static>>>,
+}
+
+impl ScriptDependencyGraph {
+    fn known_instances(
+        &self,
+    ) -> HashMap<Persistent<Function<'static>>, Persistent<Object<'static>>> {
+        self.nodes
+            .iter()
+            .map(|(constructor, node)| (constructor.clone(), node.instance.clone()))
+            .collect()
+    }
+
+    fn retain(&mut self, owner: &str, nodes: &[BuiltScriptNode]) {
+        for built_node in nodes {
+            if let Some(node) = self.nodes.get_mut(&built_node.constructor) {
+                node.owners.push(owner.to_owned());
+            } else {
+                self.nodes.insert(
+                    built_node.constructor.clone(),
+                    ScriptDependencyNode {
+                        instance: built_node.instance.clone(),
+                        owners: vec![owner.to_owned()],
+                    },
+                );
+                self.order.push(built_node.constructor.clone());
+            }
+        }
+    }
+
+    fn orphaned_instances(
+        &self,
+        owner: &str,
+        constructors: &[Persistent<Function<'static>>],
+        retained: &HashSet<Persistent<Function<'static>>>,
+    ) -> Vec<Persistent<Object<'static>>> {
+        constructors
+            .iter()
+            .filter(|constructor| !retained.contains(*constructor))
+            .filter_map(|constructor| {
+                let node = self.nodes.get(constructor)?;
+                node.owners
+                    .iter()
+                    .all(|node_owner| node_owner == owner)
+                    .then(|| node.instance.clone())
+            })
+            .collect()
+    }
+
+    fn release(&mut self, owner: &str, constructors: &[Persistent<Function<'static>>]) {
+        for constructor in constructors {
+            if let Some(node) = self.nodes.get_mut(constructor)
+                && let Some(index) = node
+                    .owners
+                    .iter()
+                    .position(|node_owner| node_owner == owner)
+            {
+                node.owners.remove(index);
+            }
+        }
+        self.nodes.retain(|_, node| !node.owners.is_empty());
+        self.order
+            .retain(|constructor| self.nodes.contains_key(constructor));
+    }
+}
+
 struct ScriptHostInner {
     modules: HashMap<String, ScriptModule>,
+    dependency_graph: ScriptDependencyGraph,
     handles: HashMap<u64, InstanceId>,
     live_handles: Rc<RefCell<HashSet<u64>>>,
     commands: Rc<RefCell<Vec<EngineCommand>>>,
@@ -89,6 +164,7 @@ impl ScriptHost {
         Ok(Self {
             inner: Rc::new(RefCell::new(ScriptHostInner {
                 modules: HashMap::new(),
+                dependency_graph: ScriptDependencyGraph::default(),
                 handles: HashMap::new(),
                 live_handles,
                 commands,
@@ -115,9 +191,17 @@ impl ScriptHost {
         let previous_source = inner.runtime.register_source(&options);
         let result = with_command_rollback(&mut inner, |inner| {
             let source = options.load_source()?;
-            let module = build_module(&inner.runtime, &options.module_path(), &source)?;
-            call_hook(&inner.runtime, &module.instance, "onInit")?;
-            call_hook(&inner.runtime, &module.instance, "onLoad")?;
+            let known_instances = inner.dependency_graph.known_instances();
+            let module = build_module(
+                &inner.runtime,
+                &options.module_path(),
+                &source,
+                &known_instances,
+            )?;
+            let new_instances = newly_created_instances(&module.nodes);
+            call_hooks(&inner.runtime, &new_instances, "onInit", false)?;
+            call_hooks(&inner.runtime, &new_instances, "onLoad", false)?;
+            inner.dependency_graph.retain(&name, &module.nodes);
             inner
                 .modules
                 .insert(name, ScriptModule::from_options(module, options));
@@ -147,11 +231,21 @@ impl ScriptHost {
         if !inner.modules.contains_key(name) {
             return Ok(false);
         }
+        let constructors = inner
+            .modules
+            .get(name)
+            .expect("module exists")
+            .constructors
+            .clone();
+        let orphaned =
+            inner
+                .dependency_graph
+                .orphaned_instances(name, &constructors, &HashSet::new());
         with_command_rollback(&mut inner, |inner| {
-            let module = inner.modules.get(name).expect("module exists");
-            call_hook(&inner.runtime, &module.instance, "onUnload")
+            call_hooks(&inner.runtime, &orphaned, "onUnload", true)
         })?;
-        inner.modules.remove(name);
+        let module = inner.modules.remove(name).expect("module exists");
+        inner.dependency_graph.release(name, &module.constructors);
         Ok(true)
     }
 
@@ -209,20 +303,34 @@ impl ScriptHost {
         #[cfg(target_arch = "wasm32")]
         poll_web_sources(&mut inner, now)?;
 
-        let names = inner.modules.keys().cloned().collect::<Vec<_>>();
-        for name in names {
-            let module = inner.modules.get(&name).expect("module exists");
-            if module.update_failed {
-                continue;
-            }
-            let instance = &module.instance;
-            if let Err(error) = call_update(&inner.runtime, instance, delta_time) {
-                inner
-                    .modules
-                    .get_mut(&name)
-                    .expect("module exists")
-                    .update_failed = true;
-                inner.last_update_error_module = Some(name);
+        let updates = inner
+            .dependency_graph
+            .order
+            .iter()
+            .filter_map(|constructor| {
+                let node = inner.dependency_graph.nodes.get(constructor)?;
+                let active_owners = node
+                    .owners
+                    .iter()
+                    .filter(|owner| {
+                        inner
+                            .modules
+                            .get(owner.as_str())
+                            .is_some_and(|module| !module.update_failed)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (!active_owners.is_empty()).then(|| (node.instance.clone(), active_owners))
+            })
+            .collect::<Vec<_>>();
+        for (instance, owners) in updates {
+            if let Err(error) = call_update(&inner.runtime, &instance, delta_time) {
+                for owner in &owners {
+                    if let Some(module) = inner.modules.get_mut(owner) {
+                        module.update_failed = true;
+                    }
+                }
+                inner.last_update_error_module = owners.first().cloned();
                 return Err(error);
             }
         }
@@ -283,27 +391,55 @@ fn reload_inner(
         .modules
         .get(name)
         .ok_or_else(|| Error::new_from_js_message("module", "loaded module", name))?;
-    let replacement = build_module(&inner.runtime, &old.module_path, source)?;
+    let old_constructors = old.constructors.clone();
+    let old_module_path = old.module_path.clone();
+    let old_native_file = old.native_file.clone();
+    #[cfg(target_arch = "wasm32")]
+    let old_web_url = old.web_url.clone();
+    #[cfg(target_arch = "wasm32")]
+    let old_poll_in_flight = old.poll_in_flight;
+    let old_watch = old.watch;
+    let old_poll_interval = old.poll_interval;
+    let old_last_modified = old.last_modified;
+    let known_instances = inner.dependency_graph.known_instances();
+    let replacement = build_module(&inner.runtime, &old_module_path, source, &known_instances)?;
+    let replacement_constructors = replacement
+        .nodes
+        .iter()
+        .map(|node| node.constructor.clone())
+        .collect::<HashSet<_>>();
+    let orphaned = inner.dependency_graph.orphaned_instances(
+        name,
+        &old_constructors,
+        &replacement_constructors,
+    );
+    let new_instances = newly_created_instances(&replacement.nodes);
     // Prepare the replacement before letting the old module tear down its scene.
-    call_hook(&inner.runtime, &replacement.instance, "onInit")?;
-    call_hook(&inner.runtime, &replacement.instance, "onLoad")?;
-    call_hook(&inner.runtime, &replacement.instance, "onReload")?;
-    call_hook(&inner.runtime, &old.instance, "onBeforeReload")?;
-    call_hook(&inner.runtime, &old.instance, "onUnload")?;
+    call_hooks(&inner.runtime, &new_instances, "onInit", false)?;
+    call_hooks(&inner.runtime, &new_instances, "onLoad", false)?;
+    call_hooks(&inner.runtime, &new_instances, "onReload", false)?;
+    call_hooks(&inner.runtime, &orphaned, "onBeforeReload", true)?;
+    call_hooks(&inner.runtime, &orphaned, "onUnload", true)?;
+    inner.dependency_graph.retain(name, &replacement.nodes);
+    inner.dependency_graph.release(name, &old_constructors);
     let module = ScriptModule {
-        instance: replacement.instance,
-        module_path: old.module_path.clone(),
-        native_file: old.native_file.clone(),
+        constructors: replacement
+            .nodes
+            .into_iter()
+            .map(|node| node.constructor)
+            .collect(),
+        module_path: old_module_path,
+        native_file: old_native_file,
         #[cfg(target_arch = "wasm32")]
-        web_url: old.web_url.clone(),
+        web_url: old_web_url,
         #[cfg(target_arch = "wasm32")]
         last_source: Some(source.to_owned()),
         #[cfg(target_arch = "wasm32")]
-        poll_in_flight: old.poll_in_flight,
-        watch: old.watch,
+        poll_in_flight: old_poll_in_flight,
+        watch: old_watch,
         update_failed: false,
-        poll_interval: old.poll_interval,
-        last_modified: modified.or(old.last_modified),
+        poll_interval: old_poll_interval,
+        last_modified: modified.or(old_last_modified),
         last_poll: Instant::now(),
     };
     inner.modules.insert(name.to_owned(), module);
@@ -317,7 +453,11 @@ impl ScriptModule {
             .as_ref()
             .and_then(|path| fs::metadata(path).ok()?.modified().ok());
         Self {
-            instance: module.instance,
+            constructors: module
+                .nodes
+                .into_iter()
+                .map(|node| node.constructor)
+                .collect(),
             module_path: options.module_path(),
             native_file: options.native_file,
             #[cfg(target_arch = "wasm32")]
@@ -430,6 +570,32 @@ fn call_hook(
         }
         result
     })
+}
+
+fn call_hooks(
+    runtime: &JavaScriptRuntime,
+    instances: &[Persistent<Object<'static>>],
+    name: &str,
+    reverse: bool,
+) -> JavaScriptResult<()> {
+    if reverse {
+        for instance in instances.iter().rev() {
+            call_hook(runtime, instance, name)?;
+        }
+    } else {
+        for instance in instances {
+            call_hook(runtime, instance, name)?;
+        }
+    }
+    Ok(())
+}
+
+fn newly_created_instances(module_nodes: &[BuiltScriptNode]) -> Vec<Persistent<Object<'static>>> {
+    module_nodes
+        .iter()
+        .filter(|node| node.is_new)
+        .map(|node| node.instance.clone())
+        .collect()
 }
 
 fn call_update(
@@ -759,6 +925,105 @@ mod tests {
         assert_eq!(
             workspace.get_all::<Part>().next().unwrap().name(),
             "injected"
+        );
+    }
+
+    #[test]
+    fn imported_dependency_graph_runs_lifecycle_hooks_in_graph_order() {
+        let host = ScriptHost::new().unwrap();
+        let orbit_source = r#"
+            globalThis.lifecycleTrace = [];
+            export default class Orbit {
+                onInit() { globalThis.lifecycleTrace.push("orbit:init"); }
+                onLoad() { globalThis.lifecycleTrace.push("orbit:load"); }
+                onUpdate() { globalThis.lifecycleTrace.push("orbit:update"); }
+                onUnload() {
+                    globalThis.lifecycleTrace.push("orbit:unload");
+                    globalThis.lifecyclePart.setName(globalThis.lifecycleTrace.join("|"));
+                }
+            }
+        "#;
+        let ring_source = r#"
+            import Orbit from "./orbit.js";
+            export default class Ring {
+                /** @param {Orbit} orbit */
+                constructor(orbit) { this.orbit = orbit; }
+                onInit() { globalThis.lifecycleTrace.push("ring:init"); }
+                onLoad() { globalThis.lifecycleTrace.push("ring:load"); }
+                onUpdate() { globalThis.lifecycleTrace.push("ring:update"); }
+                onUnload() {
+                    globalThis.lifecycleTrace.push("ring:unload");
+                    globalThis.lifecyclePart.setName(globalThis.lifecycleTrace.join("|"));
+                }
+            }
+        "#;
+        host.register_sources(&[
+            ScriptOptions::new("orbit.js").with_source(orbit_source),
+            ScriptOptions::new("ring.js").with_source(ring_source),
+        ]);
+        host.load_module(ScriptOptions::new("ring.js").with_source(ring_source))
+            .unwrap();
+        host.load_module(ScriptOptions::new("scene.js").with_source(
+            r#"
+                import Ring from "./ring.js";
+                import Orbit from "./orbit.js";
+                export default class Scene {
+                    /**
+                     * @param {Ring} ring
+                     * @param {Orbit} orbit
+                     */
+                    constructor(ring, orbit) {
+                        this.ring = ring;
+                        this.orbit = orbit;
+                    }
+                    onInit() { globalThis.lifecycleTrace.push("scene:init"); }
+                    onLoad() {
+                        globalThis.lifecycleTrace.push("scene:load");
+                        this.part = new Instance("Part", {
+                            name: globalThis.lifecycleTrace.join("|"),
+                        });
+                        globalThis.lifecyclePart = this.part;
+                    }
+                    onUpdate() {
+                        globalThis.lifecycleTrace.push("scene:update");
+                        this.part.setName(globalThis.lifecycleTrace.join("|"));
+                    }
+                    onUnload() {
+                        globalThis.lifecycleTrace.push("scene:unload");
+                        this.part.setName(globalThis.lifecycleTrace.join("|"));
+                    }
+                }
+            "#,
+        ))
+        .unwrap();
+
+        let mut workspace = Workspace::new();
+        host.apply_commands(&mut workspace);
+        let part = workspace.get_all::<Part>().next().unwrap();
+        assert_eq!(
+            part.name(),
+            "orbit:init|ring:init|orbit:load|ring:load|scene:init|scene:load"
+        );
+
+        host.update(1.0 / 60.0).unwrap();
+        host.apply_commands(&mut workspace);
+        let part = workspace.get_all::<Part>().next().unwrap();
+        assert!(
+            part.name()
+                .ends_with("orbit:update|ring:update|scene:update")
+        );
+
+        host.unload_module("scene.js").unwrap();
+        host.apply_commands(&mut workspace);
+        let part = workspace.get_all::<Part>().next().unwrap();
+        assert!(part.name().ends_with("scene:unload"));
+
+        host.unload_module("ring.js").unwrap();
+        host.apply_commands(&mut workspace);
+        let part = workspace.get_all::<Part>().next().unwrap();
+        assert!(
+            part.name()
+                .ends_with("scene:unload|ring:unload|orbit:unload")
         );
     }
 

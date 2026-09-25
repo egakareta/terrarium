@@ -66,7 +66,13 @@ declare class Instance {
   setCanCollide(canCollide: boolean): this;
 }
 
-/** Lifecycle implemented by the default-exported class of a script module. */
+/**
+ * Lifecycle implemented by the default-exported class of a script module.
+ *
+ * JSDoc constructor parameter types resolve to imported or local class bindings. Dependencies
+ * are shared across loaded script graphs. Hooks run dependency-first, with `onBeforeReload`
+ * and `onUnload` running in reverse order when the last graph releases them.
+ */
 interface Component {
   /** Runs once after the module class is constructed. */
   onInit?(): void | Promise<void>;
