@@ -34,6 +34,7 @@ interface PartOptions {
  * current script phase. Mutating a destroyed instance is ignored.
  */
 declare class Instance {
+  // TODO
   /** Creates a supported scene object. The current runtime supports `"Part"`. */
   constructor(type: "Part", options?: PartOptions);
 
