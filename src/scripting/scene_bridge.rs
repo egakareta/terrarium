@@ -5,7 +5,7 @@ use std::{
 };
 
 use glam::Vec3;
-use rquickjs::{Ctx, Error, Function, Object};
+use rquickjs::{Coerced, Ctx, Error, Function, Object, function::Rest};
 
 use super::{JavaScriptResult, JavaScriptRuntime};
 use crate::{
@@ -157,9 +157,15 @@ pub(super) fn install_instance_bridge(
                 Ok::<_, Error>(())
             })?,
         )?;
-        ctx.globals().set(
+        let console = Object::new(ctx.clone())?;
+        console.set(
             "log",
-            Function::new(ctx.clone(), |message: String| {
+            Function::new(ctx.clone(), |parts: Rest<Coerced<String>>| {
+                let message = parts
+                    .iter()
+                    .map(|part| part.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 #[cfg(not(target_arch = "wasm32"))]
                 log::info!("[javascript] {message}");
                 #[cfg(target_arch = "wasm32")]
@@ -167,6 +173,7 @@ pub(super) fn install_instance_bridge(
                 Ok::<_, Error>(())
             })?,
         )?;
+        ctx.globals().set("console", console)?;
         ctx.eval::<(), _>(INSTANCE_API)
     })
 }

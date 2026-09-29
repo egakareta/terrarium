@@ -88,8 +88,5 @@ interface Component {
   onReload?(): void | Promise<void>;
 }
 
-/** Elapsed Terrarium runtime time in seconds. */
+/** Elapsed run time in seconds. */
 declare const time: number;
-
-/** Writes a message to the Terrarium JavaScript log. */
-declare function log(message: string): void;

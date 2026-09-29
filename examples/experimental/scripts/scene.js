@@ -11,7 +11,7 @@ export default class Scene {
   }
 
   onInit() {
-    log("scene initialized");
+    console.log("scene", "initialized");
   }
 
   onLoad() {
