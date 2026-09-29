@@ -4,15 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = [
-  "meshpart",
-  "physics",
-  "default-skybox",
-  "default-fonts",
-  "eframe-default-fonts",
-  "javascript",
-  "hot-reload",
-]
+default = ["meshpart", "physics", "default-skybox", "default-fonts", "eframe-default-fonts"]
 javascript = ["dep:rquickjs", "dep:include_dir"]
 hot-reload = ["javascript", "dep:notify"]
 meshpart = ["dep:gltf"]
