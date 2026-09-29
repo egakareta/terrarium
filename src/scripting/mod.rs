@@ -1,3 +1,5 @@
+//! EXPERIMENTAL, DO NOT USE FOR PRODUCTION WORK
+
 use std::{
     cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
