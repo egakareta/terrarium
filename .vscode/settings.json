@@ -1,28 +1,8 @@
 {
   "rust-analyzer.testExplorer": true,
-  "rust-analyzer.linkedProjects": ["./Cargo.toml", "./examples/experimental/Cargo.toml"],
+  "rust-analyzer.cargo.features": "all",
   "json.schemaDownload.trustedDomains": {
     "https://raw.githubusercontent.com/oxc-project/oxc/refs/heads/main/npm/oxfmt/configuration_schema.json": true
-  },
-  "[javascript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode",
-    "editor.formatOnSave": true,
-    "editor.formatOnSaveMode": "file"
-  },
-  "[javascriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode",
-    "editor.formatOnSave": true,
-    "editor.formatOnSaveMode": "file"
-  },
-  "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode",
-    "editor.formatOnSave": true,
-    "editor.formatOnSaveMode": "file"
-  },
-  "[typescriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode",
-    "editor.formatOnSave": true,
-    "editor.formatOnSaveMode": "file"
   },
   "[toml]": {
     "editor.defaultFormatter": "oxc.oxc-vscode",

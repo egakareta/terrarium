@@ -78,7 +78,7 @@ pub(crate) fn attach_app(
         app.add_plugins(TerrariumPlugin);
     }
 
-    // Preserve any scene supplied by the caller before scripts and the initializer run.
+    // Preserve any scene supplied by the caller before the initializer runs.
     std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
     app.world_mut()
         .insert_non_send(EguiContext(context.clone()));
