@@ -205,6 +205,8 @@ pub struct Engine {
     clear_color: [f32; 4],
     #[cfg(feature = "javascript")]
     scripts: ScriptHost,
+    #[cfg(feature = "bevy")]
+    bevy_app: Option<bevy_app::App>,
 }
 
 impl Engine {
@@ -249,6 +251,8 @@ impl Engine {
             clear_color: DEFAULT_CLEAR_COLOR,
             #[cfg(feature = "javascript")]
             scripts,
+            #[cfg(feature = "bevy")]
+            bevy_app: None,
         })
     }
 
@@ -268,6 +272,18 @@ impl Engine {
     /// app-creation callback returns.
     pub fn creation_context(&self) -> &eframe::CreationContext<'_> {
         &self.creation_context
+    }
+
+    /// Returns the Bevy app attached through [`Terrarium::with_bevy`], if any.
+    #[cfg(feature = "bevy")]
+    pub fn bevy_app(&self) -> Option<&bevy_app::App> {
+        self.bevy_app.as_ref()
+    }
+
+    /// Returns mutable access to the Bevy app attached through [`Terrarium::with_bevy`], if any.
+    #[cfg(feature = "bevy")]
+    pub fn bevy_app_mut(&mut self) -> Option<&mut bevy_app::App> {
+        self.bevy_app.as_mut()
     }
 
     #[cfg(feature = "javascript")]
@@ -312,50 +328,26 @@ impl Engine {
 
     /// Processes camera input, advances the workspace, and requests the next frame.
     pub fn update(&mut self, context: &egui::Context) {
-        let delta = context.input(|input| input.stable_dt.min(0.1));
-        let egui_wants_pointer_input = context.egui_wants_pointer_input();
-        let egui_wants_keyboard_input = context.egui_wants_keyboard_input();
-        context.input(|input| {
-            self.workspace
-                .camera_controller_mut()
-                .process_eframe_input_with_capture(
-                    input,
-                    egui_wants_pointer_input,
-                    egui_wants_keyboard_input,
-                )
-        });
+        let delta = process_workspace_input(&mut self.workspace, context);
+        #[cfg(feature = "bevy")]
+        if let Some(app) = self.bevy_app.as_mut() {
+            let _delta = crate::bevy::update_app(app, &mut self.workspace, context, delta);
+            #[cfg(feature = "javascript")]
+            if let Some(delta) = _delta {
+                update_scripts(&mut self.scripts, &mut self.workspace, delta);
+            }
+            context.request_repaint();
+            return;
+        }
         self.workspace.update(delta);
         #[cfg(feature = "javascript")]
-        {
-            if let Err(error) = self.scripts.update(delta) {
-                let module = self
-                    .scripts
-                    .take_last_update_error_module()
-                    .unwrap_or_else(|| "unknown module".to_owned());
-                let detail = self.scripts.format_error(&error);
-                #[cfg(not(target_arch = "wasm32"))]
-                log::error!("JavaScript update failed in `{module}`:\n{detail}");
-                #[cfg(target_arch = "wasm32")]
-                console_error(
-                    &format!("JavaScript update failed in `{module}`:\n{detail}"),
-                    &wasm_bindgen::JsValue::NULL,
-                );
-            }
-            self.scripts.apply_commands(&mut self.workspace);
-        }
+        update_scripts(&mut self.scripts, &mut self.workspace, delta);
         context.request_repaint();
     }
 
     /// Prepares the workspace for the available eframe UI region.
     pub fn prepare(&mut self, ui: &mut egui::Ui) -> Result<(), RendererError> {
-        let rect = ui.max_rect();
-        let pixels_per_point = ui.pixels_per_point();
-        let size = [
-            (rect.width() * pixels_per_point).round().max(1.0) as u32,
-            (rect.height() * pixels_per_point).round().max(1.0) as u32,
-        ];
-        self.workspace.current_camera.resize(size[0], size[1]);
-        self.renderer().prepare_eframe_scene(&self.workspace, size)
+        prepare_workspace(&self.renderer, &mut self.workspace, ui)
     }
 
     /// Registers the paint callback for the workspace prepared with [`Self::prepare`].
@@ -516,6 +508,64 @@ impl Engine {
     }
 }
 
+fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -> f32 {
+    let delta = context.input(|input| input.stable_dt);
+    let delta = if delta.is_finite() {
+        delta.clamp(0.0, 0.1)
+    } else {
+        0.0
+    };
+    let egui_wants_pointer_input = context.egui_wants_pointer_input();
+    let egui_wants_keyboard_input = context.egui_wants_keyboard_input();
+    context.input(|input| {
+        workspace
+            .camera_controller_mut()
+            .process_eframe_input_with_capture(
+                input,
+                egui_wants_pointer_input,
+                egui_wants_keyboard_input,
+            )
+    });
+    delta
+}
+
+fn prepare_workspace(
+    renderer: &RendererHandle,
+    workspace: &mut Workspace,
+    ui: &mut egui::Ui,
+) -> Result<(), RendererError> {
+    let rect = ui.max_rect();
+    let pixels_per_point = ui.pixels_per_point();
+    let size = [
+        (rect.width() * pixels_per_point).round().max(1.0) as u32,
+        (rect.height() * pixels_per_point).round().max(1.0) as u32,
+    ];
+    workspace.current_camera.resize(size[0], size[1]);
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut renderer = renderer.lock().expect("engine renderer lock poisoned");
+    #[cfg(target_arch = "wasm32")]
+    let mut renderer = renderer.borrow_mut();
+    renderer.prepare_eframe_scene(workspace, size)
+}
+
+#[cfg(feature = "javascript")]
+fn update_scripts(scripts: &mut ScriptHost, workspace: &mut Workspace, delta: f32) {
+    if let Err(error) = scripts.update(delta) {
+        let module = scripts
+            .take_last_update_error_module()
+            .unwrap_or_else(|| "unknown module".to_owned());
+        let detail = scripts.format_error(&error);
+        #[cfg(not(target_arch = "wasm32"))]
+        log::error!("JavaScript update failed in `{module}`:\n{detail}");
+        #[cfg(target_arch = "wasm32")]
+        console_error(
+            &format!("JavaScript update failed in `{module}`:\n{detail}"),
+            &wasm_bindgen::JsValue::NULL,
+        );
+    }
+    scripts.apply_commands(workspace);
+}
+
 impl eframe::App for Engine {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         Engine::clear_color(self)
@@ -671,6 +721,8 @@ enum HeadlessMode {
 
 /// The primary entry point for configuring and running a Terrarium application.
 pub struct Terrarium<'a> {
+    #[cfg(feature = "bevy")]
+    bevy_app: Option<bevy_app::App>,
     title: &'a str,
     size: [u32; 2],
     #[cfg(target_arch = "wasm32")]
@@ -690,6 +742,8 @@ pub struct Terrarium<'a> {
 impl<'a> Default for Terrarium<'a> {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "bevy")]
+            bevy_app: None,
             title: "app",
             size: [1280, 720],
             #[cfg(target_arch = "wasm32")]
@@ -716,6 +770,18 @@ impl<'a> Terrarium<'a> {
         Self::default()
     }
 
+    /// Configures a Bevy app without changing the [`Self::run`] initializer or application callbacks.
+    ///
+    /// This only configures the launcher; the adapter is installed when `run(initialize)` creates
+    /// the engine. Terrarium adds [`crate::bevy::TerrariumPlugin`] when needed, drives Bevy from
+    /// [`Engine::update`], and still owns the event loop and renderer. Do not install Bevy's window
+    /// or render plugins. A finalized Bevy app must already contain `TerrariumPlugin`.
+    #[cfg(feature = "bevy")]
+    pub fn with_bevy(mut self, app: bevy_app::App) -> Self {
+        self.bevy_app = Some(app);
+        self
+    }
+
     /// Creates an [`Engine`] and runs the initialized [`App`].
     ///
     /// The initializer receives the engine after it has been created. Access eframe's creation
@@ -733,9 +799,18 @@ impl<'a> Terrarium<'a> {
         A: App,
         E: Into<AppCreationError>,
     {
-        let size = self.size;
+        #[cfg(feature = "bevy")]
+        let (bevy_app, launcher) = {
+            let mut launcher = self;
+            let app = launcher.bevy_app.take();
+            (app, launcher)
+        };
+        #[cfg(not(feature = "bevy"))]
+        let launcher = self;
+
+        let size = launcher.size;
         #[cfg(feature = "default-fonts")]
-        let is_bundled_fonts = self.bundle_fonts;
+        let is_bundled_fonts = launcher.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
 
         #[cfg(feature = "javascript")]
@@ -745,7 +820,7 @@ impl<'a> Terrarium<'a> {
         let app_preloaded_scripts = Rc::clone(&preloaded_scripts);
         #[cfg(not(target_arch = "wasm32"))]
         #[cfg(feature = "javascript")]
-        let app_scripts = self.scripts.clone();
+        let app_scripts = launcher.scripts.clone();
 
         let app_engine_slot = engine_slot.clone();
         let app_creator: eframe::AppCreator<'static> = Box::new(move |creation_context| {
@@ -754,6 +829,16 @@ impl<'a> Terrarium<'a> {
                 creation_context.egui_ctx.set_fonts(font_definitions());
             }
             let engine = Engine::new(creation_context, size)?;
+            #[cfg(feature = "bevy")]
+            let mut engine = engine;
+            #[cfg(feature = "bevy")]
+            if let Some(app) = bevy_app {
+                engine.bevy_app = Some(crate::bevy::attach_app(
+                    app,
+                    &mut engine.workspace,
+                    &creation_context.egui_ctx,
+                )?);
+            }
             store_engine(&app_engine_slot, engine);
 
             #[cfg(feature = "javascript")]
@@ -794,6 +879,12 @@ impl<'a> Terrarium<'a> {
 
             let app = with_engine(&app_engine_slot, initialize)
                 .map_err(|error| -> AppCreationError { error.into() })?;
+            #[cfg(feature = "bevy")]
+            with_engine(&app_engine_slot, |engine| {
+                if let Some(app) = engine.bevy_app.as_mut() {
+                    crate::bevy::finalize_app(app, &mut engine.workspace);
+                }
+            });
             Ok(Box::new(AppAdapter {
                 engine: app_engine_slot.clone(),
                 app,
@@ -801,9 +892,9 @@ impl<'a> Terrarium<'a> {
         });
 
         #[cfg(feature = "javascript")]
-        Engine::start(self, app_creator, preloaded_scripts)?;
+        Engine::start(launcher, app_creator, preloaded_scripts)?;
         #[cfg(not(feature = "javascript"))]
-        Engine::start(self, app_creator)?;
+        Engine::start(launcher, app_creator)?;
 
         Ok(take_engine(engine_slot))
     }

@@ -5,6 +5,7 @@ edition = "2024"
 
 [features]
 default = ["meshpart", "physics", "default-skybox", "default-fonts", "eframe-default-fonts"]
+bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 javascript = ["dep:rquickjs", "dep:include_dir"]
 hot-reload = ["javascript", "dep:notify"]
 meshpart = ["dep:gltf"]
@@ -14,6 +15,10 @@ default-fonts = []
 eframe-default-fonts = ["eframe/default_fonts"]
 
 [dependencies]
+bevy_app = { version = "0.19", features = ["web"], optional = true }
+bevy_ecs = { version = "0.19", optional = true }
+bevy_tasks = { version = "0.19", optional = true }
+bevy_time = { version = "0.19", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 clap = { version = "4", features = ["derive"] }
 eframe = { version = "0.36", default-features = false, features = ["wayland", "wgpu", "x11"] }
@@ -35,11 +40,7 @@ wgpu = "30"
 winit = "0.30"
 
 [dev-dependencies]
-bevy_app = "0.19"
-bevy_ecs = "0.19"
-bevy_state = "0.19"
-bevy_tasks = "0.19"
-bevy_time = "0.19"
+approx = "0.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 notify = { version = "8", optional = true }
@@ -64,6 +65,10 @@ web-sys = { version = "0.3", features = [
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [[example]]
+name = "bevy"
+required-features = ["bevy"]
+
+[[example]]
 name = "gltf"
 required-features = ["meshpart"]
 
@@ -74,6 +79,10 @@ required-features = ["meshpart"]
 [[example]]
 name = "physics"
 required-features = ["physics"]
+
+[[test]]
+name = "bevy"
+required-features = ["bevy"]
 
 [[test]]
 name = "gpu"

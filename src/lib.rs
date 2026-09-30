@@ -1,6 +1,8 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "bevy")]
+pub mod bevy;
 mod engine;
 mod instance;
 mod interpolation;
