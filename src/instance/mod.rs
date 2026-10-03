@@ -19,6 +19,8 @@ mod light;
 mod meshpart;
 mod outline;
 mod part;
+#[cfg(feature = "sound")]
+mod sound;
 mod workspace;
 pub use camera::*;
 pub use light::*;
@@ -26,6 +28,8 @@ pub use light::*;
 pub use meshpart::*;
 pub use outline::*;
 pub use part::*;
+#[cfg(feature = "sound")]
+pub use sound::*;
 pub use workspace::*;
 
 #[derive(Default)]

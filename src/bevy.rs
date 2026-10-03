@@ -38,7 +38,7 @@ impl Plugin for TerrariumPlugin {
 /// Ordering boundaries for Terrarium systems in [`PostUpdate`].
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TerrariumSet {
-    /// Advances camera motion, tweens, and physics once using Bevy's virtual frame time.
+    /// Advances camera motion, tweens, physics, and audio once using Bevy's virtual frame time.
     ///
     /// Systems in `Update` run before this phase. Systems in `PostUpdate` can declare
     /// `.before(TerrariumSet::Advance)` or `.after(TerrariumSet::Advance)` as appropriate.

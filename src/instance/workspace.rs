@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+#[cfg(feature = "sound")]
+use crate::scene::audio::AudioRuntime;
 use crate::{
     Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Lighting,
     Texture, TextureError, TextureHandle, TweenManager,
@@ -19,6 +21,8 @@ pub struct Workspace {
     tween_manager: TweenManager,
     #[cfg(feature = "physics")]
     physics: PhysicsWorld,
+    #[cfg(feature = "sound")]
+    pub(crate) audio: AudioRuntime,
     #[cfg(feature = "meshpart")]
     meshes: Vec<MeshHandle>,
     textures: Vec<Texture>,
@@ -43,6 +47,8 @@ impl Workspace {
             tween_manager: TweenManager::default(),
             #[cfg(feature = "physics")]
             physics: PhysicsWorld::default(),
+            #[cfg(feature = "sound")]
+            audio: AudioRuntime::default(),
             #[cfg(feature = "meshpart")]
             meshes: Vec::new(),
             textures: Vec::new(),
@@ -193,12 +199,16 @@ impl Workspace {
             .update_camera(&mut self.current_camera, delta);
     }
 
-    /// Advances camera input, registered scene tweens, and physics when enabled.
+    /// Advances the simulation when enabled.
     pub fn update(&mut self, delta_seconds: f32) {
         self.update_camera(delta_seconds);
         self.update_tweens(delta_seconds);
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
+        #[cfg(feature = "sound")]
+        for error in self.update_audio(delta_seconds) {
+            log::error!("{error}");
+        }
     }
 
     /// Returns the workspace's Rapier physics world.
@@ -268,6 +278,8 @@ impl Clone for Workspace {
             tween_manager: self.tween_manager.clone(),
             #[cfg(feature = "physics")]
             physics: self.physics.clone_configuration(),
+            #[cfg(feature = "sound")]
+            audio: self.audio.clone_configuration(),
             #[cfg(feature = "meshpart")]
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
