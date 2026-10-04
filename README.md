@@ -4,7 +4,7 @@
 
 </div>
 
-`terrarium` is a simple, highly extensible 3D engine built around two core crates:
+`terrarium` is a simple, extensible 3D engine built around two core crates:
 
 - [wgpu](https://github.com/gfx-rs/wgpu) for 3D graphics
 - [eframe](https://github.com/emilk/egui) for 2D graphics
