@@ -1,5 +1,7 @@
 use std::rc::Rc;
 
+#[cfg(feature = "physics")]
+use crate::glam::{Mat4, Vec3};
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
@@ -10,6 +12,44 @@ use crate::{
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
 #[cfg(feature = "physics")]
 use crate::{PhysicsInstance, PhysicsWorld, apply_transform};
+
+/// Parameters for querying colliders intersecting a world-space box.
+#[cfg(feature = "physics")]
+#[derive(Clone, Debug)]
+pub struct BoxOverlapQuery {
+    pub(crate) transform: Mat4,
+    pub(crate) size: Vec3,
+    pub(crate) excluded_instances: Vec<InstanceId>,
+    pub(crate) max_parts: usize,
+}
+
+#[cfg(feature = "physics")]
+impl BoxOverlapQuery {
+    /// Creates a box query from its world-space transform and full dimensions.
+    pub fn new(transform: Mat4, size: Vec3) -> Self {
+        Self {
+            transform,
+            size,
+            excluded_instances: Vec::new(),
+            max_parts: 0,
+        }
+    }
+
+    /// Excludes parts with these instance IDs from the results.
+    pub fn with_excluded_instances(
+        mut self,
+        instances: impl IntoIterator<Item = InstanceId>,
+    ) -> Self {
+        self.excluded_instances.extend(instances);
+        self
+    }
+
+    /// Limits the number of returned parts; zero means no limit.
+    pub fn with_max_parts(mut self, max_parts: usize) -> Self {
+        self.max_parts = max_parts;
+        self
+    }
+}
 
 /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
 #[derive(Debug)]
@@ -161,6 +201,18 @@ impl Workspace {
     pub fn get_all<T: Instance>(&self) -> impl Iterator<Item = &T> {
         self.descendants()
             .filter_map(|instance| instance.downcast_ref::<T>())
+    }
+
+    /// Returns parts whose colliders intersect the box in `overlap_params`.
+    ///
+    /// Results are instance IDs in Rapier query order. Only parts with active
+    /// colliders are returned, so parts with `can_collide` disabled are omitted.
+    /// The query uses the physics world's most recently completed step, so call
+    /// [`Self::update`] with a positive delta after changing parts to sync them.
+    /// The box uses the transform's rotation and translation; its scale is ignored.
+    #[cfg(feature = "physics")]
+    pub fn get_part_bounds_in_box(&self, query: &BoxOverlapQuery) -> Vec<InstanceId> {
+        self.physics.get_part_bounds_in_box(query)
     }
 
     /// Removes a direct child by its stable identifier.

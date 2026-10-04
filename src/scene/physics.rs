@@ -2,13 +2,14 @@ use std::{collections::HashMap, fmt};
 
 use rapier3d::prelude::{
     ColliderBuilder, ColliderHandle, IntegrationParameters, PhysicsWorld as RapierPhysicsWorld,
-    RigidBody, RigidBodyBuilder, RigidBodyHandle, RigidBodyType,
+    QueryFilter, RigidBody, RigidBodyBuilder, RigidBodyHandle, RigidBodyType,
 };
 
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId, Part, PartShape,
+    BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId, Part,
+    PartShape,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -21,6 +22,7 @@ use crate::{
 pub struct PhysicsWorld {
     world: RapierPhysicsWorld,
     bodies: HashMap<InstanceId, BodyEntry>,
+    collider_instances: HashMap<ColliderHandle, InstanceId>,
     last_transforms: HashMap<InstanceId, Mat4>,
 }
 
@@ -52,6 +54,7 @@ impl PhysicsWorld {
         Self {
             world: RapierPhysicsWorld::new(),
             bodies: HashMap::new(),
+            collider_instances: HashMap::new(),
             last_transforms: HashMap::new(),
         }
     }
@@ -105,6 +108,39 @@ impl PhysicsWorld {
         self.world.bodies.get_mut(handle)
     }
 
+    pub(crate) fn get_part_bounds_in_box(&self, query: &BoxOverlapQuery) -> Vec<InstanceId> {
+        if !query
+            .transform
+            .to_cols_array()
+            .into_iter()
+            .all(f32::is_finite)
+            || !query.size.is_finite()
+        {
+            return Vec::new();
+        }
+
+        let half_size = (query.size.abs() * 0.5).max(Vec3::splat(0.001));
+        let query_shape = ColliderBuilder::cuboid(half_size.x, half_size.y, half_size.z).build();
+        let query_pose = rapier_pose(query.transform);
+        let mut results = Vec::new();
+        for (collider, _) in
+            self.world
+                .intersect_shape(query_pose, query_shape.shape(), QueryFilter::default())
+        {
+            let Some(instance) = self.collider_instances.get(&collider).copied() else {
+                continue;
+            };
+            if query.excluded_instances.contains(&instance) {
+                continue;
+            }
+            results.push(instance);
+            if query.max_parts != 0 && results.len() >= query.max_parts {
+                break;
+            }
+        }
+        results
+    }
+
     pub(crate) fn step(
         &mut self,
         instances: &[PhysicsInstance],
@@ -153,6 +189,9 @@ impl PhysicsWorld {
         for id in stale {
             if let Some(entry) = self.bodies.remove(&id) {
                 self.world.remove_body(entry.handle);
+                if let Some(collider) = entry.collider {
+                    self.collider_instances.remove(&collider);
+                }
             }
             self.last_transforms.remove(&id);
         }
@@ -175,10 +214,11 @@ impl PhysicsWorld {
         let builder = body_builder(instance);
         let handle = self.world.insert_body(builder);
         let collider = if instance.descriptor.can_collide {
-            Some(
-                self.world
-                    .insert_collider(collider_builder(instance.descriptor), Some(handle)),
-            )
+            let collider = self
+                .world
+                .insert_collider(collider_builder(instance.descriptor), Some(handle));
+            self.collider_instances.insert(collider, instance.id);
+            Some(collider)
         } else {
             None
         };
@@ -221,22 +261,28 @@ impl PhysicsWorld {
         if collider_changed {
             if let Some(collider) = entry.collider.take() {
                 self.world.remove_collider(collider);
+                self.collider_instances.remove(&collider);
             }
             if instance.descriptor.can_collide {
-                entry.collider = Some(
-                    self.world
-                        .insert_collider(collider_builder(instance.descriptor), Some(entry.handle)),
-                );
+                let collider = self
+                    .world
+                    .insert_collider(collider_builder(instance.descriptor), Some(entry.handle));
+                self.collider_instances.insert(collider, instance.id);
+                entry.collider = Some(collider);
             }
         } else if instance.descriptor.can_collide
             && entry
                 .collider
                 .is_none_or(|collider| self.world.colliders.get(collider).is_none())
         {
-            entry.collider = Some(
-                self.world
-                    .insert_collider(collider_builder(instance.descriptor), Some(entry.handle)),
-            );
+            if let Some(collider) = entry.collider.take() {
+                self.collider_instances.remove(&collider);
+            }
+            let collider = self
+                .world
+                .insert_collider(collider_builder(instance.descriptor), Some(entry.handle));
+            self.collider_instances.insert(collider, instance.id);
+            entry.collider = Some(collider);
         }
         entry.descriptor = instance.descriptor;
         self.bodies.insert(instance.id, entry);
@@ -378,7 +424,7 @@ fn matrices_approximately_equal(left: Mat4, right: Mat4) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HasPVInstance, HasPart, Workspace};
+    use crate::{BoxOverlapQuery, HasPVInstance, HasPart, Workspace};
 
     #[test]
     fn dynamic_parts_fall_and_rest_on_anchored_parts() {
@@ -405,5 +451,42 @@ mod tests {
         assert!(ball.position().y < 3.0);
         assert!(ball.position().y > 0.35);
         assert!(workspace.physics().body_handle(ball_id).is_some());
+    }
+
+    #[test]
+    fn workspace_box_overlap_query_uses_rapier_colliders_and_filters_instances() {
+        let mut workspace = Workspace::new();
+        let fixed_id = Part::new()
+            .with_position(Vec3::new(1.5, 0.0, 0.0))
+            .set_parent(&mut workspace);
+        let dynamic_id = Part::new()
+            .with_anchored(false)
+            .with_position(Vec3::new(-1.5, 0.0, 0.0))
+            .set_parent(&mut workspace);
+        let non_collidable_id = Part::new()
+            .with_can_collide(false)
+            .set_parent(&mut workspace);
+        Part::new()
+            .with_position(Vec3::new(5.0, 0.0, 0.0))
+            .set_parent(&mut workspace);
+
+        workspace.update(1.0 / 60.0);
+
+        let params = BoxOverlapQuery::new(Mat4::IDENTITY, Vec3::splat(4.0));
+        let overlaps = workspace.get_part_bounds_in_box(&params);
+        assert_eq!(overlaps.len(), 2);
+        assert!(overlaps.contains(&fixed_id));
+        assert!(overlaps.contains(&dynamic_id));
+        assert!(!overlaps.contains(&non_collidable_id));
+
+        let filtered_params = params.with_excluded_instances([fixed_id]);
+        assert_eq!(
+            workspace.get_part_bounds_in_box(&filtered_params),
+            vec![dynamic_id]
+        );
+
+        let limited_params =
+            BoxOverlapQuery::new(Mat4::IDENTITY, Vec3::splat(4.0)).with_max_parts(1);
+        assert_eq!(workspace.get_part_bounds_in_box(&limited_params).len(), 1);
     }
 }
