@@ -539,6 +539,16 @@ pub(super) fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> b
     true
 }
 
+pub(super) fn scaled_bounding_radius(local_radius: f32, transform: Mat4) -> f32 {
+    local_radius
+        * transform
+            .to_scale_rotation_translation()
+            .0
+            .abs()
+            .max_element()
+        * 1.01
+}
+
 pub(super) fn create_shadow_texture(
     device: &wgpu::Device,
     size: u32,

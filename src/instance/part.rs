@@ -1,7 +1,6 @@
 use crate::{
     Color3, DEFAULT_MATERIAL, Face, HasPVInstance, Instance, InstanceData, Material,
     MeshMaterialSlots, PVInstance, PartShape,
-    glam::{Mat4, Vec3},
 };
 
 /// A named, transformable scene node with optional collision metadata.
@@ -12,7 +11,6 @@ use crate::{
 pub struct BasePart {
     pub(crate) instance: InstanceData,
     pub(crate) pv_instance: PVInstance,
-    size: Vec3,
     color: Color3,
     transparency: f32,
     anchored: bool,
@@ -20,13 +18,12 @@ pub struct BasePart {
 }
 
 impl BasePart {
-    /// Creates a base part with identity transform, unit size, white tint,
+    /// Creates a base part with identity pose, unit scale, white tint,
     /// opaque rendering, and collision metadata enabled.
     pub fn new() -> Self {
         Self {
             instance: InstanceData::new("BasePart"),
             pv_instance: PVInstance::new(),
-            size: Vec3::ONE,
             color: Color3::WHITE,
             transparency: 0.0,
             anchored: true,
@@ -61,11 +58,6 @@ pub trait HasBasePart {
     /// Returns mutable access to the underlying [`BasePart`].
     fn base_part_mut(&mut self) -> &mut BasePart;
 
-    /// World-space scale applied to the unit primitive mesh.
-    fn size(&self) -> Vec3 {
-        self.base_part().size
-    }
-
     /// Tint.
     fn color(&self) -> Color3 {
         self.base_part().color
@@ -90,15 +82,6 @@ pub trait HasBasePart {
     /// `false`, while still simulating its rigid body.
     fn can_collide(&self) -> bool {
         self.base_part().can_collide
-    }
-
-    /// Sets the world-space scale applied to the unit primitive mesh.
-    fn with_size(mut self, size: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        self.base_part_mut().size = size;
-        self
     }
 
     /// Sets the tint.
@@ -165,26 +148,6 @@ impl<T: HasBasePart + ?Sized> HasBasePart for &mut T {
 
     fn base_part_mut(&mut self) -> &mut BasePart {
         (**self).base_part_mut()
-    }
-}
-
-/// Provides the full object-to-world transform, including volume.
-pub trait Transform {
-    /// Returns the 4x4 transform matrix for this object:
-    /// ```text
-    /// [s_x, 0,   0,   x]
-    /// [0,   s_y, 0,   y]
-    /// [0,   0,   s_z, z]
-    /// [0,   0,   0,   1]
-    /// ```
-    ///
-    /// Unlike [`HasPVInstance::pivot`], this includes volume.
-    fn transform(&self) -> Mat4;
-}
-
-impl Transform for BasePart {
-    fn transform(&self) -> Mat4 {
-        self.pivot() * Mat4::from_scale(self.size())
     }
 }
 
@@ -355,9 +318,10 @@ impl HasMaterials for Part {
 
 #[cfg(test)]
 mod tests {
-    use glam::Vec3;
+    use glam::{EulerRot, Quat, Vec3};
 
     use super::*;
+    use crate::glam::Mat4;
 
     #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {
@@ -370,6 +334,50 @@ mod tests {
 
         assert_eq!(part.position(), position);
         assert!((part.orientation() - orientation).abs().max_element() < 0.0001);
+    }
+
+    #[test]
+    fn pivot_carries_scale_through_pose_updates() {
+        let size = Vec3::new(2.0, 3.0, 4.0);
+        let position = Vec3::new(1.0, 2.0, 3.0);
+        let orientation = Vec3::new(10.0, 20.0, 30.0);
+        let part = Part::new()
+            .with_size(size)
+            .with_position(position)
+            .with_orientation(orientation);
+
+        let pivot = part.pivot();
+        let rotation = Quat::from_euler(
+            EulerRot::XYZ,
+            orientation.x.to_radians(),
+            orientation.y.to_radians(),
+            orientation.z.to_radians(),
+        );
+        let expected = Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size);
+
+        assert!(
+            (pivot.to_scale_rotation_translation().0 - size)
+                .abs()
+                .max_element()
+                < 0.0001
+        );
+        assert_eq!(pivot.w_axis.truncate(), position);
+        for (actual, expected) in pivot
+            .to_cols_array()
+            .into_iter()
+            .zip(expected.to_cols_array())
+        {
+            assert!((actual - expected).abs() < 0.0001);
+        }
+        assert_eq!(part.base_part().pivot(), pivot);
+
+        let moved = part.with_pose(Mat4::from_translation(Vec3::new(4.0, 5.0, 6.0)));
+        assert!(
+            (moved.pivot().to_scale_rotation_translation().0 - size)
+                .abs()
+                .max_element()
+                < 0.0001
+        );
     }
 
     #[test]

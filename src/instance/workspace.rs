@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 #[cfg(feature = "physics")]
-use crate::glam::{Mat4, Vec3};
+use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
@@ -18,18 +18,16 @@ use crate::{PhysicsInstance, PhysicsWorld, apply_transform};
 #[derive(Clone, Debug)]
 pub struct BoxOverlapQuery {
     pub(crate) transform: Mat4,
-    pub(crate) size: Vec3,
     pub(crate) excluded_instances: Vec<InstanceId>,
     pub(crate) max_parts: usize,
 }
 
 #[cfg(feature = "physics")]
 impl BoxOverlapQuery {
-    /// Creates a box query from its world-space transform and full dimensions.
-    pub fn new(transform: Mat4, size: Vec3) -> Self {
+    /// Creates a box query from its world-space transform.
+    pub fn new(transform: Mat4) -> Self {
         Self {
             transform,
-            size,
             excluded_instances: Vec::new(),
             max_parts: 0,
         }
@@ -209,7 +207,6 @@ impl Workspace {
     /// colliders are returned, so parts with `can_collide` disabled are omitted.
     /// The query uses the physics world's most recently completed step, so call
     /// [`Self::update`] with a positive delta after changing parts to sync them.
-    /// The box uses the transform's rotation and translation; its scale is ignored.
     #[cfg(feature = "physics")]
     pub fn get_part_bounds_in_box(&self, query: &BoxOverlapQuery) -> Vec<InstanceId> {
         self.physics.get_part_bounds_in_box(query)

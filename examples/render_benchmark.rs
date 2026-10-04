@@ -168,7 +168,7 @@ impl Benchmark {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        (&mut engine.current_camera).with_pivot(Mat4::from_rotation_translation(
+        (&mut engine.current_camera).with_pose(Mat4::from_rotation_translation(
             camera_rotation,
             camera_position * camera_scale,
         ));
@@ -197,9 +197,10 @@ impl Benchmark {
                         (motion.cos() * 18.0).to_radians(),
                         ((motion * 0.7).sin() * 10.0).to_radians(),
                     );
-                part.with_pivot(Mat4::from_rotation_translation(rotation, position))
+                part.with_pose(Mat4::from_rotation_translation(rotation, position))
                     .with_size(
-                        base.size() * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35),
+                        base.pivot().to_scale_rotation_translation().0
+                            * Vec3::new(1.0 + pulse, 1.0 + pulse * 0.6, 1.0 - pulse * 0.35),
                     )
                     .with_transparency(time.sin().max(0.0))
                     .with_color(Color3::new(
@@ -240,7 +241,7 @@ impl Benchmark {
             );
             let mut block = Part::new()
                 .with_shape(PartShape::Block)
-                .with_pivot(Mat4::from_rotation_translation(rotation, position))
+                .with_pose(Mat4::from_rotation_translation(rotation, position))
                 .with_size(Vec3::splat(0.82))
                 .with_color(color);
             if self.random_f32() < 1.0 / TEXTURED_PART_DIVISOR as f32 {
@@ -270,9 +271,7 @@ impl Benchmark {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
         if let Some(part) = engine.get_mut::<Part>(id) {
-            part.with_pivot(base.pivot())
-                .with_size(base.size())
-                .with_color(base.color());
+            part.with_pivot(base.pivot()).with_color(base.color());
         }
     }
 }
@@ -338,7 +337,7 @@ fn create_benchmark_workspace(
                 3 => PartShape::Wedge,
                 _ => PartShape::CornerWedge,
             })
-            .with_pivot(Mat4::from_rotation_translation(
+            .with_pose(Mat4::from_rotation_translation(
                 Quat::from_rotation_y(((index % 360) as f32).to_radians()),
                 Vec3::new(
                     (column as f32 - side as f32 * 0.5) * spacing,
@@ -362,7 +361,7 @@ fn create_benchmark_workspace(
     }
 
     let floor = Part::new()
-        .with_pivot(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)))
+        .with_pose(Mat4::from_translation(Vec3::new(0.0, -0.05, 0.0)))
         .with_size(Vec3::new(
             extent + spacing * 2.0,
             0.1,

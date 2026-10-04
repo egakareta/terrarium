@@ -134,7 +134,7 @@ impl Camera {
 
     /// Returns the right-handed DirectX view-projection matrix for this camera.
     pub fn view_projection_matrix(&self) -> Mat4 {
-        self.projection_matrix() * self.pivot().inverse()
+        self.projection_matrix() * self.pose().inverse()
     }
 
     /// Returns the right-handed DirectX perspective projection matrix.
@@ -474,10 +474,10 @@ impl CameraController {
         // Rebuild a roll-free orientation from yaw/pitch every frame.
         // Incremental matrix multiplies (`pivot * rotation`) accumulate
         // floating-point error as roll/scale drift over many frames.
-        let pivot = camera.pivot();
-        let position = pivot.w_axis.truncate();
+        let pose = camera.pose();
+        let position = pose.w_axis.truncate();
         let forward0 = camera.forward();
-        let right0 = pivot.transform_vector3(Vec3::X);
+        let right0 = pose.transform_vector3(Vec3::X);
         // Yaw from the camera's right axis stays well-defined when looking
         // straight up/down, where the forward vector's horizontal projection
         // degenerates to zero.
@@ -523,7 +523,7 @@ impl CameraController {
             new_position += movement.normalize() * speed * delta_seconds;
         }
 
-        camera.with_pivot(Mat4::from_rotation_translation(new_rotation, new_position));
+        camera.with_pose(Mat4::from_rotation_translation(new_rotation, new_position));
         self.mouse_delta = (0.0, 0.0);
     }
 

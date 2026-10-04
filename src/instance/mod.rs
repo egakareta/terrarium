@@ -893,6 +893,11 @@ impl PVInstance {
     pub fn from_world_transform(transform: Mat4) -> Self {
         Self { pivot: transform }
     }
+
+    pub(crate) fn pose_from_transform(transform: Mat4) -> Mat4 {
+        let (_, rotation, translation) = transform.to_scale_rotation_translation();
+        Mat4::from_rotation_translation(rotation, translation)
+    }
 }
 
 /// Access to the underlying [`PVInstance`].
@@ -908,14 +913,19 @@ pub trait HasPVInstance {
         self.pv().pivot
     }
 
+    /// Returns the position and orientation (rigid pose), ignoring the pivot's scale.
+    fn pose(&self) -> Mat4 {
+        PVInstance::pose_from_transform(self.pivot())
+    }
+
     /// Returns the translation component of the pivot.
     fn position(&self) -> Vec3 {
-        self.pv().pivot.w_axis.truncate()
+        self.pivot().w_axis.truncate()
     }
 
     /// Returns XYZ Euler orientation angles in degrees.
     fn orientation(&self) -> Vec3 {
-        let (_, rotation, _) = self.pv().pivot.to_scale_rotation_translation();
+        let (_, rotation, _) = self.pivot().to_scale_rotation_translation();
         let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
 
         Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
@@ -923,12 +933,12 @@ pub trait HasPVInstance {
 
     /// Returns the normalized world-space direction of local `-Z`.
     fn forward(&self) -> Vec3 {
-        self.pivot()
+        self.pose()
             .transform_vector3(Vec3::NEG_Z)
             .normalize_or_zero()
     }
 
-    /// Transforms the [`PVInstance`] along with all of its descendant [`PVInstance`]s such that the pivot is now located at the specified transform.
+    /// Replaces the instance's position, orientation and scale.
     fn with_pivot(mut self, pivot: Mat4) -> Self
     where
         Self: Sized,
@@ -937,22 +947,48 @@ pub trait HasPVInstance {
         self
     }
 
-    /// Replaces the translation while preserving the current rotation.
+    /// Replaces the position and orientation (rigid pose) while preserving the current scale.
+    fn with_pose(mut self, pose: Mat4) -> Self
+    where
+        Self: Sized,
+    {
+        let pivot = self.pivot();
+        let size = pivot.to_scale_rotation_translation().0;
+        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+        self
+    }
+
+    /// Replaces the per-axis scale while preserving the current position and orientation (rigid pose).
+    fn with_size(mut self, size: Vec3) -> Self
+    where
+        Self: Sized,
+    {
+        let pivot = self.pivot();
+        self.pv_mut().pivot = PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size);
+        self
+    }
+
+    /// Replaces the translation while preserving the current orientation and size.
     fn with_position(mut self, position: Vec3) -> Self
     where
         Self: Sized,
     {
-        let (_, rotation, _) = self.pv().pivot.to_scale_rotation_translation();
-        self.pv_mut().pivot = Mat4::from_rotation_translation(rotation, position);
+        let pivot = self.pivot();
+        let (_, rotation, _) = pivot.to_scale_rotation_translation();
+        let size = pivot.to_scale_rotation_translation().0;
+        self.pv_mut().pivot =
+            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size);
         self
     }
 
-    /// Replaces the XYZ Euler orientation in degrees while preserving position.
+    /// Replaces the XYZ Euler orientation in degrees while preserving position and size.
     fn with_orientation(mut self, orientation: Vec3) -> Self
     where
         Self: Sized,
     {
+        let pivot = self.pivot();
         let position = self.position();
+        let size = pivot.to_scale_rotation_translation().0;
         self.pv_mut().pivot = Mat4::from_rotation_translation(
             Quat::from_euler(
                 EulerRot::XYZ,
@@ -961,7 +997,7 @@ pub trait HasPVInstance {
                 orientation.z.to_radians(),
             ),
             position,
-        );
+        ) * Mat4::from_scale(size);
         self
     }
 }

@@ -8,8 +8,8 @@ use rapier3d::prelude::{
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId, Part,
-    PartShape,
+    BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId,
+    PVInstance, Part, PartShape,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -30,7 +30,6 @@ pub struct PhysicsWorld {
 struct BodyDescriptor {
     anchored: bool,
     can_collide: bool,
-    size: Vec3,
     shape: PartShape,
 }
 
@@ -39,6 +38,7 @@ struct BodyEntry {
     handle: RigidBodyHandle,
     collider: Option<ColliderHandle>,
     descriptor: BodyDescriptor,
+    transform: Mat4,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,12 +114,15 @@ impl PhysicsWorld {
             .to_cols_array()
             .into_iter()
             .all(f32::is_finite)
-            || !query.size.is_finite()
         {
             return Vec::new();
         }
 
-        let half_size = (query.size.abs() * 0.5).max(Vec3::splat(0.001));
+        let size = query.transform.to_scale_rotation_translation().0;
+        if !size.is_finite() {
+            return Vec::new();
+        }
+        let half_size = (size.abs() * 0.5).max(Vec3::splat(0.001));
         let query_shape = ColliderBuilder::cuboid(half_size.x, half_size.y, half_size.z).build();
         let query_pose = rapier_pose(query.transform);
         let mut results = Vec::new();
@@ -214,9 +217,10 @@ impl PhysicsWorld {
         let builder = body_builder(instance);
         let handle = self.world.insert_body(builder);
         let collider = if instance.descriptor.can_collide {
-            let collider = self
-                .world
-                .insert_collider(collider_builder(instance.descriptor), Some(handle));
+            let collider = self.world.insert_collider(
+                collider_builder(instance.descriptor, instance.transform),
+                Some(handle),
+            );
             self.collider_instances.insert(collider, instance.id);
             Some(collider)
         } else {
@@ -228,35 +232,42 @@ impl PhysicsWorld {
                 handle,
                 collider,
                 descriptor: instance.descriptor,
+                transform: instance.transform,
             },
         );
-        self.last_transforms.insert(instance.id, instance.transform);
+        self.last_transforms.insert(
+            instance.id,
+            PVInstance::pose_from_transform(instance.transform),
+        );
     }
 
     fn update_instance(&mut self, instance: &PhysicsInstance, mut entry: BodyEntry) {
         let Some(body) = self.world.bodies.get_mut(entry.handle) else {
             return;
         };
+        let pose = PVInstance::pose_from_transform(instance.transform);
 
         if entry.descriptor.anchored != instance.descriptor.anchored {
             body.set_body_type(body_type(instance.descriptor.anchored), true);
         }
 
         if instance.descriptor.anchored {
-            body.set_position(rapier_pose(instance.transform), true);
-            self.last_transforms.insert(instance.id, instance.transform);
+            body.set_position(rapier_pose(pose), true);
+            self.last_transforms.insert(instance.id, pose);
         } else if self
             .last_transforms
             .get(&instance.id)
-            .is_none_or(|last| !matrices_approximately_equal(*last, instance.transform))
+            .is_none_or(|last| !matrices_approximately_equal(*last, pose))
         {
-            body.set_position(rapier_pose(instance.transform), true);
+            body.set_position(rapier_pose(pose), true);
             body.set_linvel(rapier_vector(Vec3::ZERO), true);
             body.set_angvel(rapier_vector(Vec3::ZERO), true);
         }
 
+        let current_size = instance.transform.to_scale_rotation_translation().0;
+        let previous_size = entry.transform.to_scale_rotation_translation().0;
         let collider_changed = entry.descriptor.can_collide != instance.descriptor.can_collide
-            || entry.descriptor.size != instance.descriptor.size
+            || !vectors_approximately_equal(previous_size, current_size)
             || entry.descriptor.shape != instance.descriptor.shape;
         if collider_changed {
             if let Some(collider) = entry.collider.take() {
@@ -264,9 +275,10 @@ impl PhysicsWorld {
                 self.collider_instances.remove(&collider);
             }
             if instance.descriptor.can_collide {
-                let collider = self
-                    .world
-                    .insert_collider(collider_builder(instance.descriptor), Some(entry.handle));
+                let collider = self.world.insert_collider(
+                    collider_builder(instance.descriptor, instance.transform),
+                    Some(entry.handle),
+                );
                 self.collider_instances.insert(collider, instance.id);
                 entry.collider = Some(collider);
             }
@@ -278,13 +290,15 @@ impl PhysicsWorld {
             if let Some(collider) = entry.collider.take() {
                 self.collider_instances.remove(&collider);
             }
-            let collider = self
-                .world
-                .insert_collider(collider_builder(instance.descriptor), Some(entry.handle));
+            let collider = self.world.insert_collider(
+                collider_builder(instance.descriptor, instance.transform),
+                Some(entry.handle),
+            );
             self.collider_instances.insert(collider, instance.id);
             entry.collider = Some(collider);
         }
         entry.descriptor = instance.descriptor;
+        entry.transform = instance.transform;
         self.bodies.insert(instance.id, entry);
     }
 }
@@ -331,7 +345,6 @@ impl PhysicsInstance {
             descriptor: BodyDescriptor {
                 anchored: part.anchored(),
                 can_collide: part.can_collide(),
-                size: part.size(),
                 shape,
             },
         }
@@ -340,16 +353,16 @@ impl PhysicsInstance {
 
 pub(crate) fn apply_transform(instance: &mut dyn Instance, transform: Mat4) {
     if let Some(part) = instance.downcast_mut::<Part>() {
-        part.with_pivot(transform);
+        part.with_pose(transform);
         return;
     }
     #[cfg(feature = "meshpart")]
     if let Some(part) = instance.downcast_mut::<MeshPart>() {
-        part.with_pivot(transform);
+        part.with_pose(transform);
         return;
     }
     if let Some(part) = instance.downcast_mut::<BasePart>() {
-        part.with_pivot(transform);
+        part.with_pose(transform);
     }
 }
 
@@ -374,8 +387,12 @@ fn body_type(anchored: bool) -> RigidBodyType {
     }
 }
 
-fn collider_builder(descriptor: BodyDescriptor) -> rapier3d::prelude::ColliderBuilder {
-    let half_size = (descriptor.size.abs() * 0.5).max(Vec3::splat(0.001));
+fn collider_builder(
+    descriptor: BodyDescriptor,
+    transform: Mat4,
+) -> rapier3d::prelude::ColliderBuilder {
+    let half_size =
+        (transform.to_scale_rotation_translation().0.abs() * 0.5).max(Vec3::splat(0.001));
     match descriptor.shape {
         PartShape::Ball => ColliderBuilder::ball(half_size.max_element()),
         PartShape::Cylinder => ColliderBuilder::cylinder(half_size.y, half_size.x.max(half_size.z)),
@@ -421,6 +438,15 @@ fn matrices_approximately_equal(left: Mat4, right: Mat4) -> bool {
         .all(|(left, right)| (left - right).abs() <= 0.0001)
 }
 
+fn vectors_approximately_equal(left: Vec3, right: Vec3) -> bool {
+    left.to_array()
+        .into_iter()
+        .zip(right.to_array())
+        .all(|(left, right)| {
+            left.is_finite() && right.is_finite() && (left - right).abs() <= 0.0001
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -438,7 +464,7 @@ mod tests {
         let ball = Part::new()
             .with_shape(PartShape::Ball)
             .with_anchored(false)
-            .with_position(Vec3::new(0.0, 3.0, 0.0));
+            .with_position(Vec3::new(3.5, 3.0, 0.0));
         let ball_id = ball.set_parent(&mut workspace);
 
         for _ in 0..120 {
@@ -450,6 +476,7 @@ mod tests {
             .expect("ball remains in workspace");
         assert!(ball.position().y < 3.0);
         assert!(ball.position().y > 0.35);
+        assert!(ball.position().x > 3.0 && ball.position().x < 4.0);
         assert!(workspace.physics().body_handle(ball_id).is_some());
     }
 
@@ -472,7 +499,7 @@ mod tests {
 
         workspace.update(1.0 / 60.0);
 
-        let params = BoxOverlapQuery::new(Mat4::IDENTITY, Vec3::splat(4.0));
+        let params = BoxOverlapQuery::new(Mat4::from_scale(Vec3::splat(4.0)));
         let overlaps = workspace.get_part_bounds_in_box(&params);
         assert_eq!(overlaps.len(), 2);
         assert!(overlaps.contains(&fixed_id));
@@ -486,7 +513,7 @@ mod tests {
         );
 
         let limited_params =
-            BoxOverlapQuery::new(Mat4::IDENTITY, Vec3::splat(4.0)).with_max_parts(1);
+            BoxOverlapQuery::new(Mat4::from_scale(Vec3::splat(4.0))).with_max_parts(1);
         assert_eq!(workspace.get_part_bounds_in_box(&limited_params).len(), 1);
     }
 }

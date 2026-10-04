@@ -156,6 +156,27 @@ fn frustum_culling_keeps_visible_and_rejects_outside() {
 }
 
 #[test]
+fn frustum_culling_keeps_negatively_scaled_parts_near_the_frustum_edge() {
+    use crate::{Camera, HasPVInstance as _, HasPart as _, Part, PartShape};
+
+    let camera = Camera::new(Vec3::ZERO, Vec3::NEG_Z, 1.0);
+    let depth = 4.0;
+    let horizontal_edge = depth * (camera.fovy() * 0.5).tan() * camera.aspect();
+    let part = Part::new()
+        .with_shape(PartShape::Block)
+        .with_size(Vec3::new(-4.0, 1.0, 1.0))
+        .with_position(Vec3::new(horizontal_edge + 2.0, 0.0, -depth));
+    let planes = frustum_planes(camera.view_projection_matrix());
+    let radius = scaled_bounding_radius(part.shape().bounding_radius(), part.pivot());
+
+    assert!(sphere_visible(
+        &planes,
+        part.pivot().w_axis.truncate(),
+        radius
+    ));
+}
+
+#[test]
 fn shadow_cascades_cover_their_camera_frustum_slices() {
     let camera = Camera::new(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
     let (matrices, splits, texel_sizes) =

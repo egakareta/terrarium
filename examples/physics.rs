@@ -14,7 +14,7 @@ impl PhysicsApp {
     fn reset(&self, engine: &mut Engine) {
         for &(id, transform) in &self.initial_transforms {
             if let Some(part) = engine.get_mut::<Part>(id) {
-                part.with_pivot(transform);
+                part.with_pose(transform);
             }
         }
     }

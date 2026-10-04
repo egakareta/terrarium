@@ -217,7 +217,7 @@ impl Renderer {
                 bytemuck::bytes_of(&uniform),
             );
         }
-        let mut sky_view = workspace.current_camera.pivot().inverse();
+        let mut sky_view = workspace.current_camera.pose().inverse();
         sky_view.w_axis = Vec4::new(0.0, 0.0, 0.0, 1.0);
         let sky_view_projection = workspace.current_camera.projection_matrix() * sky_view;
         self.queue.write_buffer(
@@ -361,8 +361,7 @@ impl Renderer {
                 }
                 let transparent = transparency > 0.0;
                 let pivot = part.pivot();
-                let max_scale = part.size().max_element().max(0.0);
-                let radius = part.shape().bounding_radius() * max_scale * 1.01;
+                let radius = scaled_bounding_radius(part.shape().bounding_radius(), pivot);
                 let center = pivot.w_axis.truncate();
                 let extent = Vec3::splat(radius);
                 bounds_min = bounds_min.min(center - extent);
@@ -657,12 +656,7 @@ impl Renderer {
                         }
                     }
                 };
-                let model = Mat4::from_cols(
-                    pivot.x_axis * part.size().x,
-                    pivot.y_axis * part.size().y,
-                    pivot.z_axis * part.size().z,
-                    pivot.w_axis,
-                );
+                let model = pivot;
                 let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
                     let mut tint = part.color().rgba();
                     tint[3] = opacity;
@@ -708,7 +702,7 @@ impl Renderer {
                 continue;
             }
             let transparent = transparency > 0.0;
-            let radius = meshpart.bounding_radius() * meshpart.size().abs().max_element() * 1.01;
+            let radius = scaled_bounding_radius(meshpart.bounding_radius(), pivot);
             let mut visibility_mask = 0;
             if sphere_visible(&camera_planes, center, radius) {
                 visibility_mask |= 1;
@@ -807,12 +801,7 @@ impl Renderer {
                 });
                 batch_index
             };
-            let model = Mat4::from_cols(
-                pivot.x_axis * meshpart.size().x,
-                pivot.y_axis * meshpart.size().y,
-                pivot.z_axis * meshpart.size().z,
-                pivot.w_axis,
-            );
+            let model = pivot;
             let (normal_scales, tint, material_set) = if visibility_mask & 1 != 0 {
                 let mut tint = meshpart.color().rgba();
                 tint[3] = opacity;

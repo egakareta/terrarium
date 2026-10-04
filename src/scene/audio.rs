@@ -10,7 +10,8 @@ use thiserror::Error;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, HasPVInstance, HasSound, Instance, InstanceId, Part, Sound, Workspace,
+    BasePart, Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Part, Sound,
+    Workspace,
 };
 
 /// A failure discovered while updating the workspace's audio scene.
@@ -105,7 +106,7 @@ impl AudioRuntime {
             position: position.to_array(),
             velocity: velocity(position, self.previous_listener_position, delta_seconds).to_array(),
             forward: camera.forward().to_array(),
-            up: camera.pivot().transform_vector3(Vec3::Y).to_array(),
+            up: camera.pose().transform_vector3(Vec3::Y).to_array(),
         })?;
         self.previous_listener_position = Some(position);
         Ok(())
@@ -144,7 +145,10 @@ fn emitter(workspace: &Workspace, sound: &Sound) -> Option<(InstanceId, Vec3)> {
                 .map(HasPVInstance::pivot)
         });
         if let Some(pivot) = pivot {
-            return Some((id, pivot.transform_point3(sound.emitter_offset())));
+            return Some((
+                id,
+                PVInstance::pose_from_transform(pivot).transform_point3(sound.emitter_offset()),
+            ));
         }
         parent = instance.parent();
     }
@@ -283,7 +287,7 @@ mod tests {
     fn sound_follows_the_nearest_part_pivot_and_publishes_velocity() {
         let mut workspace = Workspace::new();
         let outer = workspace.add_child_ref(Part::new().with_position(Vec3::splat(100.0)));
-        let inner = outer.add_child_ref(BasePart::new().with_pivot(
+        let inner = outer.add_child_ref(BasePart::new().with_pose(
             glam::Mat4::from_rotation_translation(
                 glam::Quat::from_rotation_y(FRAC_PI_2),
                 Vec3::new(3.0, 2.0, 1.0),

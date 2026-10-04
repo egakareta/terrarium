@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    HasBasePart, HasCamera, HasLight, HasPVInstance, HasPointLight, HasSpotLight, HasSurfaceLight,
+    HasCamera, HasLight, HasPVInstance, HasPointLight, HasSpotLight, HasSurfaceLight, PVInstance,
 };
 
 impl Renderer {
@@ -94,23 +94,20 @@ pub(super) fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Optio
         if let Some(part) = parent.downcast_ref::<Part>() {
             return Some(LightParent {
                 id,
-                pivot: part.pivot(),
-                size: part.size().abs(),
+                transform: part.pivot(),
             });
         }
         #[cfg(feature = "meshpart")]
         if let Some(part) = parent.downcast_ref::<MeshPart>() {
             return Some(LightParent {
                 id,
-                pivot: part.pivot(),
-                size: part.size().abs(),
+                transform: part.pivot(),
             });
         }
         if let Some(part) = parent.downcast_ref::<BasePart>() {
             return Some(LightParent {
                 id,
-                pivot: part.pivot(),
-                size: part.size().abs(),
+                transform: part.pivot(),
             });
         }
         parent_id = parent.parent();
@@ -119,65 +116,65 @@ pub(super) fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Optio
 }
 
 pub(super) fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, Vec4, Vec4) {
+    let pose = PVInstance::pose_from_transform(parent.transform);
+    let size = parent.transform.to_scale_rotation_translation().0.abs();
     let (normal, normal_extent, axis_u, half_width, axis_v, half_height) = match face {
         Face::Top => (
             Vec3::Y,
-            parent.size.y * 0.5,
+            size.y * 0.5,
             Vec3::X,
-            parent.size.x * 0.5,
+            size.x * 0.5,
             Vec3::Z,
-            parent.size.z * 0.5,
+            size.z * 0.5,
         ),
         Face::Bottom => (
             Vec3::NEG_Y,
-            parent.size.y * 0.5,
+            size.y * 0.5,
             Vec3::X,
-            parent.size.x * 0.5,
+            size.x * 0.5,
             Vec3::Z,
-            parent.size.z * 0.5,
+            size.z * 0.5,
         ),
         Face::Front => (
             Vec3::Z,
-            parent.size.z * 0.5,
+            size.z * 0.5,
             Vec3::X,
-            parent.size.x * 0.5,
+            size.x * 0.5,
             Vec3::Y,
-            parent.size.y * 0.5,
+            size.y * 0.5,
         ),
         Face::Back => (
             Vec3::NEG_Z,
-            parent.size.z * 0.5,
+            size.z * 0.5,
             Vec3::X,
-            parent.size.x * 0.5,
+            size.x * 0.5,
             Vec3::Y,
-            parent.size.y * 0.5,
+            size.y * 0.5,
         ),
         Face::Left => (
             Vec3::NEG_X,
-            parent.size.x * 0.5,
+            size.x * 0.5,
             Vec3::Z,
-            parent.size.z * 0.5,
+            size.z * 0.5,
             Vec3::Y,
-            parent.size.y * 0.5,
+            size.y * 0.5,
         ),
         Face::Right => (
             Vec3::X,
-            parent.size.x * 0.5,
+            size.x * 0.5,
             Vec3::Z,
-            parent.size.z * 0.5,
+            size.z * 0.5,
             Vec3::Y,
-            parent.size.y * 0.5,
+            size.y * 0.5,
         ),
     };
-    let direction = parent.pivot.transform_vector3(normal).normalize_or_zero();
-    let position = parent.pivot.w_axis.truncate() + direction * normal_extent;
-    let axis_u = parent
-        .pivot
+    let direction = pose.transform_vector3(normal).normalize_or_zero();
+    let position = pose.w_axis.truncate() + direction * normal_extent;
+    let axis_u = pose
         .transform_vector3(axis_u)
         .normalize_or_zero()
         .extend(half_width);
-    let axis_v = parent
-        .pivot
+    let axis_v = pose
         .transform_vector3(axis_v)
         .normalize_or_zero()
         .extend(half_height);
@@ -217,7 +214,7 @@ pub(super) fn directional_light_relevance(
     angle: f32,
     range: f32,
 ) -> f32 {
-    let view = camera.pivot().inverse();
+    let view = camera.pose().inverse();
     let view_position = view.transform_point3(position);
     let view_direction = view.transform_vector3(direction);
     let source_depth = -view_position.z;
@@ -227,7 +224,7 @@ pub(super) fn directional_light_relevance(
     let mut relevance: f32 = 0.0;
 
     let mut evaluate_probe = |probe: Vec3| {
-        let probe = camera.pivot().transform_point3(probe);
+        let probe = camera.pose().transform_point3(probe);
         let Some(to_probe) = (probe - position).try_normalize() else {
             return;
         };
@@ -310,7 +307,7 @@ pub(super) fn point_light_candidate(
     if range <= 0.0 {
         return None;
     }
-    let position = parent.pivot.w_axis.truncate();
+    let position = parent.transform.w_axis.truncate();
     if !sphere_visible(camera_planes, position, range) {
         return None;
     }
@@ -608,5 +605,5 @@ pub(super) fn camera_frustum_slice_corners(camera: &Camera, near: f32, far: f32)
         Vec3::new(-far_width, far_height, -far),
         Vec3::new(far_width, far_height, -far),
     ];
-    corners.map(|corner| camera.pivot().transform_point3(corner))
+    corners.map(|corner| camera.pose().transform_point3(corner))
 }

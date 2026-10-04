@@ -329,8 +329,7 @@ struct LocalLightCandidate {
 #[derive(Clone, Copy)]
 struct LightParent {
     id: InstanceId,
-    pivot: Mat4,
-    size: Vec3,
+    transform: Mat4,
 }
 
 struct PreparedLocalShadows {
