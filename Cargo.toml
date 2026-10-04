@@ -3,22 +3,33 @@ name = "terrarium"
 version = "0.1.0"
 edition = "2024"
 
-[features]
-default = [
-  "meshpart",
-  "physics",
-  "default-skybox",
-  "default-fonts",
-  "eframe-default-fonts",
-  "sound",
-]
-bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
-meshpart = ["dep:gltf"]
-physics = ["dep:rapier3d"]
-default-skybox = []
-default-fonts = []
-eframe-default-fonts = ["eframe/default_fonts"]
-sound = ["dep:euphorium"]
+[[example]]
+name = "bevy"
+required-features = ["bevy"]
+
+[[example]]
+name = "gltf"
+required-features = ["meshpart"]
+
+[[example]]
+name = "viewport"
+required-features = ["meshpart"]
+
+[[example]]
+name = "physics"
+required-features = ["physics"]
+
+[[example]]
+name = "sound"
+required-features = ["sound"]
+
+[[test]]
+name = "bevy"
+required-features = ["bevy"]
+
+[[test]]
+name = "gpu"
+required-features = ["meshpart"]
 
 [dependencies]
 bevy_app = { version = "0.19", features = ["web"], optional = true }
@@ -28,7 +39,7 @@ bevy_time = { version = "0.19", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 eframe = { version = "0.36", default-features = false, features = ["wayland", "wgpu", "x11"] }
 env_logger = "0.11"
-euphorium = { version = "0.6", optional = true }
+euphorium = { version = "0.6", default-features = false, optional = true }
 glam = "0.33"
 gltf = { version = "1", optional = true }
 image = { version = "0.25" }
@@ -58,30 +69,33 @@ web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasEleme
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
-[[example]]
-name = "bevy"
-required-features = ["bevy"]
-
-[[example]]
-name = "gltf"
-required-features = ["meshpart"]
-
-[[example]]
-name = "viewport"
-required-features = ["meshpart"]
-
-[[example]]
-name = "physics"
-required-features = ["physics"]
-
-[[example]]
-name = "sound"
-required-features = ["sound"]
-
-[[test]]
-name = "bevy"
-required-features = ["bevy"]
-
-[[test]]
-name = "gpu"
-required-features = ["meshpart"]
+[features]
+default = [
+  "asio",
+  "default-fonts",
+  "default-skybox",
+  "eframe-default-fonts",
+  "flac",
+  "meshpart",
+  "mp3",
+  "physics",
+  "sound",
+  "vorbis",
+  "wav",
+]
+asio = ["euphorium?/asio"]
+bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
+cli = ["euphorium?/cli"]
+default-fonts = []
+default-skybox = []
+eframe-default-fonts = ["eframe/default_fonts"]
+flac = ["euphorium?/flac"]
+jack = ["euphorium?/jack"]
+meshpart = ["dep:gltf"]
+mp3 = ["euphorium?/mp3"]
+mp4 = ["euphorium?/mp4"]
+nightly = ["euphorium?/nightly"]
+physics = ["dep:rapier3d"]
+sound = ["dep:euphorium"]
+vorbis = ["euphorium?/vorbis"]
+wav = ["euphorium?/wav"]
