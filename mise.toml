@@ -69,3 +69,9 @@ run = [
   "--all-features",
   "--",
 ]
+
+[bootstrap.packages]
+"apt:libasound2-dev" = "latest"
+"apt:libjack-jackd2-dev" = "latest"
+"apt:libudev-dev" = "latest"
+"apt:pkg-config" = "latest"

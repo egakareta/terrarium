@@ -17,6 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
+        with:
+          bootstrap: true
       - uses: Swatinem/rust-cache@v2
       - run: mise run check
   test:
@@ -42,5 +44,7 @@ jobs:
           echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
       - run: vulkaninfo --summary || true
       - uses: jdx/mise-action@v4
+        with:
+          bootstrap: true
       - uses: Swatinem/rust-cache@v2
       - run: xvfb-run -a mise run test
