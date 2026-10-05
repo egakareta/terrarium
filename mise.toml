@@ -40,6 +40,21 @@ run = "cargo test --all-targets --all-features"
 description = "Run benchmarks for native"
 run = "cargo bench --benches"
 
+[tasks."build:examples:web"]
+description = "Build the web examples gallery for GitHub Pages"
+dir = "{{config_root}}"
+env = { RUSTFLAGS = "" }
+run = """
+set -eu
+mkdir -p examples/dist
+for example in app gltf outlines physics simple viewport; do
+  trunk build --release --locked --all-features --example "$example" \\
+    --dist "examples/dist/$example" \\
+    --public-url "${PAGES_BASE_PATH:-}/$example/"
+done
+cp assets/web/examples.html examples/dist/index.html
+"""
+
 [tasks."serve:examples:app"]
 description = "Serve the example app with Trunk"
 dir = "{{config_root}}"

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101014" />
+    <title>terrarium examples</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #101014;
+        color: #f1eee8;
+      }
+      body {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 56px 24px;
+      }
+      h1 {
+        margin-bottom: 8px;
+      }
+      p {
+        color: #aaa6b2;
+        line-height: 1.6;
+      }
+      .examples {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-top: 32px;
+      }
+      a {
+        display: block;
+        padding: 20px;
+        border: 1px solid #36333f;
+        border-radius: 12px;
+        color: inherit;
+        text-decoration: none;
+        background: #19181f;
+      }
+      a:hover,
+      a:focus-visible {
+        border-color: #b4a0ff;
+        outline: none;
+      }
+      a strong {
+        display: block;
+        margin-bottom: 8px;
+        color: #d4c7ff;
+      }
+      a span {
+        color: #aaa6b2;
+        font-size: 0.92rem;
+        line-height: 1.5;
+      }
+      footer {
+        margin-top: 36px;
+        font-size: 0.9rem;
+      }
+      footer a {
+        display: inline;
+        padding: 0;
+        border: 0;
+        background: none;
+        color: #d4c7ff;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Terrarium examples 🌍</h1>
+    <p>
+      Explore the interactive examples in your browser. Use WASD and left-click drag to move the
+      camera.
+    </p>
+    <main class="examples">
+      <a href="app/"><strong>app</strong><span>the main example</span></a>
+      <a href="gltf/"><strong>gltf</strong><span>a custom 3d model</span></a>
+      <a href="outlines/"><strong>outlines</strong><span>outline a mesh easily</span></a>
+      <a href="physics/"><strong>physics</strong><span>realistic physics with rapier</span></a>
+      <a href="simple/"
+        ><strong>simple</strong><span>the smallest terrarium scene: one cube</span></a
+      >
+      <a href="viewport/"
+        ><strong>viewport</strong
+        ><span>render scenes into textures and display them in egui</span></a
+      >
+    </main>
+    <footer>
+      <p>
+        source code is available in the
+        <a href="https://github.com/egakareta/terrarium/tree/master/examples">examples directory</a>
+      </p>
+    </footer>
+  </body>
+</html>

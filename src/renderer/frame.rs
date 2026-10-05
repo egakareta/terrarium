@@ -1,5 +1,34 @@
 use super::*;
 
+// WGPU requires a Send callback in non-atomic WASM builds. Browser readback state stays
+// on its owning thread; the callback passed to WGPU carries only a registry key.
+#[cfg(target_arch = "wasm32")]
+type WebReadbackCallback = Box<dyn FnOnce(Result<(), wgpu::BufferAsyncError>)>;
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static WEB_READBACK_CALLBACKS: RefCell<slotmap::SlotMap<slotmap::DefaultKey, WebReadbackCallback>>
+        = RefCell::new(slotmap::SlotMap::new());
+}
+
+#[cfg(target_arch = "wasm32")]
+fn map_web_readback(
+    buffer: &wgpu::Buffer,
+    callback: impl FnOnce(Result<(), wgpu::BufferAsyncError>) + 'static,
+) {
+    let key =
+        WEB_READBACK_CALLBACKS.with(|callbacks| callbacks.borrow_mut().insert(Box::new(callback)));
+    buffer
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |result| {
+            let callback =
+                WEB_READBACK_CALLBACKS.with(|callbacks| callbacks.borrow_mut().remove(key));
+            if let Some(callback) = callback {
+                callback(result);
+            }
+        });
+}
+
 impl Renderer {
     /// Sets the color used to clear the color attachment before each frame.
     ///
@@ -211,47 +240,45 @@ impl Renderer {
         let width = self.width;
         let height = self.height;
         let format = self.eframe_scene.format;
-        buffer
-            .slice(..)
-            .map_async(wgpu::MapMode::Read, move |result| {
-                let pixels = match result {
-                    Ok(()) => match callback_buffer.slice(..).get_mapped_range() {
-                        Ok(mapped) => {
-                            let pixels = decode_pixel_readback(
-                                &mapped,
-                                width,
-                                height,
-                                unpadded_bytes_per_row,
-                                padded_bytes_per_row,
-                                format,
-                            );
-                            drop(mapped);
-                            callback_buffer.unmap();
-                            Ok(pixels)
-                        }
-                        Err(error) => {
-                            callback_buffer.unmap();
-                            Err(error.to_string())
-                        }
-                    },
-                    Err(error) => Err(error.to_string()),
-                };
-
-                let mut readback = readback.borrow_mut();
-                if readback.in_flight_generation == Some(generation) {
-                    readback.in_flight_generation = None;
-                }
-                if readback.generation != generation {
-                    return;
-                }
-                match pixels {
-                    Ok(pixels) => {
-                        readback.latest = Some(pixels);
-                        readback.error = None;
+        map_web_readback(&buffer, move |result| {
+            let pixels = match result {
+                Ok(()) => match callback_buffer.slice(..).get_mapped_range() {
+                    Ok(mapped) => {
+                        let pixels = decode_pixel_readback(
+                            &mapped,
+                            width,
+                            height,
+                            unpadded_bytes_per_row,
+                            padded_bytes_per_row,
+                            format,
+                        );
+                        drop(mapped);
+                        callback_buffer.unmap();
+                        Ok(pixels)
                     }
-                    Err(error) => readback.error = Some(error),
+                    Err(error) => {
+                        callback_buffer.unmap();
+                        Err(error.to_string())
+                    }
+                },
+                Err(error) => Err(error.to_string()),
+            };
+
+            let mut readback = readback.borrow_mut();
+            if readback.in_flight_generation == Some(generation) {
+                readback.in_flight_generation = None;
+            }
+            if readback.generation != generation {
+                return;
+            }
+            match pixels {
+                Ok(pixels) => {
+                    readback.latest = Some(pixels);
+                    readback.error = None;
                 }
-            });
+                Err(error) => readback.error = Some(error),
+            }
+        });
         Ok(())
     }
 
