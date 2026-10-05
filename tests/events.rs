@@ -56,6 +56,29 @@ fn signals_are_deferred_broadcasts_without_replay() {
 }
 
 #[test]
+fn callbacks_can_own_their_scoped_connection_during_shutdown_or_disconnect() {
+    for close_owner in [true, false] {
+        let workspace = Workspace::new();
+        let event = workspace.bindable_event::<()>();
+        let holder = Rc::new(RefCell::new(None));
+        let captured = holder.clone();
+        let connection = event.on_event().connect(move |_, _| {
+            let _ = &captured;
+        });
+        *holder.borrow_mut() = Some(connection.clone().scoped());
+        // The callback now owns the last reference to its scoped connection.
+        drop(holder);
+        assert!(connection.is_connected());
+        if close_owner {
+            drop(event);
+        } else {
+            connection.disconnect();
+        }
+        assert!(!connection.is_connected());
+    }
+}
+
+#[test]
 fn once_disconnects_before_callback_and_explicit_disconnect_cancels_pending_calls() {
     let mut workspace = Workspace::new();
     let event = workspace.bindable_event::<u32>();

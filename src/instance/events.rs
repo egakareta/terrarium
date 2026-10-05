@@ -57,6 +57,10 @@ struct SignalStorage {
     changed: OnceCell<SignalEmitter<InstanceProperty>>,
     attribute_changed: OnceCell<SignalEmitter<String>>,
     destroying: OnceCell<SignalEmitter<()>>,
+    #[cfg(feature = "physics")]
+    touched: OnceCell<SignalEmitter<InstanceId>>,
+    #[cfg(feature = "physics")]
+    touch_ended: OnceCell<SignalEmitter<InstanceId>>,
     properties: RefCell<BTreeMap<InstanceProperty, SignalEmitter<()>>>,
     attributes: RefCell<BTreeMap<String, SignalEmitter<()>>>,
     destroying_emitted: Cell<bool>,
@@ -100,6 +104,16 @@ impl InstanceSignals {
         self.signal(&self.inner.destroying)
     }
 
+    #[cfg(feature = "physics")]
+    pub(crate) fn touched(&self) -> Signal<InstanceId> {
+        self.signal(&self.inner.touched)
+    }
+
+    #[cfg(feature = "physics")]
+    pub(crate) fn touch_ended(&self) -> Signal<InstanceId> {
+        self.signal(&self.inner.touch_ended)
+    }
+
     pub(crate) fn property_changed(&self, property: InstanceProperty) -> Signal<()> {
         self.inner
             .properties
@@ -137,6 +151,8 @@ impl InstanceSignals {
             attribute_changed,
             destroying
         );
+        #[cfg(feature = "physics")]
+        attach!(touched, touch_ended);
         for emitter in self.inner.properties.borrow().values() {
             emitter.set_scheduler(scheduler.clone());
         }
@@ -201,6 +217,20 @@ impl InstanceSignals {
         }
     }
 
+    #[cfg(feature = "physics")]
+    pub(crate) fn emit_touched(&self, other: InstanceId) {
+        if let Some(emitter) = self.inner.touched.get() {
+            emitter.emit(other);
+        }
+    }
+
+    #[cfg(feature = "physics")]
+    pub(crate) fn emit_touch_ended(&self, other: InstanceId) {
+        if let Some(emitter) = self.inner.touch_ended.get() {
+            emitter.emit(other);
+        }
+    }
+
     pub(crate) fn close(&self) {
         macro_rules! close {
             ($($field:ident),* $(,)?) => {
@@ -219,6 +249,8 @@ impl InstanceSignals {
             attribute_changed,
             destroying
         );
+        #[cfg(feature = "physics")]
+        close!(touched, touch_ended);
         for emitter in self.inner.properties.borrow().values() {
             emitter.close();
         }

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use rapier3d::prelude::{
     ColliderBuilder, ColliderHandle, IntegrationParameters, PhysicsWorld as RapierPhysicsWorld,
@@ -24,6 +27,14 @@ pub struct PhysicsWorld {
     bodies: HashMap<InstanceId, BodyEntry>,
     collider_instances: HashMap<ColliderHandle, InstanceId>,
     last_transforms: HashMap<InstanceId, Mat4>,
+    touching: BTreeSet<(InstanceId, InstanceId)>,
+}
+
+#[derive(Default)]
+pub(crate) struct PhysicsStep {
+    pub(crate) transforms: Vec<(InstanceId, Mat4)>,
+    pub(crate) touch_started: Vec<(InstanceId, InstanceId)>,
+    pub(crate) touch_ended: Vec<(InstanceId, InstanceId)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -56,6 +67,7 @@ impl PhysicsWorld {
             bodies: HashMap::new(),
             collider_instances: HashMap::new(),
             last_transforms: HashMap::new(),
+            touching: BTreeSet::new(),
         }
     }
 
@@ -148,15 +160,32 @@ impl PhysicsWorld {
         &mut self,
         instances: &[PhysicsInstance],
         delta_seconds: f32,
-    ) -> Vec<(InstanceId, Mat4)> {
+    ) -> PhysicsStep {
         self.sync_instances(instances);
 
+        let mut result = PhysicsStep::default();
         if delta_seconds.is_finite() && delta_seconds > 0.0 {
             self.world.integration_parameters.dt = delta_seconds.min(0.1);
             self.world.step();
+            let touching: BTreeSet<_> = self
+                .world
+                .contact_pairs()
+                .filter(|pair| pair.has_any_active_contact())
+                .filter_map(|pair| {
+                    let first = *self.collider_instances.get(&pair.collider1)?;
+                    let second = *self.collider_instances.get(&pair.collider2)?;
+                    Some((first.min(second), first.max(second)))
+                })
+                .collect();
+            result
+                .touch_ended
+                .extend(self.touching.difference(&touching));
+            result
+                .touch_started
+                .extend(touching.difference(&self.touching));
+            self.touching = touching;
         }
 
-        let mut transforms = Vec::new();
         for instance in instances {
             let Some(entry) = self.bodies.get(&instance.id) else {
                 continue;
@@ -169,9 +198,9 @@ impl PhysicsWorld {
             };
             let transform = body_transform(body);
             self.last_transforms.insert(instance.id, transform);
-            transforms.push((instance.id, transform));
+            result.transforms.push((instance.id, transform));
         }
-        transforms
+        result
     }
 
     pub(crate) fn clone_configuration(&self) -> Self {
@@ -206,7 +235,11 @@ impl PhysicsWorld {
             {
                 self.update_instance(instance, entry);
             } else {
-                self.bodies.remove(&instance.id);
+                if let Some(entry) = self.bodies.remove(&instance.id)
+                    && let Some(collider) = entry.collider
+                {
+                    self.collider_instances.remove(&collider);
+                }
                 self.last_transforms.remove(&instance.id);
                 self.insert_instance(instance);
             }

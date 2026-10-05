@@ -58,6 +58,47 @@ pub trait HasBasePart {
     /// Returns mutable access to the underlying [`BasePart`].
     fn base_part_mut(&mut self) -> &mut BasePart;
 
+    /// Fires once when this part begins touching another workspace part.
+    ///
+    /// The payload is the other part's ID. Contacts are detected during positive
+    /// [`Workspace::update`](crate::Workspace::update) steps, and callbacks run
+    /// after physics and scene transforms have been updated. Persistent contact
+    /// does not emit again until the parts separate and touch again.
+    ///
+    /// Only active Rapier contacts between workspace colliders are included.
+    /// Both parts must have [`Self::can_collide`] enabled; by default, at least
+    /// one must be unanchored. Signals may be subscribed to before attachment.
+    ///
+    /// ```
+    /// use terrarium::{HasBasePart, Instance, Part, Workspace};
+    ///
+    /// let mut workspace = Workspace::new();
+    /// let part = Part::new().with_anchored(false);
+    /// part.on_touched().connect(|context, other| {
+    ///     if let Some(other) = context.workspace().instance(*other) {
+    ///         println!("Touched {}", other.name());
+    ///     }
+    /// });
+    /// workspace.add_child(part);
+    /// workspace.update(1.0 / 60.0);
+    /// ```
+    #[cfg(feature = "physics")]
+    fn on_touched(&self) -> crate::Signal<crate::InstanceId> {
+        self.base_part().instance.signals.touched()
+    }
+
+    /// Fires once when this part stops touching another workspace part.
+    ///
+    /// The payload is the other part's ID, which may no longer resolve if it
+    /// was removed. Separation, collider disabling, and removal are detected on
+    /// the next positive [`Workspace::update`](crate::Workspace::update) step.
+    /// The surviving part is notified when the other part is destroyed.
+    /// Delivery follows the same deferred rules as [`Self::on_touched`].
+    #[cfg(feature = "physics")]
+    fn on_touch_ended(&self) -> crate::Signal<crate::InstanceId> {
+        self.base_part().instance.signals.touch_ended()
+    }
+
     /// Tint.
     fn color(&self) -> Color3 {
         self.base_part().color

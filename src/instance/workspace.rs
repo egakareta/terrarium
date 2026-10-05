@@ -310,10 +310,24 @@ impl Workspace {
             .instances()
             .filter_map(PhysicsInstance::from_instance)
             .collect();
-        let transforms = self.physics.step(&instances, delta_seconds);
-        for (id, transform) in transforms {
+        let step = self.physics.step(&instances, delta_seconds);
+        for (id, transform) in step.transforms {
             if let Some(instance) = self.instance_mut(id) {
                 apply_transform(instance, transform);
+            }
+        }
+        for (first, second) in step.touch_ended {
+            for (id, other) in [(first, second), (second, first)] {
+                if let Some(signals) = self.instance(id).and_then(Instance::instance_signals) {
+                    signals.emit_touch_ended(other);
+                }
+            }
+        }
+        for (first, second) in step.touch_started {
+            for (id, other) in [(first, second), (second, first)] {
+                if let Some(signals) = self.instance(id).and_then(Instance::instance_signals) {
+                    signals.emit_touched(other);
+                }
             }
         }
     }

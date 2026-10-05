@@ -36,7 +36,8 @@ impl<T> Listener<T> {
     fn close(&self) {
         self.connected.set(false);
         if self.pending.get() == 0 {
-            self.callback.borrow_mut().take();
+            let callback = self.callback.borrow_mut().take();
+            drop(callback);
             let on_closed = self.on_closed.borrow_mut().take();
             if let Some(on_closed) = on_closed {
                 on_closed();
@@ -67,7 +68,8 @@ impl<T> ConnectionControl for Listener<T> {
     fn disconnect(&self) {
         self.cancelled.set(true);
         self.connected.set(false);
-        self.callback.borrow_mut().take();
+        let callback = self.callback.borrow_mut().take();
+        drop(callback);
         let on_closed = self.on_closed.borrow_mut().take();
         self.remove_disconnected();
         if let Some(on_closed) = on_closed {
