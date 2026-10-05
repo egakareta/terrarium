@@ -5,8 +5,8 @@ use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Lighting,
-    Texture, TextureError, TextureHandle, TweenManager,
+    BindableEvent, Camera, CameraController, EventContext, Instance, InstanceData, InstanceId,
+    InstanceLookup, Lighting, Texture, TextureError, TextureHandle, TweenManager,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -258,6 +258,38 @@ impl Workspace {
         for error in self.update_audio(delta_seconds) {
             log::error!("{error}");
         }
+        self.dispatch_events();
+    }
+
+    /// Creates a user-fired event using this workspace's deferred scheduler.
+    pub fn bindable_event<T: 'static>(&self) -> BindableEvent<T> {
+        BindableEvent::new(Rc::downgrade(&self.lookup.scheduler))
+    }
+
+    /// Processes up to 1,024 queued signal invocations in emission order.
+    ///
+    /// [`Self::update`] calls this after advancing the scene. Headless callers
+    /// may also call it directly. Nested emissions join the queue; nested calls
+    /// to dispatch do nothing. The budget prevents unbounded callback cascades.
+    /// Remaining invocations are preserved for a later dispatch.
+    ///
+    /// Returns the number of processed invocations, including cancelled calls.
+    pub fn dispatch_events(&mut self) -> usize {
+        self.dispatch_events_with_limit(1_024)
+    }
+
+    /// Processes queued signal invocations with a caller-supplied work budget.
+    ///
+    /// A zero limit leaves the queue unchanged. See [`Self::dispatch_events`]
+    /// for delivery and reentrancy semantics.
+    pub fn dispatch_events_with_limit(&mut self, limit: usize) -> usize {
+        let scheduler = self.lookup.scheduler.clone();
+        scheduler.dispatch(&mut EventContext { workspace: self }, limit)
+    }
+
+    /// Returns whether signal invocations are awaiting dispatch.
+    pub fn has_pending_events(&self) -> bool {
+        self.lookup.scheduler.has_pending()
     }
 
     /// Returns the workspace's Rapier physics world.

@@ -4,6 +4,7 @@
 #[cfg(feature = "bevy")]
 pub mod bevy;
 mod engine;
+mod events;
 mod instance;
 mod interpolation;
 mod primitive;
@@ -15,6 +16,7 @@ pub use engine::*;
 /// Cross-platform audio sources, spatial settings, and playback APIs.
 #[cfg(feature = "sound")]
 pub use euphorium;
+pub use events::*;
 pub use glam;
 pub use instance::*;
 pub use interpolation::*;
