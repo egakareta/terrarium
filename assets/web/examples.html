@@ -26,65 +26,115 @@
       }
       .examples {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
         gap: 16px;
         margin-top: 32px;
       }
-      a {
-        display: block;
-        padding: 20px;
+      .example {
         border: 1px solid #36333f;
         border-radius: 12px;
-        color: inherit;
-        text-decoration: none;
         background: #19181f;
+        overflow: hidden;
       }
-      a:hover,
-      a:focus-visible {
+      .example:focus-within {
         border-color: #b4a0ff;
-        outline: none;
       }
-      a strong {
-        display: block;
-        margin-bottom: 8px;
-        color: #d4c7ff;
+      .example-info {
+        padding: 20px;
       }
-      a span {
-        color: #aaa6b2;
+      h2 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+      }
+      .example-info p {
+        margin: 0 0 12px;
         font-size: 0.92rem;
-        line-height: 1.5;
+      }
+      a {
+        color: #d4c7ff;
+        text-underline-offset: 3px;
+      }
+      a:hover {
+        color: #eee9ff;
+      }
+      a:focus-visible {
+        outline: 2px solid #b4a0ff;
+        outline-offset: 4px;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        aspect-ratio: 4 / 3;
+        border: 0;
+        border-top: 1px solid #36333f;
+        background: #101014;
+      }
+      .example-info a {
+        display: inline-block;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
       }
       footer {
         margin-top: 36px;
         font-size: 0.9rem;
-      }
-      footer a {
-        display: inline;
-        padding: 0;
-        border: 0;
-        background: none;
-        color: #d4c7ff;
       }
     </style>
   </head>
   <body>
     <h1>Terrarium examples 🌍</h1>
     <p>
-      Explore the interactive examples in your browser. Use WASD and left-click drag to move the
-      camera.
+      Try the interactive examples below. Click inside a preview, then use WASD and left-click drag
+      to move the camera. Open an example on its own for more space.
     </p>
     <main class="examples">
-      <a href="app/"><strong>app</strong><span>the main example</span></a>
-      <a href="gltf/"><strong>gltf</strong><span>a custom 3d model</span></a>
-      <a href="outlines/"><strong>outlines</strong><span>outline a mesh easily</span></a>
-      <a href="physics/"><strong>physics</strong><span>realistic physics with rapier</span></a>
-      <a href="simple/"
-        ><strong>simple</strong><span>the smallest terrarium scene: one cube</span></a
-      >
-      <a href="viewport/"
-        ><strong>viewport</strong
-        ><span>render scenes into textures and display them in egui</span></a
-      >
+      <article class="example">
+        <div class="example-info">
+          <h2>app</h2>
+          <p>the main example</p>
+          <a href="app/">open app</a>
+        </div>
+        <iframe src="app/" title="app example" loading="lazy" allowfullscreen></iframe>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>gltf</h2>
+          <p>a custom 3d model</p>
+          <a href="gltf/">open gltf</a>
+        </div>
+        <iframe src="gltf/" title="gltf example" loading="lazy" allowfullscreen></iframe>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>outlines</h2>
+          <p>outline a mesh easily</p>
+          <a href="outlines/">open outlines</a>
+        </div>
+        <iframe src="outlines/" title="outlines example" loading="lazy" allowfullscreen></iframe>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>physics</h2>
+          <p>realistic physics with rapier</p>
+          <a href="physics/">open physics</a>
+        </div>
+        <iframe src="physics/" title="physics example" loading="lazy" allowfullscreen></iframe>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>simple</h2>
+          <p>the smallest terrarium scene: one cube</p>
+          <a href="simple/">open simple</a>
+        </div>
+        <iframe src="simple/" title="simple example" loading="lazy" allowfullscreen></iframe>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>viewport</h2>
+          <p>render scenes into textures and display them in egui</p>
+          <a href="viewport/">open viewport</a>
+        </div>
+        <iframe src="viewport/" title="viewport example" loading="lazy" allowfullscreen></iframe>
+      </article>
     </main>
     <footer>
       <p>
