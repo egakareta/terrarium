@@ -56,6 +56,37 @@ fn signals_are_deferred_broadcasts_without_replay() {
 }
 
 #[test]
+fn cleanup_preserves_live_subscriptions_pending_delivery_and_owner_shutdown() {
+    for threshold in [0, 1, 8, 64, 1_024] {
+        let mut workspace = Workspace::new();
+        assert_eq!(workspace.signal_cleanup_threshold(), 64);
+        workspace.set_signal_cleanup_threshold(threshold);
+        assert_eq!(workspace.signal_cleanup_threshold(), threshold.max(1));
+        let event = workspace.bindable_event::<u32>();
+        let signal = event.on_event();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let received = seen.clone();
+        let connection = signal.connect(move |_, value| received.borrow_mut().push(*value));
+        let mut delivered = signal.wait();
+        event.fire(42);
+
+        for _ in 0..(2 * threshold + 17) {
+            drop(workspace.bindable_event::<()>());
+        }
+        workspace.dispatch_events();
+        assert_eq!(*seen.borrow(), [42]);
+        assert_eq!(poll(&mut delivered), Poll::Ready(Ok(42)));
+        assert!(connection.is_connected());
+
+        let mut closed = signal.wait();
+        drop(workspace);
+        assert!(signal.is_closed());
+        assert!(!connection.is_connected());
+        assert_eq!(poll(&mut closed), Poll::Ready(Err(SignalClosed)));
+    }
+}
+
+#[test]
 fn callbacks_can_own_their_scoped_connection_during_shutdown_or_disconnect() {
     for close_owner in [true, false] {
         let workspace = Workspace::new();
@@ -395,6 +426,7 @@ fn destruction_delivers_final_notifications_but_explicit_disconnect_can_cancel_t
 #[test]
 fn scene_clones_do_not_inherit_listeners_or_pending_events() {
     let mut workspace = Workspace::new();
+    workspace.set_signal_cleanup_threshold(8);
     let received = Rc::new(RefCell::new(Vec::new()));
     let seen = received.clone();
     workspace
@@ -402,6 +434,10 @@ fn scene_clones_do_not_inherit_listeners_or_pending_events() {
         .connect(move |_, id| seen.borrow_mut().push(*id));
     let original = workspace.add_child(Part::new());
     let mut cloned = workspace.clone();
+    assert_eq!(cloned.signal_cleanup_threshold(), 8);
+    cloned.set_signal_cleanup_threshold(128);
+    assert_eq!(workspace.signal_cleanup_threshold(), 8);
+    assert_eq!(cloned.signal_cleanup_threshold(), 128);
     cloned.add_child(Part::new());
     cloned.dispatch_events();
     assert!(received.borrow().is_empty());

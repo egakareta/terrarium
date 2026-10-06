@@ -12,19 +12,39 @@ pub(super) trait SignalOwner {
     fn close(&self);
 }
 
-#[derive(Default)]
 pub(crate) struct EventScheduler {
     pending: RefCell<VecDeque<Invocation>>,
     dispatching: Cell<bool>,
     signals: RefCell<Vec<Weak<dyn SignalOwner>>>,
     registrations_since_cleanup: Cell<usize>,
+    cleanup_threshold: Cell<usize>,
+}
+
+impl Default for EventScheduler {
+    fn default() -> Self {
+        Self {
+            pending: RefCell::default(),
+            dispatching: Cell::new(false),
+            signals: RefCell::default(),
+            registrations_since_cleanup: Cell::new(0),
+            cleanup_threshold: Cell::new(64),
+        }
+    }
 }
 
 impl EventScheduler {
+    pub(crate) fn cleanup_threshold(&self) -> usize {
+        self.cleanup_threshold.get()
+    }
+
+    pub(crate) fn set_cleanup_threshold(&self, threshold: usize) {
+        self.cleanup_threshold.set(threshold.max(1));
+    }
+
     pub(super) fn register(&self, signal: Weak<dyn SignalOwner>) {
         let mut signals = self.signals.borrow_mut();
         let registrations = self.registrations_since_cleanup.get() + 1;
-        if registrations >= signals.len().max(64) {
+        if registrations >= self.cleanup_threshold.get() {
             signals.retain(|signal| signal.strong_count() != 0);
             self.registrations_since_cleanup.set(0);
         } else {

@@ -266,6 +266,25 @@ impl Workspace {
         BindableEvent::new(Rc::downgrade(&self.lookup.scheduler))
     }
 
+    /// Returns the number of signal registrations between registry cleanups.
+    ///
+    /// The default is 64. Cleanups release registry entries for dropped signals;
+    /// live subscriptions and queued invocations are preserved.
+    pub fn signal_cleanup_threshold(&self) -> usize {
+        self.lookup.scheduler.cleanup_threshold()
+    }
+
+    /// Sets the number of signal registrations between registry cleanups.
+    ///
+    /// Smaller values reclaim dropped signal allocations sooner; larger values
+    /// reduce the frequency of registry scans. Zero is treated as one, cleaning
+    /// on every registration. The new threshold applies on the next registration,
+    /// including registrations already accumulated since the last cleanup.
+    /// Cloned workspaces retain this setting.
+    pub fn set_signal_cleanup_threshold(&mut self, threshold: usize) {
+        self.lookup.scheduler.set_cleanup_threshold(threshold);
+    }
+
     /// Processes up to 1,024 queued signal invocations in emission order.
     ///
     /// [`Self::update`] calls this after advancing the scene. Headless callers
@@ -363,6 +382,9 @@ impl Workspace {
 impl Clone for Workspace {
     fn clone(&self) -> Self {
         let lookup = Rc::new(InstanceLookup::default());
+        lookup
+            .scheduler
+            .set_cleanup_threshold(self.signal_cleanup_threshold());
         let mut instance = Box::new((*self.instance).clone());
         lookup.set_root(&mut instance);
         instance.set_lookup(Some(&lookup));
