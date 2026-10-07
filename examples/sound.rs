@@ -211,7 +211,10 @@ fn demo_audio() -> Vec<u8> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
+        .run(initialize)
+        .unwrap();
 }
 
 #[cfg(test)]

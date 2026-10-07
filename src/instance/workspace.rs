@@ -1,12 +1,13 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 #[cfg(feature = "physics")]
 use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Lighting,
-    Texture, TextureError, TextureHandle, TweenManager,
+    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Humanoid, Instance, InstanceData,
+    InstanceId, InstanceLookup, Lighting, LocalPlayerConfig, Part, Player, Texture, TextureError,
+    TextureHandle, TweenManager, glam::Vec3,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -56,6 +57,7 @@ pub struct Workspace {
     /// The camera used when this workspace is rendered.
     pub current_camera: Camera,
     camera_controller: CameraController,
+    local_player_id: Option<InstanceId>,
     tween_manager: TweenManager,
     #[cfg(feature = "physics")]
     physics: PhysicsWorld,
@@ -82,6 +84,7 @@ impl Workspace {
             instance,
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
+            local_player_id: None,
             tween_manager: TweenManager::default(),
             #[cfg(feature = "physics")]
             physics: PhysicsWorld::default(),
@@ -94,6 +97,139 @@ impl Workspace {
             texture_revision: 0,
             lighting: Lighting::default(),
             lookup,
+        }
+    }
+
+    /// Creates a workspace with the selected starting geometry.
+    ///
+    /// Players are configured separately with [`Self::set_local_player`].
+    pub fn preset(preset: WorkspacePreset) -> Self {
+        let mut workspace = Self::new();
+        if preset == WorkspacePreset::Baseplate {
+            workspace.add_child(
+                Part::new()
+                    .with_name("Baseplate")
+                    .with_size(Vec3::new(512.0, 1.0, 512.0))
+                    .with_position(Vec3::new(0.0, -0.5, 0.0))
+                    .with_color(Color3::new(0.35, 0.4, 0.35))
+                    .with_anchored(true),
+            );
+        }
+        workspace
+    }
+
+    /// Replaces the automatically managed local player, or disables it with `None`.
+    ///
+    /// Removes the previous managed player and its character. An enabled player
+    /// with `auto_spawn` gets an immediate first character and becomes the camera subject.
+    /// Later characters use the player's respawn delay.
+    pub fn set_local_player(&mut self, config: Option<LocalPlayerConfig>) -> Option<InstanceId> {
+        if let Some(id) = self.local_player_id.take() {
+            let characters = self
+                .get::<Player>(id)
+                .map(|player| [player.character, player.previous_character]);
+            if let Some(characters) = characters {
+                if self.current_camera.subject.is_some()
+                    && characters.contains(&self.current_camera.subject)
+                {
+                    self.current_camera.subject = None;
+                }
+                if let Some(character) = characters[0]
+                    .or(characters[1])
+                    .and_then(|id| self.get_mut::<Humanoid>(id))
+                {
+                    character.destroy();
+                }
+            }
+            if let Some(player) = self.instance_mut(id) {
+                player.destroy();
+            }
+        }
+        let config = config?;
+        let auto_spawn = config.auto_spawn;
+        let id = self.add_child(Player::from_config(config));
+        self.local_player_id = Some(id);
+        if auto_spawn {
+            self.current_camera.subject = self.spawn_character(id);
+            self.update_camera(0.0);
+        }
+        Some(id)
+    }
+
+    /// Returns the automatically configured local player, if it still exists.
+    pub fn local_player(&self) -> Option<&Player> {
+        self.get(self.local_player_id?)
+    }
+
+    /// Returns mutable access to the local player's spawn and respawn settings.
+    pub fn local_player_mut(&mut self) -> Option<&mut Player> {
+        self.get_mut(self.local_player_id?)
+    }
+
+    /// Returns the local player's current character, if it exists.
+    pub fn local_character(&self) -> Option<&Humanoid> {
+        self.get(self.local_player()?.character?)
+    }
+
+    /// Immediately replaces a player's character, regardless of automatic spawning settings.
+    ///
+    /// Returns `None` for a missing player. A camera following the previous character
+    /// follows the replacement; a cleared or custom subject is preserved.
+    pub fn spawn_character(&mut self, player_id: InstanceId) -> Option<InstanceId> {
+        let player = self.get::<Player>(player_id)?;
+        let old = player.character.or(player.previous_character);
+        let mut character = Humanoid::new(player.player_id.clone());
+        character.pivot_to(player.spawn_pose);
+        if let Some(character) = old.and_then(|id| self.get_mut::<Humanoid>(id)) {
+            character.destroy();
+        }
+        let character_id = self.add_child(character);
+        let player = self.get_mut::<Player>(player_id)?;
+        player.character = Some(character_id);
+        player.previous_character = Some(character_id);
+        player.missing_seconds = 0.0;
+        if old.is_some() && self.current_camera.subject == old {
+            self.current_camera.subject = Some(character_id);
+        }
+        Some(character_id)
+    }
+
+    fn update_players(&mut self, delta_seconds: f32) {
+        let delta = if delta_seconds.is_finite() {
+            delta_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        let players: Vec<_> = self.get_all::<Player>().map(Instance::id).collect();
+        for id in players {
+            let character_exists = self
+                .get::<Player>(id)
+                .and_then(|player| player.character)
+                .and_then(|id| self.get::<Humanoid>(id))
+                .is_some();
+            let player = self
+                .get_mut::<Player>(id)
+                .expect("player was collected above");
+            if character_exists {
+                player.previous_character = player.character;
+                player.missing_seconds = 0.0;
+                continue;
+            }
+            player.previous_character = player.character.or(player.previous_character);
+            player.character = None;
+            if !player.auto_spawn {
+                player.missing_seconds = 0.0;
+                continue;
+            }
+            player.missing_seconds += delta;
+            let delay = if player.respawn_time.is_finite() {
+                player.respawn_time.max(0.0)
+            } else {
+                0.0
+            };
+            if player.missing_seconds >= delay {
+                self.spawn_character(id);
+            }
         }
     }
 
@@ -244,16 +380,26 @@ impl Workspace {
 
     /// Applies the controller's accumulated input to the active camera.
     pub fn update_camera(&mut self, delta: f32) {
-        self.camera_controller
-            .update_camera(&mut self.current_camera, delta);
+        if let Some(subject) = self.current_camera.subject {
+            let pose = self
+                .instance(subject)
+                .and_then(Instance::as_pv_instance)
+                .map(HasPVInstance::pose);
+            self.camera_controller
+                .update_subject_camera(&mut self.current_camera, pose);
+        } else {
+            self.camera_controller
+                .update_camera(&mut self.current_camera, delta);
+        }
     }
 
-    /// Advances the simulation when enabled.
+    /// Advances player respawns, tweens, optional physics, the camera, and optional audio.
     pub fn update(&mut self, delta_seconds: f32) {
-        self.update_camera(delta_seconds);
+        self.update_players(delta_seconds);
         self.update_tweens(delta_seconds);
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
+        self.update_camera(delta_seconds);
         #[cfg(feature = "sound")]
         for error in self.update_audio(delta_seconds) {
             log::error!("{error}");
@@ -324,6 +470,7 @@ impl Clone for Workspace {
             instance,
             current_camera: self.current_camera.clone(),
             camera_controller: self.camera_controller.clone(),
+            local_player_id: None,
             tween_manager: self.tween_manager.clone(),
             #[cfg(feature = "physics")]
             physics: self.physics.clone_configuration(),
@@ -340,8 +487,35 @@ impl Clone for Workspace {
         for child in workspace.instance.children_mut() {
             child.set_instance_lookup(Some(lookup.clone()));
         }
+        let ids: HashMap<_, _> = self
+            .instances()
+            .zip(workspace.instances())
+            .map(|(old, new)| (old.id(), new.id()))
+            .collect();
+        let remap = |id: InstanceId| ids.get(&id).copied().unwrap_or(id);
+        workspace.local_player_id = self.local_player_id.map(remap);
+        workspace.current_camera.subject = self.current_camera.subject.map(remap);
+        for id in ids.values().copied() {
+            if let Some(player) = workspace.get_mut::<Player>(id) {
+                player.character = player.character.map(remap);
+                player.previous_character = player.previous_character.map(remap);
+            }
+            if let Some(camera) = workspace.get_mut::<Camera>(id) {
+                camera.subject = camera.subject.map(remap);
+            }
+        }
         workspace
     }
+}
+
+/// Starting geometry for a new workspace; player settings are independent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorkspacePreset {
+    /// No starting geometry, suitable for projects that create their own world.
+    Empty,
+    /// An anchored 512 by 512 plate whose top is at world Y = 0.
+    #[default]
+    Baseplate,
 }
 
 impl Default for Workspace {

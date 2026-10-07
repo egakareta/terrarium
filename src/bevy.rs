@@ -38,7 +38,7 @@ impl Plugin for TerrariumPlugin {
 /// Ordering boundaries for Terrarium systems in [`PostUpdate`].
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TerrariumSet {
-    /// Advances camera motion, tweens, physics, and audio once using Bevy's virtual frame time.
+    /// Advances player respawns, tweens, physics, camera motion, and audio using Bevy's virtual frame time.
     ///
     /// Systems in `Update` run before this phase. Systems in `PostUpdate` can declare
     /// `.before(TerrariumSet::Advance)` or `.after(TerrariumSet::Advance)` as appropriate.
@@ -65,6 +65,7 @@ pub(crate) fn attach_app(
     workspace: &mut Workspace,
     context: &egui::Context,
 ) -> Result<BevyApp, AppCreationError> {
+    let supplied_workspace = app.world().contains_non_send::<Workspace>();
     if !app.is_plugin_added::<TerrariumPlugin>() {
         if matches!(
             app.plugins_state(),
@@ -79,7 +80,9 @@ pub(crate) fn attach_app(
     }
 
     // Preserve any scene supplied by the caller before the initializer runs.
-    std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+    if supplied_workspace {
+        std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+    }
     app.world_mut()
         .insert_non_send(EguiContext(context.clone()));
     Ok(app)

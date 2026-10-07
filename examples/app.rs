@@ -262,12 +262,16 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
+        .run(initialize)
+        .unwrap();
 }
 
 #[test]
 fn app_loads() -> Result<(), terrarium::AppCreationError> {
-    Terrarium::new()
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_size([32, 32])
         .with_headless(Some(1))
         .run(initialize)?;

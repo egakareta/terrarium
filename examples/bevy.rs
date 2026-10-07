@@ -99,7 +99,8 @@ fn main() {
         .add_systems(app::Startup, setup)
         .add_systems(app::Update, animate_orbits);
 
-    Terrarium::new()
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_bevy(app)
         .run(|_engine| Ok::<_, AppCreationError>(SceneUi))
         .unwrap();

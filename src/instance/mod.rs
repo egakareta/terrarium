@@ -14,20 +14,24 @@ use slotmap::SlotMap;
 
 use crate::glam::{EulerRot, Mat4, Quat, Vec3};
 mod camera;
+mod humanoid;
 mod light;
 #[cfg(feature = "meshpart")]
 mod meshpart;
 mod outline;
 mod part;
+mod player;
 #[cfg(feature = "sound")]
 mod sound;
 mod workspace;
 pub use camera::*;
+pub use humanoid::*;
 pub use light::*;
 #[cfg(feature = "meshpart")]
 pub use meshpart::*;
 pub use outline::*;
 pub use part::*;
+pub use player::*;
 #[cfg(feature = "sound")]
 pub use sound::*;
 pub use workspace::*;
@@ -139,6 +143,7 @@ macro_rules! impl_instance {
         $type:ty,
         class_name = $class_name:literal,
         data = $data:ident $(.$data_tail:ident)* $(,)?
+        $(pv = $pv:ident $(.$pv_tail:ident)* $(,)?)?
     ) => {
         impl $crate::Instance for $type {
             fn class_name(&self) -> &'static str {
@@ -230,6 +235,14 @@ macro_rules! impl_instance {
                 self
             }
 
+            fn as_pv_instance(&self) -> Option<&$crate::PVInstance> {
+                $crate::impl_instance!(@pv_ref self $(, $pv $(.$pv_tail)*)?)
+            }
+
+            fn as_pv_instance_mut(&mut self) -> Option<&mut $crate::PVInstance> {
+                $crate::impl_instance!(@pv_mut self $(, $pv $(.$pv_tail)*)?)
+            }
+
             fn set_instance_lookup(
                 &mut self,
                 lookup: Option<::std::rc::Rc<$crate::InstanceLookup>>,
@@ -252,6 +265,10 @@ macro_rules! impl_instance {
             }
         }
     };
+    (@pv_ref $this:ident, $pv:ident $(.$tail:ident)*) => { Some(&$this.$pv $(.$tail)*) };
+    (@pv_ref $this:ident) => { None };
+    (@pv_mut $this:ident, $pv:ident $(.$tail:ident)*) => { Some(&mut $this.$pv $(.$tail)*) };
+    (@pv_mut $this:ident) => { None };
 }
 
 impl InstanceId {
@@ -418,6 +435,19 @@ impl Clone for InstanceData {
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
 pub trait Instance: Any + Debug + InstanceClone {
+    /// Returns this node's spatial transform, when it has one.
+    ///
+    /// Custom spatial types using [`impl_instance!`] can expose their transform with
+    /// `pv = field.path` after the `data` argument.
+    fn as_pv_instance(&self) -> Option<&PVInstance> {
+        None
+    }
+
+    /// Returns mutable access to this node's spatial transform, when it has one.
+    fn as_pv_instance_mut(&mut self) -> Option<&mut PVInstance> {
+        None
+    }
+
     /// The concrete class name of this instance.
     fn class_name(&self) -> &'static str;
 
@@ -908,6 +938,36 @@ pub trait HasPVInstance {
     /// Returns mutable access to the underlying [`PVInstance`].
     fn pv_mut(&mut self) -> &mut PVInstance;
 
+    /// Returns children affected by [`Self::pivot_to`].
+    ///
+    /// Spatial scene nodes should return `Some(Instance::children_mut(self))`.
+    /// A standalone [`PVInstance`] has no children.
+    fn spatial_children_mut(&mut self) -> Option<ChildrenMut<'_>> {
+        None
+    }
+
+    /// Moves this instance and all spatial descendants to a world-space rigid pose.
+    ///
+    /// Applies the same translation and rotation to the entire subtree, including
+    /// descendants beneath non-spatial nodes. Each node keeps its scale and relative
+    /// pose. Scale in `pose` is ignored, as with [`Self::with_pose`].
+    fn pivot_to(&mut self, pose: Mat4) {
+        let pose = PVInstance::pose_from_transform(pose);
+        let delta = pose * self.pose().inverse();
+        self.pivot_to_self(pose);
+        if let Some(children) = self.spatial_children_mut() {
+            for child in children {
+                transform_subtree(child, delta);
+            }
+        }
+    }
+
+    /// Changes only this instance's rigid pose, preserving scale and leaving children in place.
+    fn pivot_to_self(&mut self, pose: Mat4) {
+        let size = self.pivot().to_scale_rotation_translation().0;
+        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+    }
+
     /// The world-space transform of the instance's pivot.
     fn pivot(&self) -> Mat4 {
         self.pv().pivot
@@ -947,14 +1007,12 @@ pub trait HasPVInstance {
         self
     }
 
-    /// Replaces the position and orientation (rigid pose) while preserving the current scale.
+    /// Replaces only this instance's rigid pose while preserving scale and leaving descendants in place.
     fn with_pose(mut self, pose: Mat4) -> Self
     where
         Self: Sized,
     {
-        let pivot = self.pivot();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+        self.pivot_to_self(pose);
         self
     }
 
@@ -1019,6 +1077,19 @@ impl<T: HasPVInstance + ?Sized> HasPVInstance for &mut T {
 
     fn pv_mut(&mut self) -> &mut PVInstance {
         (**self).pv_mut()
+    }
+
+    fn spatial_children_mut(&mut self) -> Option<ChildrenMut<'_>> {
+        (**self).spatial_children_mut()
+    }
+}
+
+fn transform_subtree(instance: &mut dyn Instance, delta: Mat4) {
+    if let Some(pv) = instance.as_pv_instance_mut() {
+        pv.pivot = delta * pv.pivot;
+    }
+    for child in instance.children_mut() {
+        transform_subtree(child, delta);
     }
 }
 

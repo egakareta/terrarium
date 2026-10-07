@@ -3,7 +3,8 @@ use terrarium::{glam::*, *};
 #[test]
 fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
     use terrarium::HasMaterials as _;
-    let engine = Terrarium::new()
+    let engine = Terrarium::preset(WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
@@ -39,7 +40,8 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
 
 #[test]
 fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
-    let engine = Terrarium::new()
+    let engine = Terrarium::preset(WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
@@ -78,7 +80,8 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
 
 #[test]
 fn multiple_viewports_keep_independent_egui_textures() -> Result<(), AppCreationError> {
-    Terrarium::new()
+    Terrarium::preset(WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_size([128, 128])
         .with_headless(Some(0))
         .run(|engine| {
@@ -99,7 +102,8 @@ fn multiple_viewports_keep_independent_egui_textures() -> Result<(), AppCreation
 #[test]
 fn basepart_transparency_blends_front_geometry_with_background()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let engine = Terrarium::new()
+    let engine = Terrarium::preset(WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
@@ -139,7 +143,8 @@ fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
         OutlineMode::Silhouette,
         OutlineMode::Stencil,
     ] {
-        let engine = Terrarium::new()
+        let engine = Terrarium::preset(WorkspacePreset::Empty)
+            .with_local_player(None)
             .with_size([128, 128])
             .with_headless(Some(1))
             .run(move |engine| {

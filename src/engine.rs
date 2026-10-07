@@ -12,7 +12,9 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
+use crate::{
+    LocalPlayerConfig, Renderer, RendererError, Workspace, WorkspacePreset, eframe, egui, egui_wgpu,
+};
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
@@ -202,11 +204,27 @@ pub struct Engine {
 impl Engine {
     /// Creates the engine from eframe's WGPU creation context.
     ///
+    /// Starts with a baseplate and a local player whose character is the camera subject.
     /// `fallback_size` is used on web and when no native window is available. The renderer is
     /// automatically resized to the UI region when [`Self::render`] is called.
     pub fn new(
         creation_context: &eframe::CreationContext<'_>,
         fallback_size: [u32; 2],
+    ) -> Result<Self, RendererError> {
+        Self::new_with_workspace(
+            creation_context,
+            fallback_size,
+            configured_workspace(
+                WorkspacePreset::Baseplate,
+                Some(LocalPlayerConfig::default()),
+            ),
+        )
+    }
+
+    fn new_with_workspace(
+        creation_context: &eframe::CreationContext<'_>,
+        fallback_size: [u32; 2],
+        workspace: Workspace,
     ) -> Result<Self, RendererError> {
         #[cfg(not(target_arch = "wasm32"))]
         let size = creation_context
@@ -231,7 +249,7 @@ impl Engine {
 
         Ok(Self {
             renderer,
-            workspace: Workspace::new(),
+            workspace,
             creation_context: Self::owned_creation_context(creation_context),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
@@ -476,6 +494,12 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     delta
 }
 
+fn configured_workspace(preset: WorkspacePreset, player: Option<LocalPlayerConfig>) -> Workspace {
+    let mut workspace = Workspace::preset(preset);
+    workspace.set_local_player(player);
+    workspace
+}
+
 fn prepare_workspace(
     renderer: &RendererHandle,
     workspace: &mut Workspace,
@@ -650,6 +674,8 @@ enum HeadlessMode {
 
 /// The primary entry point for configuring and running a Terrarium application.
 pub struct Terrarium<'a> {
+    workspace_preset: WorkspacePreset,
+    local_player: Option<LocalPlayerConfig>,
     #[cfg(feature = "bevy")]
     bevy_app: Option<bevy_app::App>,
     title: &'a str,
@@ -669,6 +695,8 @@ pub struct Terrarium<'a> {
 impl<'a> Default for Terrarium<'a> {
     fn default() -> Self {
         Self {
+            workspace_preset: WorkspacePreset::Baseplate,
+            local_player: Some(LocalPlayerConfig::default()),
             #[cfg(feature = "bevy")]
             bevy_app: None,
             title: "app",
@@ -695,12 +723,37 @@ impl<'a> Terrarium<'a> {
         Self::default()
     }
 
+    /// Creates a launcher with the selected world geometry and default local player.
+    ///
+    /// Equivalent to `Terrarium::new().with_preset(preset)`. The default preset is
+    /// [`WorkspacePreset::Baseplate`]; [`WorkspacePreset::Empty`] lets projects supply their own world.
+    pub fn preset(preset: WorkspacePreset) -> Self {
+        Self::new().with_preset(preset)
+    }
+
+    /// Selects the geometry created before the application initializer runs.
+    pub fn with_preset(mut self, preset: WorkspacePreset) -> Self {
+        self.workspace_preset = preset;
+        self
+    }
+
+    /// Configures the automatically created local player, or disables it with `None`.
+    ///
+    /// By default the player ID is `"local"`, characters respawn after three seconds,
+    /// and the camera follows the character. An initial character is created before
+    /// the initializer when `auto_spawn` is enabled.
+    pub fn with_local_player(mut self, config: Option<LocalPlayerConfig>) -> Self {
+        self.local_player = config;
+        self
+    }
+
     /// Configures a Bevy app without changing the [`Self::run`] initializer or application callbacks.
     ///
     /// This only configures the launcher; the adapter is installed when `run(initialize)` creates
     /// the engine. Terrarium adds [`crate::bevy::TerrariumPlugin`] when needed, drives Bevy from
     /// [`Engine::update`], and still owns the event loop and renderer. Do not install Bevy's window
     /// or render plugins. A finalized Bevy app must already contain `TerrariumPlugin`.
+    /// A workspace already supplied to Bevy takes precedence over the launcher's world settings.
     #[cfg(feature = "bevy")]
     pub fn with_bevy(mut self, app: bevy_app::App) -> Self {
         self.bevy_app = Some(app);
@@ -734,6 +787,8 @@ impl<'a> Terrarium<'a> {
         let launcher = self;
 
         let size = launcher.size;
+        let preset = launcher.workspace_preset;
+        let local_player = launcher.local_player.clone();
         #[cfg(feature = "default-fonts")]
         let is_bundled_fonts = launcher.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
@@ -744,7 +799,11 @@ impl<'a> Terrarium<'a> {
             if is_bundled_fonts {
                 creation_context.egui_ctx.set_fonts(font_definitions());
             }
-            let engine = Engine::new(creation_context, size)?;
+            let engine = Engine::new_with_workspace(
+                creation_context,
+                size,
+                configured_workspace(preset, local_player),
+            )?;
             #[cfg(feature = "bevy")]
             let mut engine = engine;
             #[cfg(feature = "bevy")]

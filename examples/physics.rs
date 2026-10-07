@@ -144,12 +144,16 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
+        .run(initialize)
+        .unwrap();
 }
 
 #[test]
 fn physics_example_loads_headlessly() -> Result<(), terrarium::AppCreationError> {
-    let engine = Terrarium::new()
+    let engine = Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_size([64, 64])
         .with_headless(Some(2))
         .run(initialize)?

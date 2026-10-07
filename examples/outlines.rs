@@ -63,7 +63,8 @@ impl App for OutlinesApp {
 }
 
 fn main() {
-    Terrarium::new()
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
         .run(|engine| {
             let mesh = engine.add_mesh(include_bytes!("../assets/Duck.glb"))?;
 

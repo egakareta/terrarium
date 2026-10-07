@@ -29,7 +29,8 @@ impl App for CloseAfterFrames {
 }
 
 fn main() {
-    Terrarium::new()
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
         .run(|_engine| -> Result<CloseAfterFrames, AppCreationError> {
             Ok(CloseAfterFrames {
                 completed: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -52,7 +53,8 @@ mod tests {
 
         let completed = Arc::new(AtomicUsize::new(0));
         let app_completed = Arc::clone(&completed);
-        Terrarium::new()
+        Terrarium::preset(terrarium::WorkspacePreset::Empty)
+            .with_local_player(None)
             .with_size([32, 32])
             .with_env_logger(false)
             .with_headless(None)

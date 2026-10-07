@@ -1,8 +1,8 @@
 use crate::{
-    HasPVInstance, InstanceData, PVInstance,
+    HasPVInstance, InstanceData, InstanceId, PVInstance,
     glam::{Mat4, Quat, Vec3},
     winit::{
-        event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+        event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         keyboard::{KeyCode, PhysicalKey},
     },
 };
@@ -16,6 +16,55 @@ pub struct Camera {
     fovy: f32,
     znear: f32,
     zfar: f32,
+    /// Spatial scene instance to follow. `None` enables the free-moving camera.
+    ///
+    /// A missing or non-spatial subject holds the last camera pose until a valid
+    /// subject is assigned. Automatically created local characters are selected at startup.
+    pub subject: Option<InstanceId>,
+    /// Orbit and zoom settings used when a subject is assigned.
+    pub follow: CameraFollowSettings,
+}
+
+/// Configurable third-person orbit around a camera's subject.
+///
+/// Set `distance` and `min_distance` to zero for a first-person subject view.
+/// Orbit angles use world Y as up; the target offset is in the subject's local space.
+#[derive(Clone, Debug)]
+pub struct CameraFollowSettings {
+    /// Distance from the target in world units; defaults to twelve.
+    pub distance: f32,
+    /// Minimum zoom distance; defaults to two.
+    pub min_distance: f32,
+    /// Maximum zoom distance; defaults to eighty.
+    pub max_distance: f32,
+    /// Horizontal orbit angle in radians; zero places the camera on the target's +Z side.
+    pub yaw: f32,
+    /// Camera look elevation in radians; defaults to twenty degrees downward.
+    pub pitch: f32,
+    /// Minimum look elevation in radians; defaults to eighty degrees downward.
+    pub min_pitch: f32,
+    /// Maximum look elevation in radians; defaults to eighty degrees upward.
+    pub max_pitch: f32,
+    /// Focus offset from the subject pivot in its local space; defaults to (0, 1, 0).
+    pub target_offset: Vec3,
+    /// World units of zoom per scroll line; defaults to one.
+    pub zoom_sensitivity: f32,
+}
+
+impl Default for CameraFollowSettings {
+    fn default() -> Self {
+        Self {
+            distance: 12.0,
+            min_distance: 2.0,
+            max_distance: 80.0,
+            yaw: 0.0,
+            pitch: -20.0_f32.to_radians(),
+            min_pitch: -80.0_f32.to_radians(),
+            max_pitch: 80.0_f32.to_radians(),
+            target_offset: Vec3::Y,
+            zoom_sensitivity: 1.0,
+        }
+    }
 }
 
 /// Access to a camera's projection properties.
@@ -25,6 +74,15 @@ pub trait HasCamera {
 
     /// Returns mutable access to the underlying [`Camera`].
     fn camera_mut(&mut self) -> &mut Camera;
+
+    /// Assigns a spatial subject, or selects free movement with `None`.
+    fn with_subject(mut self, subject: Option<InstanceId>) -> Self
+    where
+        Self: Sized,
+    {
+        self.camera_mut().subject = subject;
+        self
+    }
 
     /// Viewport width divided by viewport height.
     fn aspect(&self) -> f32 {
@@ -119,6 +177,8 @@ impl Camera {
             fovy: 60.0_f32.to_radians(),
             znear: 0.1,
             zfar: 200.0,
+            subject: None,
+            follow: CameraFollowSettings::default(),
         }
     }
 
@@ -143,7 +203,12 @@ impl Camera {
     }
 }
 
-crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
+crate::impl_instance!(
+    Camera,
+    class_name = "Camera",
+    data = instance,
+    pv = pv_instance,
+);
 
 /// Physical keyboard keys assigned to camera movement actions.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -178,7 +243,7 @@ impl Default for CameraKeyBindings {
     }
 }
 
-/// First-person keyboard and mouse input for a [`Camera`].
+/// Keyboard free flight and mouse orbit, look, and zoom input for a [`Camera`].
 #[derive(Clone, Debug)]
 pub struct CameraController {
     /// Movement speed in world units per second.
@@ -203,6 +268,8 @@ pub struct CameraController {
     pub sprint: bool,
     /// Accumulated mouse delta as `(x, y)` until the next update.
     pub mouse_delta: (f32, f32),
+    /// Accumulated scroll lines for subject zoom; positive values zoom in.
+    pub scroll_delta: f32,
     /// Mouse button that activates drag-to-look.
     pub mouse_drag_button: MouseButton,
     /// Whether mouse-look input is processed.
@@ -220,12 +287,12 @@ impl Default for CameraController {
 }
 
 impl CameraController {
-    /// Creates a first-person controller with the given speed and sensitivity.
+    /// Creates a camera controller with the given free-flight speed and look sensitivity.
     pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self::new_with_key_bindings(speed, sensitivity, CameraKeyBindings::default())
     }
 
-    /// Creates a first-person controller with custom movement key bindings.
+    /// Creates a camera controller with custom free-flight movement key bindings.
     pub fn new_with_key_bindings(
         speed: f32,
         sensitivity: f32,
@@ -243,6 +310,7 @@ impl CameraController {
             down: false,
             sprint: false,
             mouse_delta: (0.0, 0.0),
+            scroll_delta: 0.0,
             mouse_drag_button: MouseButton::Left,
             mouse_enabled: true,
             keyboard_enabled: true,
@@ -278,6 +346,7 @@ impl CameraController {
         self.mouse_enabled = enabled;
         if !enabled {
             self.mouse_delta = (0.0, 0.0);
+            self.scroll_delta = 0.0;
             self.stop_mouse_drag();
         }
     }
@@ -349,6 +418,13 @@ impl CameraController {
                 self.stop_mouse_drag();
                 was_dragging
             }
+            WindowEvent::MouseWheel { delta, .. } if self.mouse_enabled => {
+                self.scroll_delta += match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y,
+                    MouseScrollDelta::PixelDelta(position) => position.y as f32 / 40.0,
+                };
+                true
+            }
             WindowEvent::Focused(false) => {
                 self.clear_keys();
                 false
@@ -399,12 +475,16 @@ impl CameraController {
 
         if !self.mouse_enabled || egui_wants_pointer_input {
             self.mouse_delta = (0.0, 0.0);
+            self.scroll_delta = 0.0;
             self.stop_mouse_drag();
-        } else if let Some(button) = eframe_button(self.mouse_drag_button)
-            && input.pointer.button_down(button)
-        {
-            let delta = input.pointer.delta() * input.pixels_per_point;
-            self.process_mouse_motion((delta.x, delta.y));
+        } else {
+            self.scroll_delta += input.smooth_scroll_delta.y / 40.0;
+            if let Some(button) = eframe_button(self.mouse_drag_button)
+                && input.pointer.button_down(button)
+            {
+                let delta = input.pointer.delta() * input.pixels_per_point;
+                self.process_mouse_motion((delta.x, delta.y));
+            }
         }
     }
 
@@ -469,7 +549,11 @@ impl CameraController {
             self.clear_keyboard_input();
         }
 
-        let delta_seconds = delta_seconds.min(0.1);
+        let delta_seconds = if delta_seconds.is_finite() {
+            delta_seconds.clamp(0.0, 0.1)
+        } else {
+            0.0
+        };
 
         // Rebuild a roll-free orientation from yaw/pitch every frame.
         // Incremental matrix multiplies (`pivot * rotation`) accumulate
@@ -525,9 +609,55 @@ impl CameraController {
 
         camera.with_pose(Mat4::from_rotation_translation(new_rotation, new_position));
         self.mouse_delta = (0.0, 0.0);
+        self.scroll_delta = 0.0;
+    }
+
+    pub(crate) fn update_subject_camera(
+        &mut self,
+        camera: &mut Camera,
+        subject_pose: Option<Mat4>,
+    ) {
+        let follow = &mut camera.follow;
+        let sensitivity = finite_or(self.sensitivity, 0.0);
+        let mouse = if self.mouse_enabled {
+            self.mouse_delta
+        } else {
+            (0.0, 0.0)
+        };
+        let scroll = if self.mouse_enabled {
+            finite_or(self.scroll_delta, 0.0)
+        } else {
+            0.0
+        };
+        let limit = 89.0_f32.to_radians();
+        let min_pitch = finite_or(follow.min_pitch, -limit).clamp(-limit, limit);
+        let max_pitch = finite_or(follow.max_pitch, limit).clamp(min_pitch, limit);
+        follow.yaw = finite_or(follow.yaw, 0.0) - finite_or(mouse.0, 0.0) * sensitivity;
+        follow.pitch = (finite_or(follow.pitch, 0.0) - finite_or(mouse.1, 0.0) * sensitivity)
+            .clamp(min_pitch, max_pitch);
+        let min_distance = finite_or(follow.min_distance, 0.0).max(0.0);
+        let max_distance = finite_or(follow.max_distance, 80.0).max(min_distance);
+        follow.distance = (finite_or(follow.distance, 12.0)
+            - scroll * finite_or(follow.zoom_sensitivity, 0.0))
+        .clamp(min_distance, max_distance);
+        self.mouse_delta = (0.0, 0.0);
+        self.scroll_delta = 0.0;
+        let Some(pose) = subject_pose.filter(|pose| pose.is_finite()) else {
+            return;
+        };
+        let offset = if follow.target_offset.is_finite() {
+            follow.target_offset
+        } else {
+            Vec3::ZERO
+        };
+        let target = pose.transform_point3(offset);
+        let rotation = Quat::from_rotation_y(follow.yaw) * Quat::from_rotation_x(follow.pitch);
+        let position = target - (rotation * Vec3::NEG_Z) * follow.distance;
+        camera.pivot_to_self(Mat4::from_rotation_translation(rotation, position));
     }
 
     fn clear_keys(&mut self) {
+        self.scroll_delta = 0.0;
         self.clear_keyboard_input();
         self.mouse_delta = (0.0, 0.0);
         self.stop_mouse_drag();
@@ -549,7 +679,15 @@ impl CameraController {
     }
 }
 
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
+}
+
 impl HasPVInstance for Camera {
+    fn spatial_children_mut(&mut self) -> Option<crate::ChildrenMut<'_>> {
+        Some(crate::Instance::children_mut(self))
+    }
+
     fn pv(&self) -> &PVInstance {
         &self.pv_instance
     }

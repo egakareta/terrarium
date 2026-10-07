@@ -317,7 +317,12 @@ impl MeshPart {
     }
 }
 
-crate::impl_instance!(MeshPart, class_name = "MeshPart", data = basepart.instance,);
+crate::impl_instance!(
+    MeshPart,
+    class_name = "MeshPart",
+    data = basepart.instance,
+    pv = basepart.pv_instance,
+);
 
 /// Access to the underlying [`MeshPart`].
 pub trait HasMeshPart {
@@ -371,6 +376,10 @@ impl<T: HasMeshPart + ?Sized> HasMeshPart for &mut T {
 }
 
 impl HasPVInstance for MeshPart {
+    fn spatial_children_mut(&mut self) -> Option<crate::ChildrenMut<'_>> {
+        Some(crate::Instance::children_mut(self))
+    }
+
     fn pv(&self) -> &PVInstance {
         self.basepart.pv()
     }

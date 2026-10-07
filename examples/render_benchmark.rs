@@ -537,7 +537,8 @@ fn main() {
         config.parts, config.warmup_frames, config.measured_frames
     );
 
-    Terrarium::new()
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
         .with_title("Render benchmark")
         .with_size([config.width, config.height])
         .with_wgpu_options(|wgpu_options| {

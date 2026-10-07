@@ -90,5 +90,8 @@ fn initialize(engine: &mut Engine) -> Result<ViewportApp, AppCreationError> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::preset(terrarium::WorkspacePreset::Empty)
+        .with_local_player(None)
+        .run(initialize)
+        .unwrap();
 }

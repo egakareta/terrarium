@@ -38,9 +38,18 @@ impl Default for BasePart {
     }
 }
 
-crate::impl_instance!(BasePart, class_name = "BasePart", data = instance,);
+crate::impl_instance!(
+    BasePart,
+    class_name = "BasePart",
+    data = instance,
+    pv = pv_instance,
+);
 
 impl HasPVInstance for BasePart {
+    fn spatial_children_mut(&mut self) -> Option<crate::ChildrenMut<'_>> {
+        Some(crate::Instance::children_mut(self))
+    }
+
     fn pv(&self) -> &PVInstance {
         &self.pv_instance
     }
@@ -284,9 +293,18 @@ impl<T: HasPart + ?Sized> HasPart for &mut T {
     }
 }
 
-crate::impl_instance!(Part, class_name = "Part", data = basepart.instance,);
+crate::impl_instance!(
+    Part,
+    class_name = "Part",
+    data = basepart.instance,
+    pv = basepart.pv_instance,
+);
 
 impl HasPVInstance for Part {
+    fn spatial_children_mut(&mut self) -> Option<crate::ChildrenMut<'_>> {
+        Some(crate::Instance::children_mut(self))
+    }
+
     fn pv(&self) -> &PVInstance {
         self.basepart.pv()
     }
