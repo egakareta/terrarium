@@ -200,18 +200,11 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Creates the engine from eframe's WGPU creation context.
+    /// Creates the engine with the supplied workspace from eframe's WGPU creation context.
     ///
     /// `fallback_size` is used on web and when no native window is available. The renderer is
     /// automatically resized to the UI region when [`Self::render`] is called.
     pub fn new(
-        creation_context: &eframe::CreationContext<'_>,
-        fallback_size: [u32; 2],
-    ) -> Result<Self, RendererError> {
-        Self::new_with_workspace(creation_context, fallback_size, Workspace::new())
-    }
-
-    fn new_with_workspace(
         creation_context: &eframe::CreationContext<'_>,
         fallback_size: [u32; 2],
         workspace: Workspace,
@@ -767,8 +760,7 @@ impl<'a> Terrarium<'a> {
             if is_bundled_fonts {
                 creation_context.egui_ctx.set_fonts(font_definitions());
             }
-            let engine =
-                Engine::new_with_workspace(creation_context, size, Workspace::preset(preset))?;
+            let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
             #[cfg(feature = "bevy")]
             let mut engine = engine;
             #[cfg(feature = "bevy")]
