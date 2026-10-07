@@ -5,8 +5,9 @@ use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    Camera, CameraController, Instance, InstanceData, InstanceId, InstanceLookup, Lighting,
-    Texture, TextureError, TextureHandle, TweenManager,
+    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
+    InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError, TextureHandle, TweenManager,
+    glam::Vec3,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -47,6 +48,16 @@ impl BoxOverlapQuery {
         self.max_parts = max_parts;
         self
     }
+}
+
+/// Starting geometry for a workspace.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorkspacePreset {
+    /// An empty scene, matching [`Workspace::new`]. This is the default preset.
+    #[default]
+    Empty,
+    /// An anchored, collidable 512 by 512 baseplate with its top at world Y = 0.
+    Baseplate,
 }
 
 /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
@@ -95,6 +106,28 @@ impl Workspace {
             lighting: Lighting::default(),
             lookup,
         }
+    }
+
+    /// Creates a workspace with the selected starting geometry and default camera.
+    ///
+    /// [`WorkspacePreset::Empty`] is equivalent to [`Self::new`].
+    pub fn preset(preset: WorkspacePreset) -> Self {
+        let mut workspace = Self::new();
+        match preset {
+            WorkspacePreset::Empty => {}
+            WorkspacePreset::Baseplate => {
+                workspace.add_child(
+                    Part::new()
+                        .with_name("Baseplate")
+                        .with_size(Vec3::new(512.0, 1.0, 512.0))
+                        .with_position(Vec3::new(0.0, -0.5, 0.0))
+                        .with_color(Color3::new(0.35, 0.4, 0.35))
+                        .with_anchored(true)
+                        .with_can_collide(true),
+                );
+            }
+        }
+        workspace
     }
 
     /// Takes ownership of mesh data or losslessly imports a glTF document.
