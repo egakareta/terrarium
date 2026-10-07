@@ -191,7 +191,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             .add_systems(Startup, setup)
             .add_systems(Update, update);
 
-        let engine = Terrarium::new()
+        let engine = Terrarium::preset(WorkspacePreset::Baseplate)
             .with_bevy(app)
             .with_title("Bevy adapter test")
             .with_size([32, 32])
@@ -208,6 +208,11 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             .unwrap();
 
         let scene = &engine.workspace;
+        assert!(
+            scene
+                .get_all::<Part>()
+                .all(|part| part.name() != "Baseplate")
+        );
         let part = scene.get::<Part>(subject).unwrap();
         assert_eq!(part.name(), "Existing part");
         assert_abs_diff_eq!(part.position().x, 3.0, epsilon = 1e-6);

@@ -65,6 +65,7 @@ pub(crate) fn attach_app(
     workspace: &mut Workspace,
     context: &egui::Context,
 ) -> Result<BevyApp, AppCreationError> {
+    let supplied_workspace = app.world().contains_non_send::<Workspace>();
     if !app.is_plugin_added::<TerrariumPlugin>() {
         if matches!(
             app.plugins_state(),
@@ -79,7 +80,9 @@ pub(crate) fn attach_app(
     }
 
     // Preserve any scene supplied by the caller before the initializer runs.
-    std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+    if supplied_workspace {
+        std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+    }
     app.world_mut()
         .insert_non_send(EguiContext(context.clone()));
     Ok(app)

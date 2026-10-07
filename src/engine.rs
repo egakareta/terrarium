@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Renderer, RendererError, Workspace, eframe, egui, egui_wgpu};
+use crate::{Renderer, RendererError, Workspace, WorkspacePreset, eframe, egui, egui_wgpu};
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
@@ -200,13 +200,14 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// Creates the engine from eframe's WGPU creation context.
+    /// Creates the engine with the supplied workspace from eframe's WGPU creation context.
     ///
     /// `fallback_size` is used on web and when no native window is available. The renderer is
     /// automatically resized to the UI region when [`Self::render`] is called.
     pub fn new(
         creation_context: &eframe::CreationContext<'_>,
         fallback_size: [u32; 2],
+        workspace: Workspace,
     ) -> Result<Self, RendererError> {
         #[cfg(not(target_arch = "wasm32"))]
         let size = creation_context
@@ -231,7 +232,7 @@ impl Engine {
 
         Ok(Self {
             renderer,
-            workspace: Workspace::new(),
+            workspace,
             creation_context: Self::owned_creation_context(creation_context),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
@@ -650,6 +651,7 @@ enum HeadlessMode {
 
 /// The primary entry point for configuring and running a Terrarium application.
 pub struct Terrarium<'a> {
+    workspace_preset: WorkspacePreset,
     #[cfg(feature = "bevy")]
     bevy_app: Option<bevy_app::App>,
     title: &'a str,
@@ -669,6 +671,7 @@ pub struct Terrarium<'a> {
 impl<'a> Default for Terrarium<'a> {
     fn default() -> Self {
         Self {
+            workspace_preset: WorkspacePreset::default(),
             #[cfg(feature = "bevy")]
             bevy_app: None,
             title: "app",
@@ -688,11 +691,23 @@ impl<'a> Default for Terrarium<'a> {
 }
 
 impl<'a> Terrarium<'a> {
-    /// Creates a Terrarium application launcher with default settings.
+    /// Creates a Terrarium application launcher with an empty workspace and default settings.
     ///
     /// Equivalent to [`Terrarium::default()`].
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a launcher with the selected starting geometry.
+    ///
+    /// The preset is applied before the application initializer runs.
+    /// [`WorkspacePreset::Empty`] is equivalent to [`Self::new`].
+    /// A workspace supplied to Bevy takes precedence over this preset.
+    pub fn preset(preset: WorkspacePreset) -> Self {
+        Self {
+            workspace_preset: preset,
+            ..Self::default()
+        }
     }
 
     /// Configures a Bevy app without changing the [`Self::run`] initializer or application callbacks.
@@ -734,6 +749,7 @@ impl<'a> Terrarium<'a> {
         let launcher = self;
 
         let size = launcher.size;
+        let preset = launcher.workspace_preset;
         #[cfg(feature = "default-fonts")]
         let is_bundled_fonts = launcher.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
@@ -744,7 +760,7 @@ impl<'a> Terrarium<'a> {
             if is_bundled_fonts {
                 creation_context.egui_ctx.set_fonts(font_definitions());
             }
-            let engine = Engine::new(creation_context, size)?;
+            let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
             #[cfg(feature = "bevy")]
             let mut engine = engine;
             #[cfg(feature = "bevy")]
