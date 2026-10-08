@@ -38,12 +38,7 @@ impl Default for BasePart {
     }
 }
 
-crate::impl_instance!(
-    BasePart,
-    class_name = "BasePart",
-    data = instance,
-    pv = pv_instance,
-);
+crate::impl_instance!(BasePart, class_name = "BasePart", data = instance,);
 
 impl HasPVInstance for BasePart {
     fn pv(&self) -> &PVInstance {
@@ -289,12 +284,7 @@ impl<T: HasPart + ?Sized> HasPart for &mut T {
     }
 }
 
-crate::impl_instance!(
-    Part,
-    class_name = "Part",
-    data = basepart.instance,
-    pv = basepart.pv_instance,
-);
+crate::impl_instance!(Part, class_name = "Part", data = basepart.instance,);
 
 impl HasPVInstance for Part {
     fn pv(&self) -> &PVInstance {

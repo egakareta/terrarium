@@ -143,12 +143,7 @@ impl Camera {
     }
 }
 
-crate::impl_instance!(
-    Camera,
-    class_name = "Camera",
-    data = instance,
-    pv = pv_instance,
-);
+crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
 
 /// Physical keyboard keys assigned to camera movement actions.
 #[derive(Clone, Debug, Eq, PartialEq)]

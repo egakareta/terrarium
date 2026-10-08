@@ -317,12 +317,7 @@ impl MeshPart {
     }
 }
 
-crate::impl_instance!(
-    MeshPart,
-    class_name = "MeshPart",
-    data = basepart.instance,
-    pv = basepart.pv_instance,
-);
+crate::impl_instance!(MeshPart, class_name = "MeshPart", data = basepart.instance,);
 
 /// Access to the underlying [`MeshPart`].
 pub trait HasMeshPart {
