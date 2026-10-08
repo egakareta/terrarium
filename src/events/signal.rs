@@ -1,5 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
+    collections::{BTreeMap, VecDeque},
     future::Future,
     pin::Pin,
     rc::{Rc, Weak},
@@ -7,20 +8,23 @@ use std::{
 };
 
 use super::{
-    Connection, EventContext, EventScheduler, connection::ConnectionControl, scheduler::SignalOwner,
+    Connection, EventContext, EventQueueFull, EventScheduler, ScopedConnection,
+    connection::ConnectionControl,
+    scheduler::{EVENT_QUEUE_CAPACITY, Invocation, SignalOwner},
 };
 
 type Callback<T> = Box<dyn FnMut(&mut EventContext<'_>, &T)>;
+type CoalescedValue<T> = Weak<RefCell<Rc<T>>>;
 
 struct Listener<T> {
     owner: Weak<SignalState<T>>,
     callback: RefCell<Option<Callback<T>>>,
     on_closed: RefCell<Option<Box<dyn FnOnce()>>>,
     connected: Cell<bool>,
-    cancelled: Cell<bool>,
-    consumed: Cell<bool>,
+    cancelled: Rc<Cell<bool>>,
     pending: Cell<usize>,
     once: bool,
+    coalesced: RefCell<BTreeMap<String, CoalescedValue<T>>>,
 }
 
 impl<T> Listener<T> {
@@ -46,10 +50,11 @@ impl<T> Listener<T> {
     }
 
     fn invoke(&self, context: &mut EventContext<'_>, value: &T) {
-        if self.cancelled.get() || (self.once && self.consumed.replace(true)) {
+        if self.cancelled.get() {
             return;
         }
         if self.once {
+            self.cancelled.set(true);
             self.connected.set(false);
             self.remove_disconnected();
         }
@@ -110,6 +115,7 @@ struct SignalState<T> {
     listeners: RefCell<Vec<Rc<Listener<T>>>>,
     scheduler: RefCell<Weak<EventScheduler>>,
     closed: Cell<bool>,
+    missed: Rc<Cell<usize>>,
 }
 
 impl<T> SignalOwner for SignalState<T> {
@@ -140,17 +146,24 @@ pub struct Signal<T: 'static> {
 impl<T: 'static> Signal<T> {
     /// Registers a callback for future emissions.
     ///
-    /// Dropping the returned connection does not disconnect it. Connecting to a
-    /// closed signal returns an already-disconnected handle.
-    pub fn connect(&self, callback: impl FnMut(&mut EventContext<'_>, &T) + 'static) -> Connection {
-        self.subscribe(Box::new(callback), false, None)
+    /// Store the returned guard for as long as the callback should remain active.
+    /// Dropping it disconnects the callback and cancels queued delivery. Use
+    /// [`ScopedConnection::detach`] for an explicitly owner-lived subscription.
+    pub fn connect(
+        &self,
+        callback: impl FnMut(&mut EventContext<'_>, &T) + 'static,
+    ) -> ScopedConnection {
+        self.subscribe(Box::new(callback), false, None).scoped()
     }
 
     /// Registers a callback for the next emission only.
     ///
     /// The connection is disconnected before invoking the callback, even when
     /// multiple emissions are already queued.
-    pub fn once(&self, callback: impl FnOnce(&mut EventContext<'_>, &T) + 'static) -> Connection {
+    pub fn once(
+        &self,
+        callback: impl FnOnce(&mut EventContext<'_>, &T) + 'static,
+    ) -> ScopedConnection {
         let mut callback = Some(callback);
         self.subscribe(
             Box::new(move |context, value| {
@@ -161,6 +174,66 @@ impl<T: 'static> Signal<T> {
             true,
             None,
         )
+        .scoped()
+    }
+
+    /// Creates a scoped receiver for application-owned state.
+    ///
+    /// Drain it in [`crate::App::after_update`] to update ordinary fields without
+    /// shared ownership or a callback capturing the application. Values arrive
+    /// at dispatch boundaries. The receiver retains at most 4,096 values; on
+    /// overflow it retains the newest values and counts the omitted emissions.
+    pub fn receive(&self) -> SignalReceiver<T>
+    where
+        T: Clone,
+    {
+        let values = Rc::new(RefCell::new(VecDeque::new()));
+        let dropped = Rc::new(Cell::new(0usize));
+        let closed = Rc::new(Cell::new(false));
+        let source_missed = self
+            .state
+            .upgrade()
+            .map_or_else(|| Rc::new(Cell::new(0)), |state| state.missed.clone());
+        let baseline = source_missed.get();
+        let received = values.clone();
+        let omitted = dropped.clone();
+        let ended = closed.clone();
+        let connection = self.subscribe(
+            Box::new(move |_, value| {
+                let value = value.clone();
+                let mut values = received.borrow_mut();
+                let evicted = if values.len() == EVENT_QUEUE_CAPACITY {
+                    omitted.set(omitted.get().saturating_add(1));
+                    values.pop_front()
+                } else {
+                    None
+                };
+                values.push_back(value);
+                drop(values);
+                drop(evicted);
+            }),
+            false,
+            Some(Box::new(move || ended.set(true))),
+        );
+        if !connection.is_connected() {
+            closed.set(true);
+        }
+        SignalReceiver {
+            values,
+            dropped,
+            source_missed,
+            baseline,
+            closed,
+            _connection: connection.scoped(),
+        }
+    }
+
+    /// Returns the number of emissions rejected by the workspace's full queue.
+    ///
+    /// Property invalidations coalesce before dispatch and are not counted as
+    /// missed. This counter is available while the signal owner is alive.
+    pub fn missed_emissions(&self) -> usize {
+        self.state.upgrade().map_or(0, |state| state.missed.get())
     }
 
     /// Waits asynchronously for the next emission, without blocking a thread.
@@ -213,10 +286,10 @@ impl<T: 'static> Signal<T> {
             callback: RefCell::new(Some(callback)),
             on_closed: RefCell::new(on_closed),
             connected: Cell::new(true),
-            cancelled: Cell::new(false),
-            consumed: Cell::new(false),
+            cancelled: Rc::new(Cell::new(false)),
             pending: Cell::new(0),
             once,
+            coalesced: RefCell::new(BTreeMap::new()),
         });
         let control: Rc<dyn ConnectionControl> = listener.clone();
         let mut listeners = state.listeners.borrow_mut();
@@ -256,6 +329,7 @@ impl<T: 'static> SignalEmitter<T> {
                 listeners: RefCell::new(Vec::new()),
                 scheduler: RefCell::new(Weak::new()),
                 closed: Cell::new(false),
+                missed: Rc::new(Cell::new(0)),
             }),
         };
         emitter.set_scheduler(scheduler);
@@ -280,24 +354,83 @@ impl<T: 'static> SignalEmitter<T> {
     }
 
     pub(crate) fn emit(&self, value: T) {
+        let _ = self.try_emit(value, None);
+    }
+
+    pub(crate) fn emit_coalesced(&self, value: T, key: &str) {
+        let _ = self.try_emit(value, Some(key));
+    }
+
+    pub(crate) fn has_listeners(&self) -> bool {
+        self.state
+            .listeners
+            .borrow()
+            .iter()
+            .any(|listener| listener.connected.get())
+    }
+
+    fn try_emit(&self, value: T, key: Option<&str>) -> Result<(), EventQueueFull> {
         if self.state.closed.get() {
-            return;
+            return Ok(());
         }
         let Some(scheduler) = self.state.scheduler.borrow().upgrade() else {
-            return;
+            return Ok(());
         };
-        let mut listeners = self.state.listeners.borrow_mut();
-        listeners.retain(|listener| listener.connected.get());
+        let listeners: Vec<_> = self
+            .state
+            .listeners
+            .borrow()
+            .iter()
+            .filter(|listener| {
+                listener.connected.get() && (!listener.once || listener.pending.get() == 0)
+            })
+            .cloned()
+            .collect();
         if listeners.is_empty() {
-            return;
+            return Ok(());
         }
         let value = Rc::new(value);
+        let mut invocations = Vec::new();
         for listener in listeners.iter() {
+            if let Some(key) = key {
+                let existing = listener.coalesced.borrow().get(key).and_then(Weak::upgrade);
+                if let Some(existing) = existing {
+                    let previous = existing.replace(value.clone());
+                    drop(previous);
+                    continue;
+                }
+                listener
+                    .coalesced
+                    .borrow_mut()
+                    .retain(|_, value| value.strong_count() != 0);
+            }
+            let value = Rc::new(RefCell::new(value.clone()));
+            if let Some(key) = key {
+                listener
+                    .coalesced
+                    .borrow_mut()
+                    .insert(key.to_owned(), Rc::downgrade(&value));
+            }
             listener.pending.set(listener.pending.get() + 1);
             let pending = PendingInvocation(listener.clone());
-            let value = value.clone();
-            scheduler.enqueue(Box::new(move |context| pending.0.invoke(context, &value)));
+            let key = key.map(str::to_owned);
+            invocations.push(Invocation {
+                cancelled: listener.cancelled.clone(),
+                callback: Box::new(move |context| {
+                    if let Some(key) = key {
+                        pending.0.coalesced.borrow_mut().remove(&key);
+                    }
+                    pending.0.invoke(context, value.borrow().as_ref());
+                }),
+            });
         }
+        let result = scheduler.enqueue(invocations);
+        if result.is_err() {
+            self.state
+                .missed
+                .set(self.state.missed.get().saturating_add(1));
+        }
+        result
     }
 
     pub(crate) fn close(&self) {
@@ -321,6 +454,57 @@ impl<T: 'static> std::fmt::Debug for SignalEmitter<T> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("the signal was closed")]
 pub struct SignalClosed;
+
+/// A scoped, bounded inbox for events consumed by application-owned state.
+///
+/// Dropping the receiver disconnects it and cancels pending deliveries. It can
+/// be stored alongside ordinary application fields and drained after updates.
+#[must_use = "store and drain this receiver; dropping it cancels the subscription"]
+pub struct SignalReceiver<T> {
+    values: Rc<RefCell<VecDeque<T>>>,
+    dropped: Rc<Cell<usize>>,
+    source_missed: Rc<Cell<usize>>,
+    baseline: usize,
+    closed: Rc<Cell<bool>>,
+    _connection: ScopedConnection,
+}
+
+impl<T> SignalReceiver<T> {
+    /// Removes the oldest delivered value, or returns `None` when empty.
+    pub fn try_recv(&mut self) -> Option<T> {
+        self.values.borrow_mut().pop_front()
+    }
+
+    /// Removes all delivered values in order without retaining a queue borrow.
+    pub fn drain(&mut self) -> std::collections::vec_deque::IntoIter<T> {
+        std::mem::take(&mut *self.values.borrow_mut()).into_iter()
+    }
+
+    /// Returns whether the owner has closed and all pending deliveries finished.
+    /// Delivered values remain available to drain after closure.
+    pub fn is_closed(&self) -> bool {
+        self.closed.get()
+    }
+
+    /// Counts emissions omitted by the workspace or receiver capacity limits.
+    /// Coalesced property invalidations do not count as omitted emissions.
+    pub fn missed_emissions(&self) -> usize {
+        self.dropped
+            .get()
+            .saturating_add(self.source_missed.get().saturating_sub(self.baseline))
+    }
+}
+
+impl<T> std::fmt::Debug for SignalReceiver<T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SignalReceiver")
+            .field("pending", &self.values.borrow().len())
+            .field("closed", &self.is_closed())
+            .field("missed", &self.missed_emissions())
+            .finish()
+    }
+}
 
 struct WaitState<T> {
     result: RefCell<Option<Result<T, SignalClosed>>>,
@@ -391,7 +575,11 @@ impl<T: 'static> BindableEvent<T> {
     }
 
     /// Queues this payload for the callbacks subscribed at the time of firing.
-    pub fn fire(&self, value: T) {
-        self.emitter.emit(value);
+    ///
+    /// A full queue returns [`EventQueueFull`] and queues no callbacks from this
+    /// emission. Dispatch pending events before retrying. One-shot subscribers
+    /// with an already-queued emission do not consume additional queue space.
+    pub fn fire(&self, value: T) -> Result<(), EventQueueFull> {
+        self.emitter.try_emit(value, None)
     }
 }

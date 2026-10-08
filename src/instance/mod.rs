@@ -433,11 +433,11 @@ impl InstanceData {
             return child_id;
         }
         let child = self.children.last().expect("just pushed child");
-        self.signals.emit_child_added(child_id);
+        self.signals.emit_child_added(child.as_ref());
         let ancestors = self.ancestor_signals();
         for instance in std::iter::once(child.as_ref()).chain(child.descendants()) {
             for signals in &ancestors {
-                signals.emit_descendant_added(instance.id());
+                signals.emit_descendant_added(instance);
             }
             if let Some(signals) = instance.instance_signals() {
                 if instance.id() == child_id {
@@ -480,12 +480,13 @@ impl InstanceData {
         let ancestors = self.ancestor_signals();
         for instance in std::iter::once(child.as_ref()).chain(child.descendants()) {
             for signals in &ancestors {
-                signals.emit_descendant_removing(instance.id());
+                signals.emit_descendant_removing(instance);
             }
             if let Some(signals) = instance.instance_signals() {
-                signals.emit_destroying();
+                signals.emit_destroying(instance);
             }
         }
+        self.signals.emit_child_removed(child.as_ref());
         let mut child = self.children.swap_remove(index);
         if let Some(moved_child) = self.children.get_mut(index) {
             moved_child.set_sibling_index(index);
@@ -503,7 +504,6 @@ impl InstanceData {
                 });
             }
         }
-        self.signals.emit_child_removed(id);
         child.set_instance_lookup(None);
         true
     }
@@ -566,21 +566,22 @@ pub trait Instance: Any + Debug + InstanceClone {
     }
 
     /// Fires when a direct child is added to this instance in a workspace.
-    fn on_child_added(&self) -> Signal<InstanceId> {
+    /// The snapshot remains readable if the child is removed before dispatch.
+    fn on_child_added(&self) -> Signal<InstanceSnapshot> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::child_added)
     }
 
     /// Fires after a direct child is removed and destroyed.
     ///
-    /// The payload is the removed child's ID, which may no longer resolve.
-    fn on_child_removed(&self) -> Signal<InstanceId> {
+    /// The snapshot preserves metadata and the old parent even after destruction.
+    fn on_child_removed(&self) -> Signal<InstanceSnapshot> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::child_removed)
     }
 
     /// Fires for each instance in an added subtree, in depth-first order.
-    fn on_descendant_added(&self) -> Signal<InstanceId> {
+    fn on_descendant_added(&self) -> Signal<InstanceSnapshot> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::descendant_added)
     }
@@ -588,7 +589,7 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Fires for each instance in a removed subtree, in depth-first order.
     ///
     /// Notifications are recorded before removal but callbacks execute afterward.
-    fn on_descendant_removing(&self) -> Signal<InstanceId> {
+    fn on_descendant_removing(&self) -> Signal<InstanceSnapshot> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::descendant_removing)
     }
@@ -599,9 +600,11 @@ pub trait Instance: Any + Debug + InstanceClone {
             .map_or_else(Signal::closed, InstanceSignals::ancestry_changed)
     }
 
-    /// Fires when the name or direct parent changes, with the changed property.
+    /// Invalidates a changed property, including built-in part and transform setters.
     ///
-    /// Class-specific properties such as transforms do not yet emit notifications.
+    /// Repeated changes to the same property coalesce until dispatch. Read its
+    /// current value in the handler. Direct edits to public material-slot storage
+    /// and class-specific camera, light, and sound settings are not observed.
     fn on_changed(&self) -> Signal<InstanceProperty> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::changed)
@@ -610,18 +613,21 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Fires when the specified common property changes.
     ///
     /// Read the current property through the instance API inside the handler.
+    /// Repeated changes to that property coalesce into one invalidation.
     fn on_property_changed(&self, property: InstanceProperty) -> Signal<()> {
         self.instance_signals()
             .map_or_else(Signal::closed, |signals| signals.property_changed(property))
     }
 
-    /// Fires when an attribute changes or is removed, with its name.
+    /// Invalidates an attribute that changes or is removed, with its name.
+    /// Repeated changes to the same attribute coalesce until dispatch.
     fn on_attribute_changed(&self) -> Signal<String> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::attribute_changed)
     }
 
     /// Fires when the named attribute changes or is removed.
+    /// Repeated changes coalesce until dispatch; read its latest value in the handler.
     fn on_attribute_changed_for(&self, name: &str) -> Signal<()> {
         self.instance_signals()
             .map_or_else(Signal::closed, |signals| {
@@ -633,7 +639,8 @@ pub trait Instance: Any + Debug + InstanceClone {
     ///
     /// Delivery is deferred: the instance may no longer exist when the callback
     /// runs. Destruction disconnects future delivery but preserves queued calls.
-    fn on_destroying(&self) -> Signal<()> {
+    /// The snapshot contains the metadata, parent, and child IDs before removal.
+    fn on_destroying(&self) -> Signal<InstanceSnapshot> {
         self.instance_signals()
             .map_or_else(Signal::closed, InstanceSignals::destroying)
     }
@@ -1074,9 +1081,19 @@ impl dyn Instance {
 }
 
 /// An object that has a physical location in the world.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PVInstance {
     pivot: Mat4,
+    pub(crate) signals: Option<InstanceSignals>,
+}
+
+impl Clone for PVInstance {
+    fn clone(&self) -> Self {
+        Self {
+            pivot: self.pivot,
+            signals: None,
+        }
+    }
 }
 
 impl Default for PVInstance {
@@ -1090,12 +1107,25 @@ impl PVInstance {
     pub fn new() -> Self {
         Self {
             pivot: Mat4::IDENTITY,
+            signals: None,
         }
     }
 
     /// Creates a new instance from a world-space transform.
     pub fn from_world_transform(transform: Mat4) -> Self {
-        Self { pivot: transform }
+        Self {
+            pivot: transform,
+            signals: None,
+        }
+    }
+
+    fn set_pivot(&mut self, pivot: Mat4) {
+        if self.pivot != pivot {
+            self.pivot = pivot;
+            if let Some(signals) = &self.signals {
+                signals.emit_changed(InstanceProperty::Transform);
+            }
+        }
     }
 
     pub(crate) fn pose_from_transform(transform: Mat4) -> Mat4 {
@@ -1147,7 +1177,7 @@ pub trait HasPVInstance {
     where
         Self: Sized,
     {
-        self.pv_mut().pivot = pivot;
+        self.pv_mut().set_pivot(pivot);
         self
     }
 
@@ -1158,7 +1188,8 @@ pub trait HasPVInstance {
     {
         let pivot = self.pivot();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+        self.pv_mut()
+            .set_pivot(PVInstance::pose_from_transform(pose) * Mat4::from_scale(size));
         self
     }
 
@@ -1168,7 +1199,8 @@ pub trait HasPVInstance {
         Self: Sized,
     {
         let pivot = self.pivot();
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size);
+        self.pv_mut()
+            .set_pivot(PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size));
         self
     }
 
@@ -1180,8 +1212,9 @@ pub trait HasPVInstance {
         let pivot = self.pivot();
         let (_, rotation, _) = pivot.to_scale_rotation_translation();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot =
-            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size);
+        self.pv_mut().set_pivot(
+            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size),
+        );
         self
     }
 
@@ -1193,15 +1226,17 @@ pub trait HasPVInstance {
         let pivot = self.pivot();
         let position = self.position();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = Mat4::from_rotation_translation(
-            Quat::from_euler(
-                EulerRot::XYZ,
-                orientation.x.to_radians(),
-                orientation.y.to_radians(),
-                orientation.z.to_radians(),
-            ),
-            position,
-        ) * Mat4::from_scale(size);
+        self.pv_mut().set_pivot(
+            Mat4::from_rotation_translation(
+                Quat::from_euler(
+                    EulerRot::XYZ,
+                    orientation.x.to_radians(),
+                    orientation.y.to_radians(),
+                    orientation.z.to_radians(),
+                ),
+                position,
+            ) * Mat4::from_scale(size),
+        );
         self
     }
 }
@@ -1359,13 +1394,15 @@ mod tests {
         let received = workspace_added.clone();
         workspace
             .on_descendant_added()
-            .connect(move |_, id| received.borrow_mut().push(*id));
+            .connect(move |_, id| received.borrow_mut().push(id.id))
+            .detach();
         let received = parent_added.clone();
         workspace
             .get::<Part>(parent_id)
             .unwrap()
             .on_descendant_added()
-            .connect(move |_, id| received.borrow_mut().push(*id));
+            .connect(move |_, id| received.borrow_mut().push(id.id))
+            .detach();
 
         let leaf_id = workspace
             .instance_mut(no_signal_id)
@@ -1381,15 +1418,17 @@ mod tests {
         workspace
             .on_descendant_removing()
             .connect(move |context, id| {
-                assert!(context.workspace().instance(*id).is_none());
-                received.borrow_mut().push(*id);
-            });
+                assert!(context.workspace().instance(id.id).is_none());
+                received.borrow_mut().push(id.id);
+            })
+            .detach();
         let received = parent_removed.clone();
         workspace
             .get::<Part>(parent_id)
             .unwrap()
             .on_descendant_removing()
-            .connect(move |_, id| received.borrow_mut().push(*id));
+            .connect(move |_, id| received.borrow_mut().push(id.id))
+            .detach();
 
         assert!(
             workspace

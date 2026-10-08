@@ -5,14 +5,15 @@ use std::{
 };
 
 use crate::{
-    InstanceId, Signal,
+    Attributes, Instance, InstanceId, Signal,
     events::{EventScheduler, SignalEmitter},
 };
 
 /// An instance property supported by change notifications.
 ///
-/// Transform, material, and other class-specific properties do not yet emit
-/// notifications. Custom metadata uses the separate attribute signals.
+/// Built-in setters emit coalesced invalidations: read the latest value when
+/// handling one. Direct edits to public material-slot storage are not observed.
+/// Custom metadata uses the separate attribute signals.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum InstanceProperty {
@@ -20,6 +21,70 @@ pub enum InstanceProperty {
     Name,
     /// The direct parent changed.
     Parent,
+    /// The world transform, including position, orientation, or scale, changed.
+    Transform,
+    /// The part's tint changed.
+    Color,
+    /// The part's transparency changed.
+    Transparency,
+    /// The part's anchored state changed.
+    Anchored,
+    /// The part's collision setting changed.
+    CanCollide,
+    /// The primitive shape changed.
+    Shape,
+    /// A material was assigned through a part's material setters.
+    Material,
+}
+
+impl InstanceProperty {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Parent => "parent",
+            Self::Transform => "transform",
+            Self::Color => "color",
+            Self::Transparency => "transparency",
+            Self::Anchored => "anchored",
+            Self::CanCollide => "can_collide",
+            Self::Shape => "shape",
+            Self::Material => "material",
+        }
+    }
+}
+
+/// Owned metadata captured when an instance is added or before it is removed.
+///
+/// Lifecycle handlers can inspect this data even after the instance is gone.
+/// Descendant notifications each carry their own snapshot; `children` contains
+/// the direct children's identifiers at the time of the notification.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InstanceSnapshot {
+    /// The instance's stable identifier.
+    pub id: InstanceId,
+    /// The concrete class name.
+    pub class_name: &'static str,
+    /// The display name at emission time.
+    pub name: String,
+    /// The direct parent at emission time, before removal for removal events.
+    pub parent: Option<InstanceId>,
+    /// Custom metadata at emission time.
+    pub attributes: Attributes,
+    /// Direct children's identifiers at emission time.
+    pub children: Vec<InstanceId>,
+}
+
+impl InstanceSnapshot {
+    pub(crate) fn capture(instance: &dyn Instance) -> Self {
+        Self {
+            id: instance.id(),
+            class_name: instance.class_name(),
+            name: instance.name().to_owned(),
+            parent: instance.parent(),
+            attributes: instance.attributes().clone(),
+            children: instance.children().iter().map(|child| child.id()).collect(),
+        }
+    }
 }
 
 /// The instance and its direct parent when its ancestry changed.
@@ -49,14 +114,14 @@ pub struct InstanceSignals {
 #[derive(Debug, Default)]
 struct SignalStorage {
     scheduler: RefCell<Weak<EventScheduler>>,
-    child_added: OnceCell<SignalEmitter<InstanceId>>,
-    child_removed: OnceCell<SignalEmitter<InstanceId>>,
-    descendant_added: OnceCell<SignalEmitter<InstanceId>>,
-    descendant_removing: OnceCell<SignalEmitter<InstanceId>>,
+    child_added: OnceCell<SignalEmitter<InstanceSnapshot>>,
+    child_removed: OnceCell<SignalEmitter<InstanceSnapshot>>,
+    descendant_added: OnceCell<SignalEmitter<InstanceSnapshot>>,
+    descendant_removing: OnceCell<SignalEmitter<InstanceSnapshot>>,
     ancestry_changed: OnceCell<SignalEmitter<AncestryChanged>>,
     changed: OnceCell<SignalEmitter<InstanceProperty>>,
     attribute_changed: OnceCell<SignalEmitter<String>>,
-    destroying: OnceCell<SignalEmitter<()>>,
+    destroying: OnceCell<SignalEmitter<InstanceSnapshot>>,
     #[cfg(feature = "physics")]
     touched: OnceCell<SignalEmitter<InstanceId>>,
     #[cfg(feature = "physics")]
@@ -72,19 +137,19 @@ impl InstanceSignals {
             .signal()
     }
 
-    pub(crate) fn child_added(&self) -> Signal<InstanceId> {
+    pub(crate) fn child_added(&self) -> Signal<InstanceSnapshot> {
         self.signal(&self.inner.child_added)
     }
 
-    pub(crate) fn child_removed(&self) -> Signal<InstanceId> {
+    pub(crate) fn child_removed(&self) -> Signal<InstanceSnapshot> {
         self.signal(&self.inner.child_removed)
     }
 
-    pub(crate) fn descendant_added(&self) -> Signal<InstanceId> {
+    pub(crate) fn descendant_added(&self) -> Signal<InstanceSnapshot> {
         self.signal(&self.inner.descendant_added)
     }
 
-    pub(crate) fn descendant_removing(&self) -> Signal<InstanceId> {
+    pub(crate) fn descendant_removing(&self) -> Signal<InstanceSnapshot> {
         self.signal(&self.inner.descendant_removing)
     }
 
@@ -100,7 +165,7 @@ impl InstanceSignals {
         self.signal(&self.inner.attribute_changed)
     }
 
-    pub(crate) fn destroying(&self) -> Signal<()> {
+    pub(crate) fn destroying(&self) -> Signal<InstanceSnapshot> {
         self.signal(&self.inner.destroying)
     }
 
@@ -161,27 +226,35 @@ impl InstanceSignals {
         }
     }
 
-    pub(crate) fn emit_child_added(&self, child: InstanceId) {
-        if let Some(emitter) = self.inner.child_added.get() {
-            emitter.emit(child);
+    pub(crate) fn emit_child_added(&self, child: &dyn Instance) {
+        if let Some(emitter) = self.inner.child_added.get()
+            && emitter.has_listeners()
+        {
+            emitter.emit(InstanceSnapshot::capture(child));
         }
     }
 
-    pub(crate) fn emit_child_removed(&self, child: InstanceId) {
-        if let Some(emitter) = self.inner.child_removed.get() {
-            emitter.emit(child);
+    pub(crate) fn emit_child_removed(&self, child: &dyn Instance) {
+        if let Some(emitter) = self.inner.child_removed.get()
+            && emitter.has_listeners()
+        {
+            emitter.emit(InstanceSnapshot::capture(child));
         }
     }
 
-    pub(crate) fn emit_descendant_added(&self, descendant: InstanceId) {
-        if let Some(emitter) = self.inner.descendant_added.get() {
-            emitter.emit(descendant);
+    pub(crate) fn emit_descendant_added(&self, descendant: &dyn Instance) {
+        if let Some(emitter) = self.inner.descendant_added.get()
+            && emitter.has_listeners()
+        {
+            emitter.emit(InstanceSnapshot::capture(descendant));
         }
     }
 
-    pub(crate) fn emit_descendant_removing(&self, descendant: InstanceId) {
-        if let Some(emitter) = self.inner.descendant_removing.get() {
-            emitter.emit(descendant);
+    pub(crate) fn emit_descendant_removing(&self, descendant: &dyn Instance) {
+        if let Some(emitter) = self.inner.descendant_removing.get()
+            && emitter.has_listeners()
+        {
+            emitter.emit(InstanceSnapshot::capture(descendant));
         }
     }
 
@@ -193,27 +266,28 @@ impl InstanceSignals {
 
     pub(crate) fn emit_changed(&self, property: InstanceProperty) {
         if let Some(emitter) = self.inner.changed.get() {
-            emitter.emit(property);
+            emitter.emit_coalesced(property, property.key());
         }
         if let Some(emitter) = self.inner.properties.borrow().get(&property) {
-            emitter.emit(());
+            emitter.emit_coalesced((), "");
         }
     }
 
     pub(crate) fn emit_attribute_changed(&self, name: &str) {
         if let Some(emitter) = self.inner.attribute_changed.get() {
-            emitter.emit(name.to_owned());
+            emitter.emit_coalesced(name.to_owned(), name);
         }
         if let Some(emitter) = self.inner.attributes.borrow().get(name) {
-            emitter.emit(());
+            emitter.emit_coalesced((), "");
         }
     }
 
-    pub(crate) fn emit_destroying(&self) {
+    pub(crate) fn emit_destroying(&self, instance: &dyn Instance) {
         if !self.inner.destroying_emitted.replace(true)
             && let Some(emitter) = self.inner.destroying.get()
+            && emitter.has_listeners()
         {
-            emitter.emit(());
+            emitter.emit(InstanceSnapshot::capture(instance));
         }
     }
 

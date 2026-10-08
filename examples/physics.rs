@@ -1,13 +1,15 @@
 use terrarium::{
     App, Color3, Engine, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart,
     HasPointLight, Instance, InstanceId, Material, Part, PartShape, PointLight, RendererError,
-    Terrarium, eframe, egui,
+    SignalReceiver, Terrarium, eframe, egui,
     glam::{Mat4, Vec3},
 };
 
 struct PhysicsApp {
     dynamic_parts: Vec<InstanceId>,
     initial_transforms: Vec<(InstanceId, Mat4)>,
+    contacts: Vec<SignalReceiver<InstanceId>>,
+    contact_count: usize,
 }
 
 impl PhysicsApp {
@@ -33,6 +35,19 @@ impl PhysicsApp {
 }
 
 impl App for PhysicsApp {
+    fn after_update(
+        &mut self,
+        _engine: &mut Engine,
+        _context: &egui::Context,
+        _frame: &mut eframe::Frame,
+    ) {
+        // Receivers are owned by the app. Updating an ordinary field requires
+        // no shared state, captured application, or subscription guards.
+        for contacts in &mut self.contacts {
+            self.contact_count += contacts.drain().count();
+        }
+    }
+
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         egui::Panel::left("physics_controls")
             .resizable(false)
@@ -40,6 +55,7 @@ impl App for PhysicsApp {
             .show(ui, |ui| {
                 let gravity = engine.physics().gravity();
                 ui.label(format!("Dynamic bodies: {}", self.dynamic_parts.len()));
+                ui.label(format!("Contact transitions: {}", self.contact_count));
                 ui.label(format!(
                     "Gravity: ({:.1}, {:.1}, {:.1})",
                     gravity.x, gravity.y, gravity.z
@@ -103,6 +119,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
 
     let mut dynamic_parts = Vec::new();
     let mut initial_transforms = Vec::new();
+    let mut contacts = Vec::new();
     for layer in 0..5 {
         for column in 0..4 {
             let index = layer * 4 + column;
@@ -133,6 +150,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
                     .with_material(Material::default().with_metallic(0.12).with_roughness(0.3)),
             );
             dynamic_parts.push(id);
+            contacts.push(engine.get::<Part>(id).unwrap().on_touched().receive());
             initial_transforms.push((id, transform));
         }
     }
@@ -140,6 +158,8 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
     Ok(PhysicsApp {
         dynamic_parts,
         initial_transforms,
+        contacts,
+        contact_count: 0,
     })
 }
 

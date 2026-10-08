@@ -5,8 +5,9 @@ use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    BindableEvent, Camera, CameraController, EventContext, Instance, InstanceData, InstanceId,
-    InstanceLookup, Lighting, Texture, TextureError, TextureHandle, TweenManager,
+    BindableEvent, Camera, CameraController, Color3, EventContext, HasBasePart, HasPVInstance,
+    Instance, InstanceData, InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError,
+    TextureHandle, TweenManager, glam::Vec3,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -47,6 +48,16 @@ impl BoxOverlapQuery {
         self.max_parts = max_parts;
         self
     }
+}
+
+/// Starting geometry for a workspace.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorkspacePreset {
+    /// An empty scene, matching [`Workspace::new`]. This is the default preset.
+    #[default]
+    Empty,
+    /// An anchored, collidable 512 by 512 baseplate with its top at world Y = 0.
+    Baseplate,
 }
 
 /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
@@ -95,6 +106,28 @@ impl Workspace {
             lighting: Lighting::default(),
             lookup,
         }
+    }
+
+    /// Creates a workspace with the selected starting geometry and default camera.
+    ///
+    /// [`WorkspacePreset::Empty`] is equivalent to [`Self::new`].
+    pub fn preset(preset: WorkspacePreset) -> Self {
+        let mut workspace = Self::new();
+        match preset {
+            WorkspacePreset::Empty => {}
+            WorkspacePreset::Baseplate => {
+                workspace.add_child(
+                    Part::new()
+                        .with_name("Baseplate")
+                        .with_size(Vec3::new(512.0, 1.0, 512.0))
+                        .with_position(Vec3::new(0.0, -0.5, 0.0))
+                        .with_color(Color3::new(0.35, 0.4, 0.35))
+                        .with_anchored(true)
+                        .with_can_collide(true),
+                );
+            }
+        }
+        workspace
     }
 
     /// Takes ownership of mesh data or losslessly imports a glTF document.
@@ -266,35 +299,21 @@ impl Workspace {
         BindableEvent::new(Rc::downgrade(&self.lookup.scheduler))
     }
 
-    /// Returns the number of signal registrations between registry cleanups.
-    ///
-    /// The default is 64. Cleanups release registry entries for dropped signals;
-    /// live subscriptions and queued invocations are preserved.
-    pub fn signal_cleanup_threshold(&self) -> usize {
-        self.lookup.scheduler.cleanup_threshold()
-    }
-
-    /// Sets the number of signal registrations between registry cleanups.
-    ///
-    /// Smaller values reclaim dropped signal allocations sooner; larger values
-    /// reduce the frequency of registry scans. Zero is treated as one, cleaning
-    /// on every registration. The new threshold applies on the next registration,
-    /// including registrations already accumulated since the last cleanup.
-    /// Cloned workspaces retain this setting.
-    pub fn set_signal_cleanup_threshold(&mut self, threshold: usize) {
-        self.lookup.scheduler.set_cleanup_threshold(threshold);
-    }
-
-    /// Processes up to 1,024 queued signal invocations in emission order.
+    /// Processes the existing callback backlog in emission order.
     ///
     /// [`Self::update`] calls this after advancing the scene. Headless callers
     /// may also call it directly. Nested emissions join the queue; nested calls
-    /// to dispatch do nothing. The budget prevents unbounded callback cascades.
-    /// Remaining invocations are preserved for a later dispatch.
+    /// to dispatch do nothing. The budget drains the existing live backlog, with
+    /// a minimum of 1,024 invocations. At most 4,096 invocations can be queued,
+    /// so ordinary bursts drain in one update and callback cascades stay bounded.
+    /// Remaining nested invocations are preserved for a later dispatch.
+    /// Queue overflow is reported by [`crate::BindableEvent::fire`] and
+    /// [`crate::Signal::missed_emissions`], and logged once per dispatch.
     ///
-    /// Returns the number of processed invocations, including cancelled calls.
+    /// Returns the number of callbacks executed. Cancelled invocations do not
+    /// consume the dispatch budget.
     pub fn dispatch_events(&mut self) -> usize {
-        self.dispatch_events_with_limit(1_024)
+        self.dispatch_events_with_limit(self.lookup.scheduler.dispatch_budget())
     }
 
     /// Processes queued signal invocations with a caller-supplied work budget.
@@ -382,9 +401,6 @@ impl Workspace {
 impl Clone for Workspace {
     fn clone(&self) -> Self {
         let lookup = Rc::new(InstanceLookup::default());
-        lookup
-            .scheduler
-            .set_cleanup_threshold(self.signal_cleanup_threshold());
         let mut instance = Box::new((*self.instance).clone());
         lookup.set_root(&mut instance);
         instance.set_lookup(Some(&lookup));

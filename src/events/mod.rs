@@ -3,9 +3,10 @@ mod scheduler;
 mod signal;
 
 pub use connection::{Connection, ScopedConnection};
+pub use scheduler::EventQueueFull;
 pub(crate) use scheduler::EventScheduler;
 pub(crate) use signal::SignalEmitter;
-pub use signal::{BindableEvent, Signal, SignalClosed, SignalWait};
+pub use signal::{BindableEvent, Signal, SignalClosed, SignalReceiver, SignalWait};
 
 use crate::Workspace;
 

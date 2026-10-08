@@ -33,7 +33,9 @@ fn contact_scene() -> (Workspace, InstanceId, InstanceId) {
 fn received(signal: Signal<InstanceId>) -> Rc<RefCell<Vec<InstanceId>>> {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let recorded = seen.clone();
-    signal.connect(move |_, other| recorded.borrow_mut().push(*other));
+    signal
+        .connect(move |_, other| recorded.borrow_mut().push(*other))
+        .detach();
     seen
 }
 
@@ -114,7 +116,9 @@ fn removing_a_touching_part_notifies_the_survivor_and_closes_its_signals() {
     let (mut workspace, floor, ball) = contact_scene();
     let ended = received(workspace.get::<BasePart>(floor).unwrap().on_touch_ended());
     let signal = workspace.get::<Part>(ball).unwrap().on_touch_ended();
-    let connection = signal.connect(|_, _| panic!("destroyed part received a new contact"));
+    let connection = signal
+        .connect(|_, _| panic!("destroyed part received a new contact"))
+        .detach();
     let mut wait = signal.wait();
     workspace.update(DT);
     assert!(workspace.remove_child(ball));
@@ -145,7 +149,8 @@ fn collision_callbacks_can_destroy_parts_after_transforms_are_synchronized() {
             let body = context.workspace().physics().body(ball).unwrap();
             assert_eq!(position.to_array(), body.translation().to_array());
             assert!(context.workspace_mut().remove_child(ball));
-        });
+        })
+        .detach();
 
     workspace.update(DT);
     assert!(workspace.instance(ball).is_none());
@@ -156,21 +161,20 @@ fn collision_callbacks_can_destroy_parts_after_transforms_are_synchronized() {
 }
 
 #[test]
-fn contact_delivery_respects_dispatch_budget_and_cancellation() {
+fn contact_delivery_drains_ordinary_backlogs_and_respects_cancellation() {
     let (mut workspace, floor, ball) = contact_scene();
     let event = workspace.bindable_event::<()>();
-    event.on_event().connect(|_, _| {});
+    event.on_event().connect(|_, _| {}).detach();
     for _ in 0..1_024 {
-        event.fire(());
+        event.fire(()).unwrap();
     }
     let signal = workspace.get::<Part>(ball).unwrap().on_touched();
     let seen = received(signal.clone());
-    let cancelled = signal.connect(|_, _| panic!("cancelled contact ran"));
-    workspace.update(DT);
-    assert!(seen.borrow().is_empty());
-    assert!(workspace.has_pending_events());
+    let cancelled = signal
+        .connect(|_, _| panic!("cancelled contact ran"))
+        .detach();
     cancelled.disconnect();
-    workspace.dispatch_events();
+    workspace.update(DT);
     assert_eq!(*seen.borrow(), [floor]);
     assert!(!workspace.has_pending_events());
 }
@@ -194,7 +198,9 @@ fn detached_contact_subscriptions_support_once_and_async_waits() {
     let mut wait = signal.wait();
     let once_seen = Rc::new(RefCell::new(Vec::new()));
     let once_recorded = once_seen.clone();
-    let once = signal.once(move |_, other| once_recorded.borrow_mut().push(*other));
+    let once = signal
+        .once(move |_, other| once_recorded.borrow_mut().push(*other))
+        .detach();
     workspace.add_child(ball);
     workspace.update(DT);
     assert_eq!(*once_seen.borrow(), [floor]);

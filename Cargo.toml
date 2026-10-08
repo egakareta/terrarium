@@ -37,12 +37,15 @@ bevy_ecs = { version = "0.19", optional = true }
 bevy_tasks = { version = "0.19", optional = true }
 bevy_time = { version = "0.19", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
-eframe = { version = "0.36", default-features = false, features = ["wayland", "wgpu", "x11"] }
+eframe = { version = "0.36", default-features = false, features = [
+  "wgpu_no_default_features",
+  "wayland",
+] }
 env_logger = "0.11"
 euphorium = { version = "0.6", default-features = false, optional = true }
-glam = "0.33"
+glam = { version = "0.33", default-features = false, features = ["std"] }
 gltf = { version = "1", optional = true }
-image = { version = "0.25" }
+image = { version = "0.25", default-features = false, features = ["webp"] }
 log = "0.4"
 rapier3d = { version = "0.36", optional = true }
 rustc-hash = "2"
@@ -51,8 +54,8 @@ serde_json = "1"
 slotmap = "1"
 thiserror = "2"
 web-time = "1"
-wgpu = "30"
-winit = "0.30"
+wgpu = { version = "30", default-features = false, features = ["std"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
 
 [dev-dependencies]
 approx = "0.5"
@@ -74,28 +77,48 @@ default = [
   "asio",
   "default-fonts",
   "default-skybox",
+  "dx12",
   "eframe-default-fonts",
   "flac",
+  "gles",
   "meshpart",
+  "metal",
   "mp3",
   "physics",
   "sound",
   "vorbis",
   "wav",
+  "webgpu",
 ]
-asio = ["euphorium?/asio"]
 bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
-cli = ["euphorium?/cli"]
 default-fonts = []
 default-skybox = []
+meshpart = ["dep:gltf"]
+physics = ["dep:rapier3d"]
+sound = ["dep:euphorium"]
+
+# you usually want this since this also comes with emojis
 eframe-default-fonts = ["eframe/default_fonts"]
+
+# audio
+asio = ["euphorium?/asio"]
+cli = ["euphorium?/cli"]
 flac = ["euphorium?/flac"]
 jack = ["euphorium?/jack"]
-meshpart = ["dep:gltf"]
 mp3 = ["euphorium?/mp3"]
 mp4 = ["euphorium?/mp4"]
 nightly = ["euphorium?/nightly"]
-physics = ["dep:rapier3d"]
-sound = ["dep:euphorium"]
 vorbis = ["euphorium?/vorbis"]
 wav = ["euphorium?/wav"]
+
+# 3d graphics
+dx12 = ["wgpu/dx12"]
+gles = ["wgpu/gles"]
+metal = ["wgpu/metal"]
+webgpu = ["wgpu/webgpu"]
+
+# for production, enabling these is a good idea
+compat = ["vulkan", "webgl", "x11"]
+vulkan = ["wgpu/vulkan"]
+webgl = ["wgpu/webgl"]
+x11 = ["eframe/x11", "winit/x11"]
