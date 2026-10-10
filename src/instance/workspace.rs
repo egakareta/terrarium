@@ -1,13 +1,11 @@
 use std::rc::Rc;
 
-#[cfg(feature = "physics")]
-use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
+    BasePart, Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
     InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError, TextureHandle, TweenManager,
-    glam::Vec3,
+    glam::{Mat4, Vec3},
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -276,17 +274,25 @@ impl Workspace {
     }
 
     /// Applies the controller's accumulated input to the active camera.
+    ///
+    /// When the camera has a spatial subject, it orbits and follows that
+    /// instance. A missing or non-spatial subject uses free-moving controls.
     pub fn update_camera(&mut self, delta: f32) {
+        let subject = self.current_camera.subject().and_then(|id| {
+            self.instance(id)
+                .and_then(pv_instance_pose)
+                .map(|pose| (id, pose))
+        });
         self.camera_controller
-            .update_camera(&mut self.current_camera, delta);
+            .update_camera(&mut self.current_camera, subject, delta);
     }
 
     /// Advances the simulation when enabled.
     pub fn update(&mut self, delta_seconds: f32) {
-        self.update_camera(delta_seconds);
         self.update_tweens(delta_seconds);
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
+        self.update_camera(delta_seconds);
         #[cfg(feature = "sound")]
         for error in self.update_audio(delta_seconds) {
             log::error!("{error}");
@@ -347,15 +353,34 @@ impl Workspace {
     }
 }
 
+fn pv_instance_pose(instance: &dyn Instance) -> Option<Mat4> {
+    let pose = instance
+        .downcast_ref::<Camera>()
+        .map(HasPVInstance::pose)
+        .or_else(|| instance.downcast_ref::<BasePart>().map(HasPVInstance::pose))
+        .or_else(|| instance.downcast_ref::<Part>().map(HasPVInstance::pose));
+    #[cfg(feature = "meshpart")]
+    let pose = pose.or_else(|| instance.downcast_ref::<MeshPart>().map(HasPVInstance::pose));
+    pose
+}
+
 impl Clone for Workspace {
     fn clone(&self) -> Self {
         let lookup = Rc::new(InstanceLookup::default());
         let mut instance = Box::new((*self.instance).clone());
         lookup.set_root(&mut instance);
         instance.set_lookup(Some(&lookup));
+        let mut current_camera = self.current_camera.clone();
+        if let Some(subject) = current_camera.subject() {
+            current_camera.set_subject(cloned_instance_id(
+                self.instance.children(),
+                instance.children(),
+                subject,
+            ));
+        }
         let mut workspace = Self {
             instance,
-            current_camera: self.current_camera.clone(),
+            current_camera,
             camera_controller: self.camera_controller.clone(),
             tween_manager: self.tween_manager.clone(),
             #[cfg(feature = "physics")]
@@ -375,6 +400,18 @@ impl Clone for Workspace {
         }
         workspace
     }
+}
+
+fn cloned_instance_id(
+    original: &[Box<dyn Instance>],
+    cloned: &[Box<dyn Instance>],
+    target: InstanceId,
+) -> Option<InstanceId> {
+    original.iter().zip(cloned).find_map(|(original, cloned)| {
+        (original.id() == target)
+            .then_some(cloned.id())
+            .or_else(|| cloned_instance_id(original.children(), cloned.children(), target))
+    })
 }
 
 impl Default for Workspace {
@@ -570,6 +607,63 @@ mod tests {
             workspace.camera_controller().key_bindings.forward,
             vec![winit::keyboard::KeyCode::ArrowUp]
         );
+    }
+
+    #[test]
+    fn camera_subject_follows_a_spatial_instance_and_can_be_cleared() {
+        let mut workspace = Workspace::new();
+        let subject_id = workspace.add_child(Part::new());
+        workspace.current_camera.set_subject(Some(subject_id));
+        workspace.camera_controller_mut().subject_distance = 8.0;
+        workspace.camera_controller_mut().subject_offset = Vec3::Y;
+
+        workspace.update_camera(1.0 / 60.0);
+        workspace.camera_controller_mut().mouse_delta = (0.0, 10.0);
+        workspace.update_camera(1.0 / 60.0);
+
+        let focus = Vec3::Y;
+        let camera_position = workspace.current_camera.position();
+        assert!((camera_position.distance(focus) - 8.0).abs() < 1e-5);
+        assert!(workspace.current_camera.forward().y < 0.0);
+        assert!(
+            workspace
+                .current_camera
+                .forward()
+                .dot((focus - camera_position).normalize())
+                > 0.9999
+        );
+
+        workspace.get_mut::<Part>(subject_id).unwrap().pivot_to(
+            crate::glam::Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
+        );
+        workspace.update_camera(1.0 / 60.0);
+
+        let moved_position = workspace.current_camera.position();
+        assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
+
+        let mut cloned_workspace = workspace.clone();
+        let cloned_subject = cloned_workspace.current_camera.subject().unwrap();
+        assert_ne!(cloned_subject, subject_id);
+        cloned_workspace.update_camera(1.0 / 60.0);
+        let cloned_camera_position = cloned_workspace.current_camera.position();
+        cloned_workspace
+            .get_mut::<Part>(cloned_subject)
+            .unwrap()
+            .pivot_to(crate::glam::Mat4::from_translation(Vec3::new(
+                20.0, 0.0, 0.0,
+            )));
+        cloned_workspace.update_camera(1.0 / 60.0);
+        assert!(
+            (cloned_workspace.current_camera.position().x - cloned_camera_position.x - 10.0).abs()
+                < 1e-5
+        );
+
+        workspace.current_camera.set_subject(None);
+        workspace.camera_controller_mut().forward = true;
+        workspace.update_camera(0.1);
+
+        assert_eq!(workspace.current_camera.subject(), None);
+        assert!(workspace.current_camera.position().z < moved_position.z);
     }
 
     #[test]

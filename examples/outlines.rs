@@ -1,6 +1,6 @@
 use terrarium::{
     App, AppCreationError, Color3, Engine, Instance, InstanceId, MeshPart, Outline, OutlineMode,
-    Terrarium, eframe, egui,
+    Part, Terrarium, eframe, egui,
 };
 
 struct OutlinesApp {
@@ -8,6 +8,7 @@ struct OutlinesApp {
     outline: Option<InstanceId>,
     mode: OutlineMode,
     width: f32,
+    focus_on_duck: bool,
 }
 
 impl OutlinesApp {
@@ -38,6 +39,7 @@ impl OutlinesApp {
 impl App for OutlinesApp {
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let mut selected_mode = self.mode;
+        let mut focus_on_duck = self.focus_on_duck;
         let mut width_changed = false;
         egui::Panel::top("outline_modes")
             .resizable(false)
@@ -53,11 +55,22 @@ impl App for OutlinesApp {
                     width_changed = ui
                         .add(egui::Slider::new(&mut self.width, 0.5..=10.0).text("Width"))
                         .changed();
+
+                    ui.separator();
+                    ui.checkbox(&mut focus_on_duck, "Focus on duck");
                 });
             });
 
         if selected_mode != self.mode || width_changed {
             self.set_mode(engine, selected_mode);
+        }
+
+        if focus_on_duck != self.focus_on_duck {
+            self.focus_on_duck = focus_on_duck;
+            engine
+                .workspace
+                .current_camera
+                .set_subject(focus_on_duck.then_some(self.mesh_part));
         }
     }
 }
@@ -68,12 +81,14 @@ fn main() {
             let mesh = engine.add_mesh(include_bytes!("../assets/Duck.glb"))?;
 
             let mesh_part = engine.add_child(MeshPart::new(mesh));
+            engine.workspace.current_camera.set_subject(Some(mesh_part));
 
             let mut app = OutlinesApp {
                 mesh_part,
                 outline: None,
                 mode: OutlineMode::Stencil,
                 width: 2.0,
+                focus_on_duck: true,
             };
             app.set_mode(engine, app.mode);
             Ok::<OutlinesApp, AppCreationError>(app)
