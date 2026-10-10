@@ -97,8 +97,8 @@ bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 default-fonts = []
 default-skybox = []
 meshpart = ["dep:gltf"]
-physics = ["dep:rapier3d"]
 persistence = ["dep:base64", "dep:renfs"]
+physics = ["dep:rapier3d"]
 sound = ["dep:euphorium"]
 
 # you usually want this since this also comes with emojis
