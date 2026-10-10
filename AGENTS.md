@@ -17,6 +17,14 @@
 - Default features are `meshpart`, `physics`, `default-skybox`, `default-fonts`, and `eframe-default-fonts`; use `--all-features` for parity with CI.
 - Run the native demo with `mise run:examples:app` (`cargo run --example app`). The web entrypoint is `assets/web/index.html`; root `Trunk.toml` selects example `app` and writes to `examples/dist`, so use `trunk serve` or `trunk build` from the repository root.
 
+## Code Style
+
+- Do not clutter the README. It is intentionally terse.
+- Write code as a competent engineer maintaining a production codebase.
+- Do not add comments that restate requirements, narrate obvious operations, justify parameter choices with vague adjectives, or describe the intended quality of the implementation.
+- Comments are permitted only to explain non-obvious invariants, constraints, mathematical reasoning, or surprising behavior.
+- Do not add explanatory prose unless requested.
+
 ## Test Implementation Rules
 
 Tests exist to detect regressions in externally observable behavior.
