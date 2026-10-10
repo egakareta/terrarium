@@ -48,6 +48,7 @@ pub mod cookbook {
 
 #[cfg(feature = "bevy")]
 pub mod bevy;
+mod clipboard;
 mod engine;
 mod instance;
 mod interpolation;
@@ -57,6 +58,7 @@ mod primitive;
 mod renderer;
 mod scene;
 
+pub use clipboard::*;
 pub use eframe::{self, egui, egui_wgpu, wgpu};
 pub use engine::*;
 /// Cross-platform audio sources, spatial settings, and playback APIs.
