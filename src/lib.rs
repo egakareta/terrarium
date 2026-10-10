@@ -59,7 +59,6 @@ mod scene;
 
 pub use eframe::{self, egui, egui_wgpu, wgpu};
 pub use engine::*;
-/// Cross-platform audio sources, spatial settings, and playback APIs.
 #[cfg(feature = "sound")]
 pub use euphorium;
 pub use glam;
