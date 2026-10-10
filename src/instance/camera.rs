@@ -1,5 +1,5 @@
 use crate::{
-    HasPVInstance, InstanceData, PVInstance,
+    HasPVInstance, InstanceData, InstanceId, PVInstance,
     glam::{Mat4, Quat, Vec3},
     winit::{
         event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
@@ -12,6 +12,7 @@ use crate::{
 pub struct Camera {
     pub(crate) instance: InstanceData,
     pub(crate) pv_instance: PVInstance,
+    subject: Option<InstanceId>,
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -115,6 +116,7 @@ impl Camera {
                 Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
                 position,
             )),
+            subject: None,
             aspect: aspect.max(0.001),
             fovy: 60.0_f32.to_radians(),
             znear: 0.1,
@@ -141,24 +143,45 @@ impl Camera {
     pub fn projection_matrix(&self) -> Mat4 {
         glam::camera::rh::proj::directx::perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
+
+    /// Returns the instance this camera follows in third-person mode.
+    ///
+    /// A missing subject leaves the camera in free-moving mode.
+    pub fn subject(&self) -> Option<InstanceId> {
+        self.subject
+    }
+
+    /// Sets the instance this camera follows in third-person mode.
+    ///
+    /// The ID must belong to a spatial instance in the active workspace. Set
+    /// this to `None` to return to free-moving mode.
+    pub fn set_subject(&mut self, subject: Option<InstanceId>) {
+        self.subject = subject;
+    }
+
+    /// Sets the instance this camera follows, returning `self` for chaining.
+    pub fn with_subject(mut self, subject: Option<InstanceId>) -> Self {
+        self.set_subject(subject);
+        self
+    }
 }
 
 crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
 
-/// Physical keyboard keys assigned to camera movement actions.
+/// Physical keyboard keys assigned to camera movement and orbit actions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CameraKeyBindings {
-    /// Keys that move the camera forward.
+    /// Keys that move forward freely or zoom toward the subject.
     pub forward: Vec<KeyCode>,
-    /// Keys that move the camera backward.
+    /// Keys that move backward freely or zoom away from the subject.
     pub backward: Vec<KeyCode>,
-    /// Keys that move the camera left.
+    /// Keys that strafe left freely or orbit left around the subject.
     pub left: Vec<KeyCode>,
-    /// Keys that move the camera right.
+    /// Keys that strafe right freely or orbit right around the subject.
     pub right: Vec<KeyCode>,
-    /// Keys that move the camera up.
+    /// Keys that move up freely or raise the subject orbit.
     pub up: Vec<KeyCode>,
-    /// Keys that move the camera down.
+    /// Keys that move down freely or lower the subject orbit.
     pub down: Vec<KeyCode>,
     /// Keys that activate sprinting.
     pub sprint: Vec<KeyCode>,
@@ -178,10 +201,10 @@ impl Default for CameraKeyBindings {
     }
 }
 
-/// First-person keyboard and mouse input for a [`Camera`].
+/// Keyboard and mouse input for free-moving and subject-following [`Camera`]s.
 #[derive(Clone, Debug)]
 pub struct CameraController {
-    /// Movement speed in world units per second.
+    /// Movement and zoom speed in world units per second.
     pub speed: f32,
     /// Mouse-look sensitivity in radians per raw mouse unit.
     pub sensitivity: f32,
@@ -209,8 +232,25 @@ pub struct CameraController {
     pub mouse_enabled: bool,
     /// Whether keyboard movement input is processed.
     pub keyboard_enabled: bool,
+    /// Distance from the subject's focus point in third-person mode.
+    pub subject_distance: f32,
+    /// Minimum camera distance from the subject's focus point.
+    pub min_subject_distance: f32,
+    /// Maximum camera distance from the subject's focus point.
+    pub max_subject_distance: f32,
+    /// Local-space offset from the subject pivot to the camera's focus point.
+    pub subject_offset: Vec3,
+    /// Orbit speed in radians per second for keyboard controls.
+    pub orbit_speed: f32,
+    /// Minimum vertical orbit angle in radians.
+    pub min_subject_pitch: f32,
+    /// Maximum vertical orbit angle in radians.
+    pub max_subject_pitch: f32,
     mouse_dragging: bool,
     last_cursor_position: Option<(f64, f64)>,
+    orbit_subject: Option<InstanceId>,
+    orbit_yaw: f32,
+    orbit_pitch: f32,
 }
 
 impl Default for CameraController {
@@ -220,12 +260,12 @@ impl Default for CameraController {
 }
 
 impl CameraController {
-    /// Creates a first-person controller with the given speed and sensitivity.
+    /// Creates a camera controller with the given movement speed and sensitivity.
     pub fn new(speed: f32, sensitivity: f32) -> Self {
         Self::new_with_key_bindings(speed, sensitivity, CameraKeyBindings::default())
     }
 
-    /// Creates a first-person controller with custom movement key bindings.
+    /// Creates a camera controller with custom movement key bindings.
     pub fn new_with_key_bindings(
         speed: f32,
         sensitivity: f32,
@@ -246,9 +286,51 @@ impl CameraController {
             mouse_drag_button: MouseButton::Left,
             mouse_enabled: true,
             keyboard_enabled: true,
+            subject_distance: 5.0,
+            min_subject_distance: 0.5,
+            max_subject_distance: 100.0,
+            subject_offset: Vec3::ZERO,
+            orbit_speed: 1.5,
+            min_subject_pitch: -89.0_f32.to_radians(),
+            max_subject_pitch: 89.0_f32.to_radians(),
             mouse_dragging: false,
             last_cursor_position: None,
+            orbit_subject: None,
+            orbit_yaw: 0.0,
+            orbit_pitch: 0.0,
         }
+    }
+
+    /// Sets the third-person distance from the subject's focus point.
+    pub fn with_subject_distance(mut self, distance: f32) -> Self {
+        self.subject_distance = distance;
+        self
+    }
+
+    /// Sets the local-space offset from the subject pivot to the focus point.
+    pub fn with_subject_offset(mut self, offset: Vec3) -> Self {
+        self.subject_offset = offset;
+        self
+    }
+
+    /// Sets the minimum and maximum third-person camera distance.
+    pub fn with_subject_distance_limits(mut self, min: f32, max: f32) -> Self {
+        self.min_subject_distance = min;
+        self.max_subject_distance = max;
+        self
+    }
+
+    /// Sets the minimum and maximum vertical orbit angles in radians.
+    pub fn with_subject_pitch_limits(mut self, min: f32, max: f32) -> Self {
+        self.min_subject_pitch = min;
+        self.max_subject_pitch = max;
+        self
+    }
+
+    /// Sets the keyboard orbit speed in radians per second.
+    pub fn with_orbit_speed(mut self, speed: f32) -> Self {
+        self.orbit_speed = speed;
+        self
     }
 
     /// Enables or disables all camera input (both keyboard and mouse).
@@ -451,17 +533,8 @@ impl CameraController {
         self.mouse_delta.1 += delta.1;
     }
 
-    /// Moves and rotates `camera` using accumulated input, then clears the mouse delta.
-    ///
-    /// Movement is frame-rate independent. The delta is capped at 100 ms,
-    /// sprinting multiplies movement speed by `2.5`, and pitch is clamped to
-    /// 89 degrees from the horizon.
-    ///
-    /// `forward`/`backward` fly along the camera's look direction, so looking
-    /// down and pressing forward descends. Strafing stays horizontal and the
-    /// orientation is rebuilt from yaw/pitch every update so no roll can
-    /// accumulate.
-    pub fn update_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
+    fn update_free_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
+        self.orbit_subject = None;
         if !self.mouse_enabled {
             self.mouse_delta = (0.0, 0.0);
         }
@@ -525,6 +598,133 @@ impl CameraController {
 
         camera.with_pose(Mat4::from_rotation_translation(new_rotation, new_position));
         self.mouse_delta = (0.0, 0.0);
+    }
+
+    /// Moves and rotates `camera` using accumulated input, then clears the mouse delta.
+    ///
+    /// Without a subject, movement is frame-rate independent. The delta is
+    /// capped at 100 ms, sprinting multiplies movement speed by `2.5`, and
+    /// pitch is clamped to 89 degrees from the horizon.
+    ///
+    /// In free-moving mode, `forward`/`backward` fly along the camera's look
+    /// direction, so looking down and pressing forward descends. Strafing stays
+    /// horizontal, and the orientation is rebuilt from yaw/pitch every update
+    /// so no roll can accumulate.
+    ///
+    /// With a subject, the camera follows it in third person: mouse movement
+    /// and left/right keys orbit, forward/backward keys zoom, and up/down keys
+    /// adjust orbit elevation. Passing `None` keeps the camera free-moving.
+    pub fn update_camera(
+        &mut self,
+        camera: &mut Camera,
+        subject: Option<(InstanceId, Mat4)>,
+        delta_seconds: f32,
+    ) {
+        let Some((subject_id, subject_pose)) = subject else {
+            self.update_free_camera(camera, delta_seconds);
+            return;
+        };
+
+        if !self.mouse_enabled {
+            self.mouse_delta = (0.0, 0.0);
+        }
+        if !self.keyboard_enabled {
+            self.clear_keyboard_input();
+        }
+
+        let delta_seconds = if delta_seconds.is_finite() {
+            delta_seconds.clamp(0.0, 0.1)
+        } else {
+            0.0
+        };
+        let offset = if self.subject_offset.is_finite() {
+            self.subject_offset
+        } else {
+            Vec3::ZERO
+        };
+        let focus = subject_pose.transform_point3(offset);
+
+        if self.orbit_subject != Some(subject_id) {
+            let camera_offset = camera.position() - focus;
+            let direction = if camera_offset.length_squared() > 1e-10 {
+                camera_offset.normalize()
+            } else {
+                -camera.forward()
+            };
+            self.orbit_yaw = direction.x.atan2(direction.z);
+            self.orbit_pitch = direction.y.clamp(-1.0, 1.0).asin();
+            self.orbit_subject = Some(subject_id);
+        }
+
+        self.orbit_yaw -= self.mouse_delta.0 * self.sensitivity;
+        let (min_pitch, max_pitch) = self.subject_pitch_limits();
+        self.orbit_pitch =
+            (self.orbit_pitch + self.mouse_delta.1 * self.sensitivity).clamp(min_pitch, max_pitch);
+
+        let speed_multiplier = if self.sprint { 2.5 } else { 1.0 };
+        let movement = self.speed * speed_multiplier * delta_seconds;
+        if self.forward {
+            self.subject_distance -= movement;
+        }
+        if self.backward {
+            self.subject_distance += movement;
+        }
+        if self.left {
+            self.orbit_yaw += self.orbit_speed * speed_multiplier * delta_seconds;
+        }
+        if self.right {
+            self.orbit_yaw -= self.orbit_speed * speed_multiplier * delta_seconds;
+        }
+        if self.up {
+            self.orbit_pitch += self.orbit_speed * speed_multiplier * delta_seconds;
+        }
+        if self.down {
+            self.orbit_pitch -= self.orbit_speed * speed_multiplier * delta_seconds;
+        }
+        self.orbit_pitch = self.orbit_pitch.clamp(min_pitch, max_pitch);
+
+        let min_distance = if self.min_subject_distance.is_finite() {
+            self.min_subject_distance.max(0.01)
+        } else {
+            0.5
+        };
+        let max_distance = if self.max_subject_distance.is_finite() {
+            self.max_subject_distance.max(min_distance)
+        } else {
+            min_distance.max(100.0)
+        };
+        self.subject_distance = if self.subject_distance.is_finite() {
+            self.subject_distance
+        } else {
+            min_distance
+        }
+        .clamp(min_distance, max_distance);
+
+        let horizontal_distance = self.orbit_pitch.cos() * self.subject_distance;
+        let camera_position = focus
+            + Vec3::new(
+                self.orbit_yaw.sin() * horizontal_distance,
+                self.orbit_pitch.sin() * self.subject_distance,
+                self.orbit_yaw.cos() * horizontal_distance,
+            );
+        let pose = glam::camera::rh::view::look_at_mat4(camera_position, focus, Vec3::Y).inverse();
+        camera.with_pose(pose);
+        self.mouse_delta = (0.0, 0.0);
+    }
+
+    fn subject_pitch_limits(&self) -> (f32, f32) {
+        let limit = 89.0_f32.to_radians();
+        let min = if self.min_subject_pitch.is_finite() {
+            self.min_subject_pitch.clamp(-limit, limit)
+        } else {
+            -limit
+        };
+        let max = if self.max_subject_pitch.is_finite() {
+            self.max_subject_pitch.clamp(-limit, limit)
+        } else {
+            limit
+        };
+        if min <= max { (min, max) } else { (max, min) }
     }
 
     fn clear_keys(&mut self) {
@@ -633,7 +833,7 @@ mod tests {
         let mut controller = CameraController::new(6.0, 0.1);
         controller.mouse_delta = (1.0, 0.0);
 
-        controller.update_camera(&mut camera, 1.0 / 60.0);
+        controller.update_camera(&mut camera, None, 1.0 / 60.0);
 
         assert_eq!(camera.pivot().w_axis.truncate(), original_position);
         assert!(camera.forward().x > 0.0);
@@ -687,7 +887,7 @@ mod tests {
         let mut camera = Camera::default();
         let initial_position = camera.pivot().w_axis.truncate();
         controller.forward = true; // Even if force-set, update_camera clears disabled keyboard input
-        controller.update_camera(&mut camera, 1.0 / 60.0);
+        controller.update_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.pivot().w_axis.truncate(), initial_position);
         assert!(!controller.forward);
     }
@@ -708,7 +908,7 @@ mod tests {
         let mut camera = Camera::default();
         let initial_forward = camera.forward();
         controller.mouse_delta = (5.0, 5.0); // Force-set delta should be ignored if disabled
-        controller.update_camera(&mut camera, 1.0 / 60.0);
+        controller.update_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.forward(), initial_forward);
         assert_eq!(controller.mouse_delta, (0.0, 0.0));
     }

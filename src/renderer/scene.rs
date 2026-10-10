@@ -516,12 +516,12 @@ impl Renderer {
                     continue;
                 }
                 let has_custom_textures = visibility_mask & 1 != 0
-                    && part.material_slots.slots.iter().flatten().any(|material| {
-                        material.textures().base_color.is_some()
-                            || material.textures().normal.is_some()
-                            || material.textures().metallic_roughness.is_some()
-                            || material.textures().emissive.is_some()
-                    });
+                    && part
+                        .material_slots
+                        .slots
+                        .iter()
+                        .flatten()
+                        .any(Material::has_texture_maps);
                 let custom_textures = if has_custom_textures {
                     let textures = self.material_textures(workspace, &part.material_slots)?;
                     (textures != default_textures).then_some(textures)
@@ -745,12 +745,7 @@ impl Renderer {
                     .slots
                     .iter()
                     .flatten()
-                    .any(|material| {
-                        material.textures().base_color.is_some()
-                            || material.textures().normal.is_some()
-                            || material.textures().metallic_roughness.is_some()
-                            || material.textures().emissive.is_some()
-                    });
+                    .any(Material::has_texture_maps);
             let textures = if has_custom_textures {
                 self.material_textures(workspace, &meshpart.material_slots)?
             } else {

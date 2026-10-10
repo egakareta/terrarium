@@ -33,15 +33,73 @@ impl Renderer {
             .filter_map(|(index, material)| material.as_ref().map(|material| (index, material)))
         {
             let slot = index;
-            textures.base_color[slot] = resolve(self, material.textures().base_color, base_color)?;
-            textures.normal[slot] = resolve(self, material.textures().normal, normal)?;
+            let builtin: Option<MaterialTextures> = {
+                #[cfg(feature = "default-materials")]
+                {
+                    material
+                        .builtin_material()
+                        .map(|builtin| self.load_builtin_material_textures(builtin))
+                        .transpose()?
+                }
+                #[cfg(not(feature = "default-materials"))]
+                {
+                    None
+                }
+            };
+            let material_maps = material.textures();
+            textures.base_color[slot] = resolve(
+                self,
+                material_maps.base_color,
+                builtin.map_or(base_color, |maps| maps.base_color[slot]),
+            )?;
+            textures.normal[slot] = resolve(
+                self,
+                material_maps.normal,
+                builtin.map_or(normal, |maps| maps.normal[slot]),
+            )?;
             textures.metallic_roughness[slot] = resolve(
                 self,
-                material.textures().metallic_roughness,
-                metallic_roughness,
+                material_maps.metallic_roughness,
+                builtin.map_or(metallic_roughness, |maps| maps.metallic_roughness[slot]),
             )?;
-            textures.emissive[slot] = resolve(self, material.textures().emissive, emissive)?;
+            textures.emissive[slot] = resolve(
+                self,
+                material_maps.emissive,
+                builtin.map_or(emissive, |maps| maps.emissive[slot]),
+            )?;
         }
+        Ok(textures)
+    }
+
+    #[cfg(feature = "default-materials")]
+    fn load_builtin_material_textures(
+        &mut self,
+        builtin: BuiltinMaterial,
+    ) -> Result<MaterialTextures, RendererError> {
+        if let Some(&textures) = self.builtin_material_textures.get(&builtin) {
+            return Ok(textures);
+        }
+
+        let decoded = builtin.decode()?;
+        let base_color = self.upload_dedup_texture(&decoded.base_color)?;
+        let normal = decoded
+            .normal
+            .as_ref()
+            .map_or(Ok(self.default_material_textures.normal[0]), |texture| {
+                self.upload_dedup_texture(texture)
+            })?;
+        let metallic_roughness = decoded.metallic_roughness.as_ref().map_or(
+            Ok(self.default_material_textures.metallic_roughness[0]),
+            |texture| self.upload_dedup_texture(texture),
+        )?;
+        let emissive = self.default_material_textures.emissive[0];
+        let textures = MaterialTextures {
+            base_color: [base_color; MATERIAL_SLOT_COUNT],
+            normal: [normal; MATERIAL_SLOT_COUNT],
+            metallic_roughness: [metallic_roughness; MATERIAL_SLOT_COUNT],
+            emissive: [emissive; MATERIAL_SLOT_COUNT],
+        };
+        self.builtin_material_textures.insert(builtin, textures);
         Ok(textures)
     }
 

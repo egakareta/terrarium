@@ -3,13 +3,22 @@
 #[error("clipboard error: {0}")]
 pub struct ClipboardError(String);
 
+#[cfg(not(any(
+    all(
+        any(unix, windows),
+        not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
+    ),
+    target_arch = "wasm32"
+)))]
+static FALLBACK_TEXT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 /// Cross-platform access to clipboard text.
 ///
 /// Desktop targets use the system clipboard. Keep this handle alive while its
 /// contents are needed: on Linux, dropping the last handle can clear the clipboard.
 /// Web targets use the browser Clipboard API, which requires a secure context
 /// and may require permission and a user gesture. Other targets, including
-/// Android and iOS, use an in-process text buffer.
+/// Android and iOS, use an in-process text buffer shared by all handles.
 ///
 /// ```no_run
 /// use terrarium::{Clipboard, ClipboardError};
@@ -27,14 +36,6 @@ pub struct Clipboard {
         not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
     ))]
     inner: arboard::Clipboard,
-    #[cfg(not(any(
-        all(
-            any(unix, windows),
-            not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
-        ),
-        target_arch = "wasm32"
-    )))]
-    text: String,
 }
 
 impl Clipboard {
@@ -48,14 +49,6 @@ impl Clipboard {
                 not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
             ))]
             inner: arboard::Clipboard::new().map_err(|e| ClipboardError(e.to_string()))?,
-            #[cfg(not(any(
-                all(
-                    any(unix, windows),
-                    not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
-                ),
-                target_arch = "wasm32"
-            )))]
-            text: String::new(),
         })
     }
 
@@ -89,7 +82,10 @@ impl Clipboard {
             target_arch = "wasm32"
         )))]
         {
-            Ok(self.text.clone())
+            Ok(FALLBACK_TEXT
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone())
         }
     }
 
@@ -121,7 +117,9 @@ impl Clipboard {
             target_arch = "wasm32"
         )))]
         {
-            self.text = text.to_owned();
+            *FALLBACK_TEXT
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = text.to_owned();
             Ok(())
         }
     }
