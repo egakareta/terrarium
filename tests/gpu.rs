@@ -265,23 +265,33 @@ fn material_triplanar_projection_samples_world_space_coordinates()
 #[test]
 fn builtin_material_loads_lazily_and_renders() -> Result<(), AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
-    let engine = Terrarium::new()
-        .with_size([128, 128])
-        .with_headless(Some(1))
-        .run(|engine| {
-            engine.lighting.clear_skybox();
-            engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
-            engine.add_child(
-                Part::new()
-                    .with_position(Vec3::new(0.0, 1.0, 0.0))
-                    .with_size(Vec3::splat(2.0))
-                    .with_material(Material::builtin(BuiltinMaterial::Wood)),
-            );
-            Ok::<(), AppCreationError>(())
-        })?
-        .unwrap();
+    fn render(material: Material) -> Result<Vec<[u8; 4]>, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.lighting.clear_skybox();
+                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::new(0.0, 1.0, 0.0))
+                        .with_size(Vec3::splat(2.0))
+                        .with_material(material),
+                );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
 
-    let pixel = engine.renderer().read_pixel(64, 64)?;
-    assert_ne!(pixel, [0, 0, 0, 255]);
+        Ok(engine.renderer().read_pixels()?)
+    }
+
+    let builtin = Material::brick();
+    let factors_only = Material::default()
+        .with_metallic(builtin.metallic())
+        .with_roughness(builtin.roughness())
+        .with_projection(builtin.projection());
+    let builtin_pixels = render(builtin)?;
+    let factors_only_pixels = render(factors_only)?;
+    assert_ne!(builtin_pixels, factors_only_pixels);
     Ok(())
 }

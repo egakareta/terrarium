@@ -906,33 +906,28 @@ mod tests {
     }
 
     #[test]
-    fn builtin_material_loads_maps_with_triplanar_projection() {
-        let workspace = Workspace::new();
-        let material: Material = Material::builtin(BuiltinMaterial::Wood);
+    fn builtin_material_maps_decode_with_triplanar_projection() {
+        let builtin = BuiltinMaterial::Wood;
+        let material = Material::builtin(builtin);
+        let maps = builtin.decode().unwrap();
 
         assert_eq!(material.projection(), TextureProjection::Triplanar);
         assert_eq!(material.metallic(), 0.0);
         assert_eq!(material.roughness(), 1.0);
 
-        let textures = material.textures();
-        let base_color = workspace.get_texture(textures.base_color.unwrap()).unwrap();
-        let normal = workspace.get_texture(textures.normal.unwrap()).unwrap();
-        let metallic_roughness = workspace
-            .get_texture(textures.metallic_roughness.unwrap())
-            .unwrap();
-
-        assert_eq!(base_color.color_space, TextureColorSpace::Srgb);
+        assert_eq!(maps.base_color.color_space, TextureColorSpace::Srgb);
+        let normal = maps.normal.unwrap();
+        let metallic_roughness = maps.metallic_roughness.unwrap();
         assert_eq!(normal.color_space, TextureColorSpace::Linear);
         assert_eq!(metallic_roughness.color_space, TextureColorSpace::Linear);
-        assert_eq!((base_color.width, base_color.height), (512, 512));
+        assert_eq!((maps.base_color.width, maps.base_color.height), (512, 512));
         assert_eq!(metallic_roughness.pixel(0, 0)[2], 255);
     }
 
     #[test]
-    fn every_builtin_material_map_can_be_loaded() {
+    fn every_builtin_material_map_can_be_decoded() {
         for builtin in BuiltinMaterial::ALL {
-            let material: Material = Material::builtin(builtin);
-            assert_eq!(material.projection(), TextureProjection::Triplanar);
+            assert!(builtin.decode().is_ok(), "{builtin:?} maps should decode");
         }
     }
 }

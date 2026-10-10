@@ -100,6 +100,14 @@ impl Material {
         self.builtin
     }
 
+    pub(crate) fn has_texture_maps(&self) -> bool {
+        self.builtin.is_some()
+            || self.textures.base_color.is_some()
+            || self.textures.normal.is_some()
+            || self.textures.metallic_roughness.is_some()
+            || self.textures.emissive.is_some()
+    }
+
     /// RGBA multiplier for the base color. Values are not clamped on assignment.
     pub fn base_color(&self) -> [f32; 4] {
         self.base_color
