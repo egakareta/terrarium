@@ -79,6 +79,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         );
     }
 
+    #[cfg(feature = "default-materials")]
     ground.add_child(
         Part::new()
             .with_shape(PartShape::Block)

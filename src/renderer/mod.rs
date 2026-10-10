@@ -19,6 +19,7 @@ use crate::{
     glam::{Mat4, Vec3, Vec4},
     wgpu::util::DeviceExt,
 };
+#[cfg(feature = "default-materials")]
 mod builtin_material;
 mod frame;
 mod helpers;
@@ -31,6 +32,7 @@ mod skybox;
 mod texture;
 #[cfg(feature = "meshpart")]
 mod viewport;
+#[cfg(feature = "default-materials")]
 pub use builtin_material::*;
 use helpers::*;
 use lighting::*;
@@ -613,6 +615,7 @@ pub struct Renderer {
     textures: Vec<GpuTexture>,
     workspace_texture_handles: HashMap<(InstanceId, TextureHandle), (GpuTextureHandle, u64)>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,
+    #[cfg(feature = "default-materials")]
     builtin_material_textures: HashMap<BuiltinMaterial, MaterialTextures>,
     default_material_textures: MaterialTextures,
     default_material_filters: [TextureFilter; MATERIAL_SLOT_COUNT],

@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use thiserror::Error;
 
+#[cfg(feature = "default-materials")]
 use super::BuiltinMaterial;
 use crate::{Color3, Face};
 
@@ -50,6 +51,7 @@ pub struct Material {
     textures: TextureSet,
     filter: TextureFilter,
     projection: TextureProjection,
+    #[cfg(feature = "default-materials")]
     builtin: Option<BuiltinMaterial>,
 }
 
@@ -72,6 +74,7 @@ pub(crate) const DEFAULT_MATERIAL: Material = Material {
     },
     filter: TextureFilter::Trilinear,
     projection: TextureProjection::Uv,
+    #[cfg(feature = "default-materials")]
     builtin: None,
 };
 
@@ -81,6 +84,7 @@ impl Material {
     /// Its maps are decoded and uploaded lazily by the renderer, so this can be
     /// used while a mutable workspace child is already borrowed. Individual
     /// texture builder methods can override its maps while retaining the rest.
+    #[cfg(feature = "default-materials")]
     pub fn builtin(builtin: BuiltinMaterial) -> Self {
         let assets = builtin.assets();
         Self {
@@ -96,13 +100,18 @@ impl Material {
         }
     }
 
+    #[cfg(feature = "default-materials")]
     pub(crate) fn builtin_material(&self) -> Option<BuiltinMaterial> {
         self.builtin
     }
 
     pub(crate) fn has_texture_maps(&self) -> bool {
-        self.builtin.is_some()
-            || self.textures.base_color.is_some()
+        #[cfg(feature = "default-materials")]
+        if self.builtin.is_some() {
+            return true;
+        }
+
+        self.textures.base_color.is_some()
             || self.textures.normal.is_some()
             || self.textures.metallic_roughness.is_some()
             || self.textures.emissive.is_some()
@@ -173,9 +182,17 @@ impl Material {
     /// to override one map while retaining the other built-in maps.
     pub fn with_textures(mut self, textures: TextureSet) -> Self {
         self.textures = textures;
-        self.builtin = None;
+        self.clear_builtin_source();
         self
     }
+
+    #[cfg(feature = "default-materials")]
+    fn clear_builtin_source(&mut self) {
+        self.builtin = None;
+    }
+
+    #[cfg(not(feature = "default-materials"))]
+    fn clear_builtin_source(&mut self) {}
 
     /// Creates a material using a texture as its base-color map.
     pub fn textured(texture: TextureHandle) -> Self {

@@ -263,6 +263,7 @@ fn material_triplanar_projection_samples_world_space_coordinates()
 }
 
 #[test]
+#[cfg(feature = "default-materials")]
 fn builtin_material_loads_lazily_and_renders() -> Result<(), AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
     fn render(material: Material) -> Result<Vec<[u8; 4]>, AppCreationError> {

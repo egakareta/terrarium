@@ -3,11 +3,12 @@ use std::rc::Rc;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    BasePart, BuiltinMaterial, Camera, CameraController, Color3, HasBasePart, HasPVInstance,
-    Instance, InstanceData, InstanceId, InstanceLookup, Lighting, Material, Part, Texture,
-    TextureError, TextureHandle, TweenManager,
+    BasePart, Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
+    InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError, TextureHandle, TweenManager,
     glam::{Mat4, Vec3},
 };
+#[cfg(feature = "default-materials")]
+use crate::{BuiltinMaterial, Material};
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
 #[cfg(feature = "physics")]
@@ -74,6 +75,7 @@ pub struct Workspace {
     #[cfg(feature = "meshpart")]
     meshes: Vec<MeshHandle>,
     textures: Vec<Texture>,
+    #[cfg(feature = "default-materials")]
     builtin_materials: Vec<Option<Material>>,
     texture_revisions: Vec<u64>,
     texture_revision: u64,
@@ -101,6 +103,7 @@ impl Workspace {
             #[cfg(feature = "meshpart")]
             meshes: Vec::new(),
             textures: Vec::new(),
+            #[cfg(feature = "default-materials")]
             builtin_materials: vec![None; BuiltinMaterial::COUNT],
             texture_revisions: Vec::new(),
             texture_revision: 0,
@@ -393,6 +396,7 @@ impl Clone for Workspace {
             #[cfg(feature = "meshpart")]
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
+            #[cfg(feature = "default-materials")]
             builtin_materials: self.builtin_materials.clone(),
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
@@ -429,10 +433,9 @@ crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        BasePart, Camera, HasPart, Part, PartShape, TextureColorSpace, TextureProjection,
-        glam::Vec3,
-    };
+    #[cfg(feature = "default-materials")]
+    use crate::TextureProjection;
+    use crate::{BasePart, Camera, HasPart, Part, PartShape, TextureColorSpace, glam::Vec3};
     #[cfg(feature = "meshpart")]
     use crate::{Mesh, MeshPart};
 
@@ -906,6 +909,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "default-materials")]
     fn builtin_material_maps_decode_with_triplanar_projection() {
         let builtin = BuiltinMaterial::Wood;
         let material = Material::builtin(builtin);
@@ -925,6 +929,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "default-materials")]
     fn every_builtin_material_map_can_be_decoded() {
         for builtin in BuiltinMaterial::ALL {
             assert!(builtin.decode().is_ok(), "{builtin:?} maps should decode");

@@ -33,10 +33,19 @@ impl Renderer {
             .filter_map(|(index, material)| material.as_ref().map(|material| (index, material)))
         {
             let slot = index;
-            let builtin = material
-                .builtin_material()
-                .map(|builtin| self.load_builtin_material_textures(builtin))
-                .transpose()?;
+            let builtin: Option<MaterialTextures> = {
+                #[cfg(feature = "default-materials")]
+                {
+                    material
+                        .builtin_material()
+                        .map(|builtin| self.load_builtin_material_textures(builtin))
+                        .transpose()?
+                }
+                #[cfg(not(feature = "default-materials"))]
+                {
+                    None
+                }
+            };
             let material_maps = material.textures();
             textures.base_color[slot] = resolve(
                 self,
@@ -62,6 +71,7 @@ impl Renderer {
         Ok(textures)
     }
 
+    #[cfg(feature = "default-materials")]
     fn load_builtin_material_textures(
         &mut self,
         builtin: BuiltinMaterial,
