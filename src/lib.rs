@@ -46,6 +46,16 @@ pub mod cookbook {
     pub mod quick_start {}
 }
 
+// re-exports
+pub use eframe::{self, egui, egui_wgpu, wgpu};
+#[cfg(feature = "sound")]
+pub use euphorium;
+pub use glam;
+#[cfg(feature = "physics")]
+pub use rapier3d;
+pub use winit;
+
+// actual stuff
 #[cfg(feature = "bevy")]
 pub mod bevy;
 mod engine;
@@ -57,18 +67,11 @@ mod primitive;
 mod renderer;
 mod scene;
 
-pub use eframe::{self, egui, egui_wgpu, wgpu};
 pub use engine::*;
-#[cfg(feature = "sound")]
-pub use euphorium;
-pub use glam;
 pub use instance::*;
 pub use interpolation::*;
 #[cfg(feature = "persistence")]
 pub use persistence::*;
 pub use primitive::*;
-#[cfg(feature = "physics")]
-pub use rapier3d;
 pub use renderer::*;
 pub use scene::*;
-pub use winit;
