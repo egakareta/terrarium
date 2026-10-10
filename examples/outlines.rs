@@ -1,6 +1,6 @@
 use terrarium::{
     App, AppCreationError, Color3, Engine, Instance, InstanceId, MeshPart, Outline, OutlineMode,
-    Part, Terrarium, eframe, egui,
+    Terrarium, eframe, egui, glam::Vec3,
 };
 
 struct OutlinesApp {
@@ -80,7 +80,21 @@ fn main() {
         .run(|engine| {
             let mesh = engine.add_mesh(include_bytes!("../assets/Duck.glb"))?;
 
+            // the mesh is bounded Y +0.86, lets apply an offset
+            let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+            for vertex in &mesh.mesh().vertices {
+                let position = Vec3::from_array(vertex.position);
+                min = min.min(position);
+                max = max.max(position);
+            }
+            let focus_offset = if min.is_finite() && max.is_finite() {
+                (min + max) * 0.5
+            } else {
+                Vec3::ZERO
+            };
             let mesh_part = engine.add_child(MeshPart::new(mesh));
+            engine.workspace.camera_controller_mut().subject_offset = focus_offset;
+
             engine.workspace.current_camera.set_subject(Some(mesh_part));
 
             let mut app = OutlinesApp {
