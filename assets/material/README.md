@@ -27,15 +27,6 @@ material. To rebuild from externally stored WebP sources, use the upstream
 Basis Universal encoder with ETC1S, minimum quality, 512-pixel maximum
 dimensions, and mip generation off.
 
-## GPU-compressed uploads
-
-On native targets, the default `gpu-texture-compression` Cargo feature enables
-BC7 uploads when the selected WGPU adapter supports BC textures. Material maps
-are transcoded to RGBA8 when loaded, then encoded to BC7 on the CPU before GPU
-upload, including their mip chains. Adapters without BC support and WebAssembly
-use RGBA8 uploads instead. Initial transcoding and upload, plus later texture
-edits, incur CPU work.
-
 ## Projection
 
 Built-in material maps use world-space triplanar projection. The renderer

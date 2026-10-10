@@ -284,24 +284,6 @@ fn builtin_texture_loads_and_renders() -> Result<(), AppCreationError> {
         })?
         .unwrap();
 
-    let render_state = engine
-        .creation_context()
-        .wgpu_render_state
-        .as_ref()
-        .unwrap();
-    if render_state
-        .adapter
-        .features()
-        .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
-    {
-        assert!(
-            render_state
-                .device
-                .features()
-                .contains(wgpu::Features::TEXTURE_COMPRESSION_BC)
-        );
-    }
-
     let pixel = engine.renderer().read_pixel(64, 64)?;
     assert_ne!(pixel, [0, 0, 0, 255]);
     Ok(())

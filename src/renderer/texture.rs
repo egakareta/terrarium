@@ -295,20 +295,14 @@ impl Renderer {
                         base_texture.height,
                     ),
                 )?;
-                let mut mip_data = MaterialMipData::new(
-                    &base_texture,
-                    &surface_texture,
-                    &emissive_texture,
-                    self.device
-                        .features()
-                        .contains(wgpu::Features::TEXTURE_COMPRESSION_BC),
-                )?;
-                let format = mip_data.gpu_format(base_texture.color_space);
+                let (base_mips, mut surface_mips, emissive_mips) =
+                    material_mip_levels(&base_texture, &surface_texture, &emissive_texture)?;
+                let format = texture_gpu_format(base_texture.color_space);
                 let entry = &self.gpu_material_textures[packed_handle.0];
                 if entry._texture.size().width != base_texture.width
                     || entry._texture.size().height != base_texture.height
                     || entry._texture.format() != format
-                    || entry._texture.mip_level_count() != mip_data.mip_count() as u32
+                    || entry._texture.mip_level_count() != base_mips.len() as u32
                 {
                     let replacement = self.device.create_texture(&wgpu::TextureDescriptor {
                         label: Some("packed material texture"),
@@ -317,14 +311,21 @@ impl Renderer {
                             height: base_texture.height,
                             depth_or_array_layers: 3,
                         },
-                        mip_level_count: mip_data.mip_count() as u32,
+                        mip_level_count: base_mips.len() as u32,
                         sample_count: 1,
                         dimension: wgpu::TextureDimension::D2,
                         format,
                         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                         view_formats: &[],
                     });
-                    mip_data.write(&self.queue, &replacement, base_texture.color_space);
+                    write_packed_mips(
+                        &self.queue,
+                        &replacement,
+                        &base_mips,
+                        &mut surface_mips,
+                        &emissive_mips,
+                        base_texture.color_space,
+                    );
                     let view = replacement.create_view(&wgpu::TextureViewDescriptor {
                         dimension: Some(wgpu::TextureViewDimension::D2Array),
                         array_layer_count: Some(3),
@@ -336,7 +337,14 @@ impl Renderer {
                     };
                     recreated.push(packed_handle);
                 } else {
-                    mip_data.write(&self.queue, &entry._texture, base_texture.color_space);
+                    write_packed_mips(
+                        &self.queue,
+                        &entry._texture,
+                        &base_mips,
+                        &mut surface_mips,
+                        &emissive_mips,
+                        base_texture.color_space,
+                    );
                 }
             }
         }
@@ -369,15 +377,9 @@ impl Renderer {
         surface: &Texture,
         emissive: &Texture,
     ) -> Result<PackedTextureHandle, RendererError> {
-        let mut mip_data = MaterialMipData::new(
-            base_color,
-            surface,
-            emissive,
-            self.device
-                .features()
-                .contains(wgpu::Features::TEXTURE_COMPRESSION_BC),
-        )?;
-        let format = mip_data.gpu_format(base_color.color_space);
+        let (base_mips, mut surface_mips, emissive_mips) =
+            material_mip_levels(base_color, surface, emissive)?;
+        let format = texture_gpu_format(base_color.color_space);
         let gpu_texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("packed material texture"),
             size: wgpu::Extent3d {
@@ -385,14 +387,21 @@ impl Renderer {
                 height: base_color.height,
                 depth_or_array_layers: 3,
             },
-            mip_level_count: mip_data.mip_count() as u32,
+            mip_level_count: base_mips.len() as u32,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        mip_data.write(&self.queue, &gpu_texture, base_color.color_space);
+        write_packed_mips(
+            &self.queue,
+            &gpu_texture,
+            &base_mips,
+            &mut surface_mips,
+            &emissive_mips,
+            base_color.color_space,
+        );
         let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::D2Array),
             array_layer_count: Some(3),
@@ -504,178 +513,6 @@ impl Renderer {
 }
 
 type MaterialMipLevels = (Vec<Image>, Vec<Image>, Vec<Image>);
-
-struct MaterialMipData {
-    base_color: Vec<Image>,
-    surface: Vec<Image>,
-    emissive: Vec<Image>,
-    #[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-    compressed: Option<image_dds::Surface<Vec<u8>>>,
-}
-
-impl MaterialMipData {
-    fn new(
-        base_color: &Texture,
-        surface: &Texture,
-        emissive: &Texture,
-        compression_supported: bool,
-    ) -> Result<Self, RendererError> {
-        let (base_color_mips, surface_mips, emissive_mips) =
-            material_mip_levels(base_color, surface, emissive)?;
-
-        #[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-        let compressed = (compression_supported && base_color.width >= 4 && base_color.height >= 4)
-            .then(|| {
-                encode_bc7_mips(
-                    &base_color_mips,
-                    &surface_mips,
-                    &emissive_mips,
-                    base_color.color_space,
-                )
-            })
-            .transpose()?;
-
-        #[cfg(not(all(feature = "gpu-texture-compression", not(target_arch = "wasm32"))))]
-        let _ = compression_supported;
-
-        Ok(Self {
-            base_color: base_color_mips,
-            surface: surface_mips,
-            emissive: emissive_mips,
-            #[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-            compressed,
-        })
-    }
-
-    fn gpu_format(&self, color_space: TextureColorSpace) -> wgpu::TextureFormat {
-        #[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-        if self.compressed.is_some() {
-            return match color_space {
-                TextureColorSpace::Srgb => wgpu::TextureFormat::Bc7RgbaUnormSrgb,
-                TextureColorSpace::Linear => wgpu::TextureFormat::Bc7RgbaUnorm,
-            };
-        }
-
-        texture_gpu_format(color_space)
-    }
-
-    fn mip_count(&self) -> usize {
-        self.base_color.len()
-    }
-
-    fn write(
-        &mut self,
-        queue: &wgpu::Queue,
-        texture: &wgpu::Texture,
-        color_space: TextureColorSpace,
-    ) {
-        #[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-        if let Some(compressed) = self.compressed.as_ref() {
-            write_bc7_mips(queue, texture, compressed);
-            return;
-        }
-
-        write_packed_mips(
-            queue,
-            texture,
-            &self.base_color,
-            &mut self.surface,
-            &self.emissive,
-            color_space,
-        );
-    }
-}
-
-#[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-fn encode_bc7_mips(
-    base_color_mips: &[Image],
-    surface_mips: &[Image],
-    emissive_mips: &[Image],
-    color_space: TextureColorSpace,
-) -> Result<image_dds::Surface<Vec<u8>>, RendererError> {
-    let mut encoded_surface_mips = surface_mips.to_vec();
-    if color_space == TextureColorSpace::Srgb {
-        for mip in &mut encoded_surface_mips {
-            encode_srgb_rgb_in_place(&mut mip.pixels);
-        }
-    }
-
-    let mut pixels = Vec::with_capacity(
-        base_color_mips
-            .iter()
-            .chain(&encoded_surface_mips)
-            .chain(emissive_mips)
-            .map(|mip| mip.pixels.len())
-            .sum(),
-    );
-    for layer in [base_color_mips, &encoded_surface_mips, emissive_mips] {
-        for mip in layer {
-            pixels.extend_from_slice(&mip.pixels);
-        }
-    }
-
-    let base = &base_color_mips[0];
-    let surface = image_dds::SurfaceRgba8 {
-        width: base.width,
-        height: base.height,
-        depth: 1,
-        layers: 3,
-        mipmaps: base_color_mips.len() as u32,
-        data: pixels,
-    };
-    let format = match color_space {
-        TextureColorSpace::Srgb => image_dds::ImageFormat::BC7RgbaUnormSrgb,
-        TextureColorSpace::Linear => image_dds::ImageFormat::BC7RgbaUnorm,
-    };
-    surface
-        .encode(
-            format,
-            image_dds::Quality::Fast,
-            image_dds::Mipmaps::FromSurface,
-        )
-        .map_err(|error| RendererError::TextureCompression(error.to_string()))
-}
-
-#[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
-fn write_bc7_mips(
-    queue: &wgpu::Queue,
-    texture: &wgpu::Texture,
-    compressed: &image_dds::Surface<Vec<u8>>,
-) {
-    for layer in 0..compressed.layers {
-        for mip_level in 0..compressed.mipmaps {
-            let width = (compressed.width >> mip_level).max(1);
-            let height = (compressed.height >> mip_level).max(1);
-            let blocks_wide = width.div_ceil(4);
-            let blocks_high = height.div_ceil(4);
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture,
-                    mip_level,
-                    origin: wgpu::Origin3d {
-                        x: 0,
-                        y: 0,
-                        z: layer,
-                    },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                compressed
-                    .get(layer, 0, mip_level)
-                    .expect("encoded BC7 mip data exists"),
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(blocks_wide * 16),
-                    rows_per_image: Some(blocks_high),
-                },
-                wgpu::Extent3d {
-                    width: blocks_wide * 4,
-                    height: blocks_high * 4,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
-    }
-}
 
 fn material_mip_levels(
     base_color: &Texture,

@@ -9,11 +9,6 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
 use web_time::Instant;
 
-// The BC7 encoder's native archive does not propagate its C++ runtime link.
-#[cfg(all(feature = "gpu-texture-compression", target_os = "linux"))]
-#[link(name = "stdc++")]
-unsafe extern "C" {}
-
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 #[cfg(feature = "meshpart")]
@@ -175,9 +170,6 @@ pub enum RendererError {
     /// A texture failed validation.
     #[error("invalid texture: {0}")]
     InvalidTexture(#[from] TextureError),
-    /// Encoding a supported GPU-compressed texture failed.
-    #[error("could not encode BC7 material texture: {0}")]
-    TextureCompression(String),
     /// A skybox failed validation.
     #[error("invalid skybox: {0}")]
     InvalidSkybox(#[from] SkyboxError),
