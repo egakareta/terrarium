@@ -32,10 +32,10 @@ name = "gpu"
 required-features = ["meshpart"]
 
 [dependencies]
-bevy_app = { version = "0.19", features = ["web"], optional = true }
-bevy_ecs = { version = "0.19", optional = true }
-bevy_tasks = { version = "0.19", optional = true }
-bevy_time = { version = "0.19", optional = true }
+bevy_app = { version = "0.20", features = ["web"], optional = true }
+bevy_ecs = { version = "0.20", optional = true }
+bevy_tasks = { version = "0.20", optional = true }
+bevy_time = { version = "0.20", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 eframe = { version = "0.36", default-features = false, features = [
   "wgpu_no_default_features",
