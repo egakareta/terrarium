@@ -3,20 +3,6 @@
 These recreated textures provide tiled color, normal, and roughness maps for
 Roblox-inspired materials. The source images were generated with AI assistance.
 
-## Using built-in materials
-
-Load a material into a workspace and assign it to a part:
-
-```rust
-let wood = workspace.load_builtin_texture(BuiltinMaterial::Wood)?;
-workspace.add_child(Part::new().with_material(wood));
-```
-
-`BuiltinMaterial::ALL` lists every available material. Maps are decoded and
-registered the first time a material is loaded into a workspace; later loads
-reuse those texture handles. Available maps are used when present; missing
-maps use the renderer's neutral defaults.
-
 ## Bundled maps
 
 Built-in maps are embedded as ETC1S Basis Universal data at the encoder's

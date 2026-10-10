@@ -944,6 +944,7 @@ impl Renderer {
             textures,
             workspace_texture_handles: HashMap::default(),
             texture_dedup,
+            builtin_material_textures: HashMap::default(),
             default_material_textures,
             default_material_filters: [TextureFilter::default(); MATERIAL_SLOT_COUNT],
             packed_material_textures: HashMap::default(),

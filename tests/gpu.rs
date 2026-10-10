@@ -263,7 +263,7 @@ fn material_triplanar_projection_samples_world_space_coordinates()
 }
 
 #[test]
-fn builtin_texture_loads_and_renders() -> Result<(), AppCreationError> {
+fn builtin_material_loads_lazily_and_renders() -> Result<(), AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
     let engine = Terrarium::new()
         .with_size([128, 128])
@@ -271,14 +271,11 @@ fn builtin_texture_loads_and_renders() -> Result<(), AppCreationError> {
         .run(|engine| {
             engine.lighting.clear_skybox();
             engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
-            let wood = engine
-                .workspace
-                .load_builtin_texture(BuiltinTexture::Wood)?;
             engine.add_child(
                 Part::new()
                     .with_position(Vec3::new(0.0, 1.0, 0.0))
                     .with_size(Vec3::splat(2.0))
-                    .with_material(wood),
+                    .with_material(Material::builtin(BuiltinMaterial::Wood)),
             );
             Ok::<(), AppCreationError>(())
         })?

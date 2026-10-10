@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use thiserror::Error;
 
+use super::BuiltinMaterial;
 use crate::{Color3, Face};
 
 /// Depth-stencil format used by the built-in renderer.
@@ -49,6 +50,7 @@ pub struct Material {
     textures: TextureSet,
     filter: TextureFilter,
     projection: TextureProjection,
+    builtin: Option<BuiltinMaterial>,
 }
 
 impl Default for Material {
@@ -70,9 +72,34 @@ pub(crate) const DEFAULT_MATERIAL: Material = Material {
     },
     filter: TextureFilter::Trilinear,
     projection: TextureProjection::Uv,
+    builtin: None,
 };
 
 impl Material {
+    /// Creates a material from a built-in PBR material.
+    ///
+    /// Its maps are decoded and uploaded lazily by the renderer, so this can be
+    /// used while a mutable workspace child is already borrowed. Individual
+    /// texture builder methods can override its maps while retaining the rest.
+    pub fn builtin(builtin: BuiltinMaterial) -> Self {
+        let assets = builtin.assets();
+        Self {
+            metallic: builtin.metallic(),
+            roughness: if assets.roughness.is_some() {
+                1.0
+            } else {
+                builtin.fallback_roughness()
+            },
+            projection: TextureProjection::Triplanar,
+            builtin: Some(builtin),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn builtin_material(&self) -> Option<BuiltinMaterial> {
+        self.builtin
+    }
+
     /// RGBA multiplier for the base color. Values are not clamped on assignment.
     pub fn base_color(&self) -> [f32; 4] {
         self.base_color
@@ -132,9 +159,13 @@ impl Material {
         self
     }
 
-    /// Sets texture maps multiplied by the scalar factors.
+    /// Replaces the texture maps multiplied by the scalar factors.
+    ///
+    /// This replaces any built-in map source. Use an individual texture builder
+    /// to override one map while retaining the other built-in maps.
     pub fn with_textures(mut self, textures: TextureSet) -> Self {
         self.textures = textures;
+        self.builtin = None;
         self
     }
 

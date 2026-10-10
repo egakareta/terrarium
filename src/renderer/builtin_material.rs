@@ -1,11 +1,12 @@
+use super::material::{Texture, TextureColorSpace, TextureError};
+
 /// A material texture set shipped with Terrarium.
 ///
-/// Load a material into a workspace with
-/// [`Workspace::load_builtin_texture`](crate::Workspace::load_builtin_texture).
+/// Use a material directly with [`Material::builtin`](crate::Material::builtin).
 /// Built-in material maps use world-space triplanar projection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u8)]
-pub enum BuiltinTexture {
+pub enum BuiltinMaterial {
     /// Asphalt surface.
     Asphalt,
     /// Basalt surface.
@@ -70,7 +71,7 @@ pub enum BuiltinTexture {
     WoodPlanks,
 }
 
-impl BuiltinTexture {
+impl BuiltinMaterial {
     /// Every built-in material in its stable declaration order.
     pub const ALL: [Self; 31] = [
         Self::Asphalt,
@@ -107,10 +108,6 @@ impl BuiltinTexture {
     ];
 
     pub(crate) const COUNT: usize = Self::ALL.len();
-
-    pub(crate) const fn index(self) -> usize {
-        self as usize
-    }
 
     /// Returns the lowercase asset name for this material.
     pub const fn name(self) -> &'static str {
@@ -243,6 +240,58 @@ impl BuiltinTexture {
             Self::WoodPlanks => all_maps!("woodplanks"),
         }
     }
+
+    pub(crate) fn decode(self) -> Result<DecodedBuiltinMaterial, TextureError> {
+        let assets = self.assets();
+        let base_color = decode_builtin_material(assets.base_color, TextureColorSpace::Srgb)?;
+        let normal = assets
+            .normal
+            .map(|bytes| decode_builtin_material(bytes, TextureColorSpace::Linear))
+            .transpose()?;
+        let metallic_roughness = assets
+            .roughness
+            .map(|bytes| {
+                let roughness = decode_builtin_material(bytes, TextureColorSpace::Linear)?;
+                let mut pixels = Vec::with_capacity(roughness.pixels.len());
+                for pixel in roughness.pixels.chunks_exact(4) {
+                    pixels.extend_from_slice(&[255, pixel[0], 255, 255]);
+                }
+                Texture::linear(roughness.width, roughness.height, pixels)
+            })
+            .transpose()?;
+
+        Ok(DecodedBuiltinMaterial {
+            base_color,
+            normal,
+            metallic_roughness,
+        })
+    }
+}
+
+fn decode_builtin_material(
+    bytes: &[u8],
+    color_space: TextureColorSpace,
+) -> Result<Texture, TextureError> {
+    use basisu::{DecodeFlags, TargetFormat, Transcoder};
+
+    let transcoder = Transcoder::new(bytes).map_err(|_| TextureError::BasisDecode)?;
+    if transcoder.layer_count() != 1 {
+        return Err(TextureError::BasisDecode);
+    }
+    let (width, height) = transcoder.base_dimensions();
+    let pixels = transcoder.transcode(0, TargetFormat::Rgba32, DecodeFlags::NONE);
+    Texture::with_color_space(
+        width,
+        height,
+        pixels.map_err(|_| TextureError::BasisDecode)?,
+        color_space,
+    )
+}
+
+pub(crate) struct DecodedBuiltinMaterial {
+    pub(crate) base_color: Texture,
+    pub(crate) normal: Option<Texture>,
+    pub(crate) metallic_roughness: Option<Texture>,
 }
 
 pub(crate) struct BuiltinMaterialAssets {
