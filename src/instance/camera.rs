@@ -555,6 +555,7 @@ impl HasPVInstance for Camera {
     }
 
     fn pv_mut(&mut self) -> &mut PVInstance {
+        self.pv_instance.signals = Some(self.instance.signals.clone());
         &mut self.pv_instance
     }
 }

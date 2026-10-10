@@ -1,14 +1,24 @@
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, Instance, Part,
+    BasePart, Camera, Instance, InstanceProperty, InstanceSignals, Part,
     glam::{EulerRot, Mat4, Quat, Vec3},
 };
 
 /// An object that has a physical location in the world.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PVInstance {
     pivot: Mat4,
+    pub(crate) signals: Option<InstanceSignals>,
+}
+
+impl Clone for PVInstance {
+    fn clone(&self) -> Self {
+        Self {
+            pivot: self.pivot,
+            signals: None,
+        }
+    }
 }
 
 impl Default for PVInstance {
@@ -22,12 +32,25 @@ impl PVInstance {
     pub fn new() -> Self {
         Self {
             pivot: Mat4::IDENTITY,
+            signals: None,
         }
     }
 
     /// Creates a new instance from a world-space transform.
     pub fn from_world_transform(transform: Mat4) -> Self {
-        Self { pivot: transform }
+        Self {
+            pivot: transform,
+            signals: None,
+        }
+    }
+
+    fn set_pivot(&mut self, pivot: Mat4) {
+        if self.pivot != pivot {
+            self.pivot = pivot;
+            if let Some(signals) = &self.signals {
+                signals.emit_changed(InstanceProperty::Transform);
+            }
+        }
     }
 
     pub(crate) fn pose_from_transform(transform: Mat4) -> Mat4 {
@@ -111,7 +134,7 @@ pub trait HasPVInstance {
             transform.is_finite(),
             "pivot_to requires an invertible current pivot and a finite transform delta"
         );
-        self.pv_mut().pivot = pivot;
+        self.pv_mut().set_pivot(pivot);
         for child in self.children_mut() {
             transform_subtree(child, transform);
         }
@@ -125,7 +148,7 @@ pub trait HasPVInstance {
     where
         Self: Sized,
     {
-        self.pv_mut().pivot = pivot;
+        self.pv_mut().set_pivot(pivot);
         self
     }
 
@@ -136,7 +159,8 @@ pub trait HasPVInstance {
     {
         let pivot = self.pivot();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+        self.pv_mut()
+            .set_pivot(PVInstance::pose_from_transform(pose) * Mat4::from_scale(size));
         self
     }
 
@@ -146,7 +170,8 @@ pub trait HasPVInstance {
         Self: Sized,
     {
         let pivot = self.pivot();
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size);
+        self.pv_mut()
+            .set_pivot(PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size));
         self
     }
 
@@ -158,8 +183,9 @@ pub trait HasPVInstance {
         let pivot = self.pivot();
         let (_, rotation, _) = pivot.to_scale_rotation_translation();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot =
-            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size);
+        self.pv_mut().set_pivot(
+            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size),
+        );
         self
     }
 
@@ -171,15 +197,17 @@ pub trait HasPVInstance {
         let pivot = self.pivot();
         let position = self.position();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = Mat4::from_rotation_translation(
-            Quat::from_euler(
-                EulerRot::XYZ,
-                orientation.x.to_radians(),
-                orientation.y.to_radians(),
-                orientation.z.to_radians(),
-            ),
-            position,
-        ) * Mat4::from_scale(size);
+        self.pv_mut().set_pivot(
+            Mat4::from_rotation_translation(
+                Quat::from_euler(
+                    EulerRot::XYZ,
+                    orientation.x.to_radians(),
+                    orientation.y.to_radians(),
+                    orientation.z.to_radians(),
+                ),
+                position,
+            ) * Mat4::from_scale(size),
+        );
         self
     }
 }
@@ -224,7 +252,7 @@ fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
 
 fn transform_pivot(instance: &mut impl HasPVInstance, transform: Mat4) {
     let pivot = transform * instance.pivot();
-    instance.pv_mut().pivot = pivot;
+    instance.pv_mut().set_pivot(pivot);
 }
 
 #[cfg(test)]
@@ -265,6 +293,32 @@ mod tests {
         let unrelated_id = Part::new()
             .with_pivot(unrelated_pivot)
             .set_parent(&mut workspace);
+        let moved_ids = [
+            parent_id,
+            part_id,
+            camera_id,
+            base_id,
+            #[cfg(feature = "meshpart")]
+            mesh_id,
+        ];
+        let mut moved = moved_ids
+            .into_iter()
+            .map(|id| {
+                (
+                    id,
+                    workspace
+                        .instance(id)
+                        .unwrap()
+                        .on_property_changed(InstanceProperty::Transform)
+                        .receive(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut unrelated = workspace
+            .instance(unrelated_id)
+            .unwrap()
+            .on_property_changed(InstanceProperty::Transform)
+            .receive();
 
         let target = target_pose * parent_scale;
         workspace
@@ -321,6 +375,12 @@ mod tests {
             workspace.instance(base_id).unwrap().parent(),
             Some(light_id)
         );
+        workspace.dispatch_events();
+        for (id, receiver) in &mut moved {
+            assert_eq!(receiver.try_recv(), Some(()), "{id:?}");
+            assert_eq!(receiver.try_recv(), None, "{id:?}");
+        }
+        assert_eq!(unrelated.try_recv(), None);
 
         let camera_pivot = workspace.get::<Camera>(camera_id).unwrap().pivot();
         workspace
@@ -331,6 +391,10 @@ mod tests {
             workspace.get::<Camera>(camera_id).unwrap().pivot(),
             camera_pivot
         );
+        workspace.dispatch_events();
+        for (id, receiver) in &mut moved {
+            assert_eq!(receiver.try_recv(), None, "{id:?}");
+        }
     }
 
     #[test]

@@ -5,9 +5,9 @@ use crate::glam::Mat4;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
-    InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError, TextureHandle, TweenManager,
-    glam::Vec3,
+    BindableEvent, Camera, CameraController, Color3, EventContext, HasBasePart, HasPVInstance,
+    Instance, InstanceData, InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError,
+    TextureHandle, TweenManager, glam::Vec3,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -291,6 +291,43 @@ impl Workspace {
         for error in self.update_audio(delta_seconds) {
             log::error!("{error}");
         }
+        self.dispatch_events();
+    }
+
+    /// Creates a user-fired event using this workspace's deferred scheduler.
+    pub fn bindable_event<T: 'static>(&self) -> BindableEvent<T> {
+        BindableEvent::new(Rc::downgrade(&self.lookup.scheduler))
+    }
+
+    /// Processes the existing callback backlog in emission order.
+    ///
+    /// [`Self::update`] calls this after advancing the scene. Headless callers
+    /// may also call it directly. Nested emissions join the queue; nested calls
+    /// to dispatch do nothing. The budget drains the existing live backlog, with
+    /// a minimum of 1,024 invocations. At most 4,096 invocations can be queued,
+    /// so ordinary bursts drain in one update and callback cascades stay bounded.
+    /// Remaining nested invocations are preserved for a later dispatch.
+    /// Queue overflow is reported by [`crate::BindableEvent::fire`] and
+    /// [`crate::Signal::missed_emissions`], and logged once per dispatch.
+    ///
+    /// Returns the number of callbacks executed. Cancelled invocations do not
+    /// consume the dispatch budget.
+    pub fn dispatch_events(&mut self) -> usize {
+        self.dispatch_events_with_limit(self.lookup.scheduler.dispatch_budget())
+    }
+
+    /// Processes queued signal invocations with a caller-supplied work budget.
+    ///
+    /// A zero limit leaves the queue unchanged. See [`Self::dispatch_events`]
+    /// for delivery and reentrancy semantics.
+    pub fn dispatch_events_with_limit(&mut self, limit: usize) -> usize {
+        let scheduler = self.lookup.scheduler.clone();
+        scheduler.dispatch(&mut EventContext { workspace: self }, limit)
+    }
+
+    /// Returns whether signal invocations are awaiting dispatch.
+    pub fn has_pending_events(&self) -> bool {
+        self.lookup.scheduler.has_pending()
     }
 
     /// Returns the workspace's Rapier physics world.
@@ -311,10 +348,24 @@ impl Workspace {
             .instances()
             .filter_map(PhysicsInstance::from_instance)
             .collect();
-        let transforms = self.physics.step(&instances, delta_seconds);
-        for (id, transform) in transforms {
+        let step = self.physics.step(&instances, delta_seconds);
+        for (id, transform) in step.transforms {
             if let Some(instance) = self.instance_mut(id) {
                 apply_transform(instance, transform);
+            }
+        }
+        for (first, second) in step.touch_ended {
+            for (id, other) in [(first, second), (second, first)] {
+                if let Some(signals) = self.instance(id).and_then(Instance::instance_signals) {
+                    signals.emit_touch_ended(other);
+                }
+            }
+        }
+        for (first, second) in step.touch_started {
+            for (id, other) in [(first, second), (second, first)] {
+                if let Some(signals) = self.instance(id).and_then(Instance::instance_signals) {
+                    signals.emit_touched(other);
+                }
             }
         }
     }

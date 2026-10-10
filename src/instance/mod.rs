@@ -12,7 +12,10 @@ use std::{
 use serde::{Serialize, de::DeserializeOwned};
 use slotmap::SlotMap;
 
+use crate::{Signal, events::EventScheduler};
+
 mod camera;
+mod events;
 mod light;
 #[cfg(feature = "meshpart")]
 mod meshpart;
@@ -23,6 +26,7 @@ mod pv;
 mod sound;
 mod workspace;
 pub use camera::*;
+pub use events::*;
 pub use light::*;
 #[cfg(feature = "meshpart")]
 pub use meshpart::*;
@@ -77,22 +81,38 @@ fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
 #[derive(Debug, Default)]
 pub struct InstanceLookup {
     instances: RefCell<InstanceMap<NonNull<dyn Instance>>>,
+    instance_parents: RefCell<InstanceMap<Option<InstanceId>>>,
+    signal_instances: RefCell<InstanceMap<InstanceSignals>>,
     root: Cell<Option<(InstanceId, NonNull<InstanceData>)>>,
     generation: Cell<u64>,
+    pub(crate) scheduler: Rc<EventScheduler>,
 }
 
 impl InstanceLookup {
     /// Registers an instance pointer in this lookup index.
     #[doc(hidden)]
     pub fn register(&self, instance: &mut dyn Instance) {
+        let id = instance.id();
+        self.instance_parents
+            .borrow_mut()
+            .insert(id, instance.parent());
+        if let Some(signals) = instance.instance_signals() {
+            self.signal_instances
+                .borrow_mut()
+                .insert(id, signals.clone());
+        } else {
+            self.signal_instances.borrow_mut().remove(&id);
+        }
         self.instances
             .borrow_mut()
-            .insert(instance.id(), NonNull::from(instance));
+            .insert(id, NonNull::from(instance));
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 
     pub(crate) fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
+        self.instance_parents.borrow_mut().remove(&id);
+        self.signal_instances.borrow_mut().remove(&id);
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 
@@ -110,7 +130,27 @@ impl InstanceLookup {
     }
 
     pub(crate) fn set_root(&self, root: &mut InstanceData) {
+        self.instance_parents.borrow_mut().insert(root.id(), None);
+        self.signal_instances
+            .borrow_mut()
+            .insert(root.id(), root.signals.clone());
         self.root.set(Some((root.id(), NonNull::from(root))));
+    }
+
+    fn ancestor_signals(&self, mut parent: Option<InstanceId>) -> Vec<InstanceSignals> {
+        let parents = self.instance_parents.borrow();
+        let instances = self.signal_instances.borrow();
+        let mut signals = Vec::new();
+        while let Some(id) = parent {
+            let Some(next) = parents.get(&id) else {
+                break;
+            };
+            if let Some(instance_signals) = instances.get(&id) {
+                signals.push(instance_signals.clone());
+            }
+            parent = *next;
+        }
+        signals
     }
 
     fn remove_child(&self, parent_id: InstanceId, child_id: InstanceId) -> bool {
@@ -163,6 +203,10 @@ macro_rules! impl_instance {
                 self.$data $(.$data_tail)*.id()
             }
 
+            fn instance_signals(&self) -> Option<&$crate::InstanceSignals> {
+                Some(&self.$data $(.$data_tail)*.signals)
+            }
+
             fn parent(&self) -> Option<$crate::InstanceId> {
                 self.$data $(.$data_tail)*.parent()
             }
@@ -209,6 +253,10 @@ macro_rules! impl_instance {
 
             fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
                 self.$data $(.$data_tail)*.get_attribute(name)
+            }
+
+            fn set_attribute(&mut self, name: String, value: serde_json::Value) {
+                self.$data $(.$data_tail)*.set_attribute(name, value);
             }
 
             fn attributes(&self) -> &$crate::Attributes {
@@ -273,6 +321,7 @@ pub(crate) struct InstanceData {
     sibling_index: usize,
     lookup: Weak<InstanceLookup>,
     attributes: Attributes,
+    signals: InstanceSignals,
 }
 
 impl InstanceData {
@@ -285,6 +334,7 @@ impl InstanceData {
             sibling_index: usize::MAX,
             lookup: Weak::new(),
             attributes: Attributes::new(),
+            signals: InstanceSignals::default(),
         }
     }
 
@@ -293,7 +343,11 @@ impl InstanceData {
     }
 
     pub(crate) fn set_name(&mut self, name: String) {
+        if self.name == name {
+            return;
+        }
         self.name = name;
+        self.signals.emit_changed(InstanceProperty::Name);
     }
 
     pub(crate) fn id(&self) -> InstanceId {
@@ -322,6 +376,9 @@ impl InstanceData {
 
     pub(crate) fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
         self.lookup = lookup.map_or_else(Weak::new, Rc::downgrade);
+        self.signals.set_scheduler(
+            lookup.map_or_else(Weak::new, |lookup| Rc::downgrade(&lookup.scheduler)),
+        );
     }
 
     pub(crate) fn children(&self) -> &[Box<dyn Instance>] {
@@ -333,7 +390,11 @@ impl InstanceData {
     }
 
     pub(crate) fn set_attribute(&mut self, name: String, value: serde_json::Value) {
-        self.attributes.insert(name, value);
+        if self.attributes.get(&name) == Some(&value) {
+            return;
+        }
+        self.attributes.insert(name.clone(), value);
+        self.signals.emit_attribute_changed(&name);
     }
 
     pub(crate) fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
@@ -345,11 +406,16 @@ impl InstanceData {
     }
 
     pub(crate) fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
-        self.attributes.remove(name)
+        let value = self.attributes.remove(name)?;
+        self.signals.emit_attribute_changed(name);
+        Some(value)
     }
 
     pub(crate) fn clear_attributes(&mut self) {
-        self.attributes.clear();
+        let attributes = std::mem::take(&mut self.attributes);
+        for name in attributes.keys() {
+            self.signals.emit_attribute_changed(name);
+        }
     }
 
     pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
@@ -362,8 +428,35 @@ impl InstanceData {
                 .last_mut()
                 .expect("just pushed child")
                 .set_instance_lookup(Some(lookup));
+        } else {
+            return child_id;
+        }
+        let child = self.children.last().expect("just pushed child");
+        self.signals.emit_child_added(child.as_ref());
+        let ancestors = self.ancestor_signals();
+        for instance in std::iter::once(child.as_ref()).chain(child.descendants()) {
+            for signals in &ancestors {
+                signals.emit_descendant_added(instance);
+            }
+            if let Some(signals) = instance.instance_signals() {
+                if instance.id() == child_id {
+                    signals.emit_changed(InstanceProperty::Parent);
+                }
+                signals.emit_ancestry_changed(AncestryChanged {
+                    instance: instance.id(),
+                    parent: instance.parent(),
+                });
+            }
         }
         child_id
+    }
+
+    fn ancestor_signals(&self) -> Vec<InstanceSignals> {
+        let mut signals = vec![self.signals.clone()];
+        if let Some(lookup) = self.lookup() {
+            signals.extend(lookup.ancestor_signals(self.parent));
+        }
+        signals
     }
 
     pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
@@ -382,12 +475,34 @@ impl InstanceData {
         else {
             return false;
         };
+        let child = &self.children[index];
+        let ancestors = self.ancestor_signals();
+        for instance in std::iter::once(child.as_ref()).chain(child.descendants()) {
+            for signals in &ancestors {
+                signals.emit_descendant_removing(instance);
+            }
+            if let Some(signals) = instance.instance_signals() {
+                signals.emit_destroying(instance);
+            }
+        }
+        self.signals.emit_child_removed(child.as_ref());
         let mut child = self.children.swap_remove(index);
         if let Some(moved_child) = self.children.get_mut(index) {
             moved_child.set_sibling_index(index);
         }
         child.set_instance_parent(None);
         child.set_sibling_index(usize::MAX);
+        for instance in std::iter::once(child.as_ref()).chain(child.descendants()) {
+            if let Some(signals) = instance.instance_signals() {
+                if instance.id() == id {
+                    signals.emit_changed(InstanceProperty::Parent);
+                }
+                signals.emit_ancestry_changed(AncestryChanged {
+                    instance: instance.id(),
+                    parent: instance.parent(),
+                });
+            }
+        }
         child.set_instance_lookup(None);
         true
     }
@@ -395,6 +510,7 @@ impl InstanceData {
 
 impl Drop for InstanceData {
     fn drop(&mut self) {
+        self.signals.close();
         instance_ids()
             .lock()
             .expect("instance ID registry poisoned")
@@ -439,6 +555,95 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Returns this instance's stable identifier.
     fn id(&self) -> InstanceId;
 
+    /// Internal hook for the common signals supplied by built-in instances.
+    ///
+    /// Implementations without signal storage return closed handles from the
+    /// `on_*` accessors.
+    #[doc(hidden)]
+    fn instance_signals(&self) -> Option<&InstanceSignals> {
+        None
+    }
+
+    /// Fires when a direct child is added to this instance in a workspace.
+    /// The snapshot remains readable if the child is removed before dispatch.
+    fn on_child_added(&self) -> Signal<InstanceSnapshot> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::child_added)
+    }
+
+    /// Fires after a direct child is removed and destroyed.
+    ///
+    /// The snapshot preserves metadata and the old parent even after destruction.
+    fn on_child_removed(&self) -> Signal<InstanceSnapshot> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::child_removed)
+    }
+
+    /// Fires for each instance in an added subtree, in depth-first order.
+    fn on_descendant_added(&self) -> Signal<InstanceSnapshot> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::descendant_added)
+    }
+
+    /// Fires for each instance in a removed subtree, in depth-first order.
+    ///
+    /// Notifications are recorded before removal but callbacks execute afterward.
+    fn on_descendant_removing(&self) -> Signal<InstanceSnapshot> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::descendant_removing)
+    }
+
+    /// Fires when this instance or one of its ancestors changes parent.
+    fn on_ancestry_changed(&self) -> Signal<AncestryChanged> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::ancestry_changed)
+    }
+
+    /// Invalidates a changed property, including built-in part and transform setters.
+    ///
+    /// Repeated changes to the same property coalesce until dispatch. Read its
+    /// current value in the handler. Direct edits to public material-slot storage
+    /// and class-specific camera, light, and sound settings are not observed.
+    fn on_changed(&self) -> Signal<InstanceProperty> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::changed)
+    }
+
+    /// Fires when the specified common property changes.
+    ///
+    /// Read the current property through the instance API inside the handler.
+    /// Repeated changes to that property coalesce into one invalidation.
+    fn on_property_changed(&self, property: InstanceProperty) -> Signal<()> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, |signals| signals.property_changed(property))
+    }
+
+    /// Invalidates an attribute that changes or is removed, with its name.
+    /// Repeated changes to the same attribute coalesce until dispatch.
+    fn on_attribute_changed(&self) -> Signal<String> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::attribute_changed)
+    }
+
+    /// Fires when the named attribute changes or is removed.
+    /// Repeated changes coalesce until dispatch; read its latest value in the handler.
+    fn on_attribute_changed_for(&self, name: &str) -> Signal<()> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, |signals| {
+                signals.attribute_changed_for(name)
+            })
+    }
+
+    /// Fires when this instance is destroyed by removal from a workspace.
+    ///
+    /// Delivery is deferred: the instance may no longer exist when the callback
+    /// runs. Destruction disconnects future delivery but preserves queued calls.
+    /// The snapshot contains the metadata, parent, and child IDs before removal.
+    fn on_destroying(&self) -> Signal<InstanceSnapshot> {
+        self.instance_signals()
+            .map_or_else(Signal::closed, InstanceSignals::destroying)
+    }
+
     /// Stores a custom metadata value under `name`, overwriting any previous
     /// value.
     ///
@@ -461,6 +666,10 @@ pub trait Instance: Any + Debug + InstanceClone {
 
     /// Returns the custom metadata stored under `name`, if any.
     fn get_attribute(&self, name: &str) -> Option<&serde_json::Value>;
+
+    /// Stores or replaces an attribute in place, notifying attribute subscribers
+    /// when its value actually changes.
+    fn set_attribute(&mut self, name: String, value: serde_json::Value);
 
     /// Returns all custom metadata in sorted key order.
     fn attributes(&self) -> &Attributes;
@@ -874,6 +1083,181 @@ impl dyn Instance {
 mod tests {
     use super::*;
     use crate::{BasePart, Camera, Part, PartShape, Workspace};
+
+    #[derive(Clone, Debug)]
+    struct NoSignalInstance {
+        data: InstanceData,
+    }
+
+    impl NoSignalInstance {
+        fn new() -> Self {
+            Self {
+                data: InstanceData::new("NoSignalInstance"),
+            }
+        }
+    }
+
+    impl Instance for NoSignalInstance {
+        fn class_name(&self) -> &'static str {
+            "NoSignalInstance"
+        }
+
+        fn name(&self) -> &str {
+            self.data.name()
+        }
+
+        fn set_name(&mut self, name: String) {
+            self.data.set_name(name);
+        }
+
+        fn with_name(mut self, name: impl Into<String>) -> Self {
+            self.data.set_name(name.into());
+            self
+        }
+
+        fn id(&self) -> InstanceId {
+            self.data.id()
+        }
+
+        fn instance_signals(&self) -> Option<&InstanceSignals> {
+            None
+        }
+
+        fn with_attribute(mut self, name: impl Into<String>, value: serde_json::Value) -> Self {
+            self.data.set_attribute(name.into(), value);
+            self
+        }
+
+        fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
+            self.data.get_attribute(name)
+        }
+
+        fn set_attribute(&mut self, name: String, value: serde_json::Value) {
+            self.data.set_attribute(name, value);
+        }
+
+        fn attributes(&self) -> &Attributes {
+            self.data.attributes()
+        }
+
+        fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
+            self.data.remove_attribute(name)
+        }
+
+        fn clear_attributes(&mut self) {
+            self.data.clear_attributes();
+        }
+
+        fn parent(&self) -> Option<InstanceId> {
+            self.data.parent()
+        }
+
+        fn children(&self) -> &[Box<dyn Instance>] {
+            self.data.children()
+        }
+
+        fn children_mut(&mut self) -> ChildrenMut<'_> {
+            self.data.children_mut()
+        }
+
+        fn remove_child(&mut self, id: InstanceId) -> bool {
+            self.data.remove_child(id)
+        }
+
+        fn add_child_box(&mut self, child: Box<dyn Instance>) -> InstanceId {
+            self.data.add_child(child)
+        }
+
+        fn set_instance_parent(&mut self, parent: Option<InstanceId>) {
+            self.data.set_parent(parent);
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn set_instance_lookup(&mut self, lookup: Option<Rc<InstanceLookup>>) {
+            if let Some(lookup) = &lookup {
+                lookup.register(self);
+            } else if let Some(lookup) = self.data.lookup() {
+                lookup.unregister(self.id());
+            }
+
+            self.data.set_lookup(lookup.as_ref());
+            for child in self.data.children_mut() {
+                child.set_instance_lookup(lookup.clone());
+            }
+        }
+
+        fn instance_lookup(&self) -> Option<Rc<InstanceLookup>> {
+            self.data.lookup()
+        }
+    }
+
+    #[test]
+    fn descendant_notifications_cross_instances_without_signal_storage() {
+        let mut workspace = Workspace::new();
+        let parent_id = workspace.add_child(Part::new());
+        let no_signal_id = workspace
+            .get_mut::<Part>(parent_id)
+            .unwrap()
+            .add_child(NoSignalInstance::new());
+
+        let workspace_added = Rc::new(RefCell::new(Vec::new()));
+        let parent_added = Rc::new(RefCell::new(Vec::new()));
+        let received = workspace_added.clone();
+        workspace
+            .on_descendant_added()
+            .connect(move |_, id| received.borrow_mut().push(id.id))
+            .detach();
+        let received = parent_added.clone();
+        workspace
+            .get::<Part>(parent_id)
+            .unwrap()
+            .on_descendant_added()
+            .connect(move |_, id| received.borrow_mut().push(id.id))
+            .detach();
+
+        let leaf_id = workspace
+            .instance_mut(no_signal_id)
+            .unwrap()
+            .add_child_box(Box::new(Part::new()));
+        workspace.dispatch_events();
+        assert_eq!(*workspace_added.borrow(), [leaf_id]);
+        assert_eq!(*parent_added.borrow(), [leaf_id]);
+
+        let workspace_removed = Rc::new(RefCell::new(Vec::new()));
+        let parent_removed = Rc::new(RefCell::new(Vec::new()));
+        let received = workspace_removed.clone();
+        workspace
+            .on_descendant_removing()
+            .connect(move |context, id| {
+                assert!(context.workspace().instance(id.id).is_none());
+                received.borrow_mut().push(id.id);
+            })
+            .detach();
+        let received = parent_removed.clone();
+        workspace
+            .get::<Part>(parent_id)
+            .unwrap()
+            .on_descendant_removing()
+            .connect(move |_, id| received.borrow_mut().push(id.id))
+            .detach();
+
+        assert!(
+            workspace
+                .instance_mut(no_signal_id)
+                .unwrap()
+                .remove_child(leaf_id)
+        );
+        workspace.dispatch_events();
+        assert_eq!(*workspace_removed.borrow(), [leaf_id]);
+        assert_eq!(*parent_removed.borrow(), [leaf_id]);
+    }
 
     #[test]
     fn built_in_objects_implement_instance_and_support_downcasting() {

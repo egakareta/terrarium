@@ -1,6 +1,6 @@
 use crate::{
-    Color3, DEFAULT_MATERIAL, Face, HasPVInstance, Instance, InstanceData, Material,
-    MeshMaterialSlots, PVInstance, PartShape,
+    Color3, DEFAULT_MATERIAL, Face, HasPVInstance, Instance, InstanceData, InstanceProperty,
+    InstanceSignals, Material, MeshMaterialSlots, PVInstance, PartShape,
 };
 
 /// A named, transformable scene node with optional collision metadata.
@@ -46,6 +46,7 @@ impl HasPVInstance for BasePart {
     }
 
     fn pv_mut(&mut self) -> &mut PVInstance {
+        self.pv_instance.signals = Some(self.instance.signals.clone());
         &mut self.pv_instance
     }
 }
@@ -57,6 +58,47 @@ pub trait HasBasePart {
 
     /// Returns mutable access to the underlying [`BasePart`].
     fn base_part_mut(&mut self) -> &mut BasePart;
+
+    /// Fires once when this part begins touching another workspace part.
+    ///
+    /// The payload is the other part's ID. Contacts are detected during positive
+    /// [`Workspace::update`](crate::Workspace::update) steps, and callbacks run
+    /// after physics and scene transforms have been updated. Persistent contact
+    /// does not emit again until the parts separate and touch again.
+    ///
+    /// Only active Rapier contacts between workspace colliders are included.
+    /// Both parts must have [`Self::can_collide`] enabled; by default, at least
+    /// one must be unanchored. Signals may be subscribed to before attachment.
+    ///
+    /// ```
+    /// use terrarium::{HasBasePart, Instance, Part, Workspace};
+    ///
+    /// let mut workspace = Workspace::new();
+    /// let part = Part::new().with_anchored(false);
+    /// let _subscription = part.on_touched().connect(|context, other| {
+    ///     if let Some(other) = context.workspace().instance(*other) {
+    ///         println!("Touched {}", other.name());
+    ///     }
+    /// });
+    /// workspace.add_child(part);
+    /// workspace.update(1.0 / 60.0);
+    /// ```
+    #[cfg(feature = "physics")]
+    fn on_touched(&self) -> crate::Signal<crate::InstanceId> {
+        self.base_part().instance.signals.touched()
+    }
+
+    /// Fires once when this part stops touching another workspace part.
+    ///
+    /// The payload is the other part's ID, which may no longer resolve if it
+    /// was removed. Separation, collider disabling, and removal are detected on
+    /// the next positive [`Workspace::update`](crate::Workspace::update) step.
+    /// The surviving part is notified when the other part is destroyed.
+    /// Delivery follows the same deferred rules as [`Self::on_touched`].
+    #[cfg(feature = "physics")]
+    fn on_touch_ended(&self) -> crate::Signal<crate::InstanceId> {
+        self.base_part().instance.signals.touch_ended()
+    }
 
     /// Tint.
     fn color(&self) -> Color3 {
@@ -89,7 +131,11 @@ pub trait HasBasePart {
     where
         Self: Sized,
     {
-        self.base_part_mut().color = color;
+        let part = self.base_part_mut();
+        if part.color != color {
+            part.color = color;
+            part.instance.signals.emit_changed(InstanceProperty::Color);
+        }
         self
     }
 
@@ -98,11 +144,18 @@ pub trait HasBasePart {
     where
         Self: Sized,
     {
-        self.base_part_mut().transparency = if transparency.is_finite() {
+        let transparency = if transparency.is_finite() {
             transparency.clamp(0.0, 1.0)
         } else {
             0.0
         };
+        let part = self.base_part_mut();
+        if part.transparency != transparency {
+            part.transparency = transparency;
+            part.instance
+                .signals
+                .emit_changed(InstanceProperty::Transparency);
+        }
         self
     }
 
@@ -114,7 +167,13 @@ pub trait HasBasePart {
     where
         Self: Sized,
     {
-        self.base_part_mut().anchored = anchored;
+        let part = self.base_part_mut();
+        if part.anchored != anchored {
+            part.anchored = anchored;
+            part.instance
+                .signals
+                .emit_changed(InstanceProperty::Anchored);
+        }
         self
     }
 
@@ -126,7 +185,13 @@ pub trait HasBasePart {
     where
         Self: Sized,
     {
-        self.base_part_mut().can_collide = can_collide;
+        let part = self.base_part_mut();
+        if part.can_collide != can_collide {
+            part.can_collide = can_collide;
+            part.instance
+                .signals
+                .emit_changed(InstanceProperty::CanCollide);
+        }
         self
     }
 }
@@ -153,6 +218,12 @@ impl<T: HasBasePart + ?Sized> HasBasePart for &mut T {
 
 /// Access to directional material slots.
 pub trait HasMaterials {
+    /// Internal notification storage for built-in material setters.
+    #[doc(hidden)]
+    fn material_signals(&self) -> Option<&InstanceSignals> {
+        None
+    }
+
     /// Returns shared access to the directional material slots.
     fn material_slots(&self) -> &MeshMaterialSlots;
 
@@ -187,8 +258,15 @@ pub trait HasMaterials {
     where
         Self: Sized,
     {
+        let mut changed = false;
         for slot in Face::ALL {
-            self.material_slots_mut().set(slot, material);
+            if self.material_slots().get(slot) != Some(&material) {
+                self.material_slots_mut().set(slot, material);
+                changed = true;
+            }
+        }
+        if changed && let Some(signals) = self.material_signals() {
+            signals.emit_changed(InstanceProperty::Material);
         }
         self
     }
@@ -202,12 +280,20 @@ pub trait HasMaterials {
     where
         Self: Sized,
     {
-        self.material_slots_mut().set(slot, material);
+        if self.material_slots().get(slot) != Some(&material) {
+            self.material_slots_mut().set(slot, material);
+            if let Some(signals) = self.material_signals() {
+                signals.emit_changed(InstanceProperty::Material);
+            }
+        }
         self
     }
 }
 
 impl<T: HasMaterials + ?Sized> HasMaterials for &mut T {
+    fn material_signals(&self) -> Option<&InstanceSignals> {
+        (**self).material_signals()
+    }
     fn material_slots(&self) -> &MeshMaterialSlots {
         (**self).material_slots()
     }
@@ -260,7 +346,14 @@ pub trait HasPart {
     where
         Self: Sized,
     {
-        self.part_mut().shape = shape;
+        let part = self.part_mut();
+        if part.shape != shape {
+            part.shape = shape;
+            part.basepart
+                .instance
+                .signals
+                .emit_changed(InstanceProperty::Shape);
+        }
         self
     }
 }
@@ -307,6 +400,9 @@ impl HasBasePart for Part {
 }
 
 impl HasMaterials for Part {
+    fn material_signals(&self) -> Option<&InstanceSignals> {
+        Some(&self.basepart.instance.signals)
+    }
     fn material_slots(&self) -> &MeshMaterialSlots {
         &self.material_slots
     }

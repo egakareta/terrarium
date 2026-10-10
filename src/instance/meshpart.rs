@@ -391,6 +391,9 @@ impl HasBasePart for MeshPart {
 }
 
 impl HasMaterials for MeshPart {
+    fn material_signals(&self) -> Option<&crate::InstanceSignals> {
+        Some(&self.basepart.instance.signals)
+    }
     fn material_slots(&self) -> &MeshMaterialSlots {
         &self.material_slots
     }
