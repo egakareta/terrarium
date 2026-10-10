@@ -33,6 +33,7 @@ required-features = ["meshpart"]
 
 [dependencies]
 base64 = { version = "0.23", optional = true }
+basisu = { version = "0.1", default-features = false, features = ["std"] }
 bevy_app = { version = "0.20", features = ["web"], optional = true }
 bevy_ecs = { version = "0.20", optional = true }
 bevy_tasks = { version = "0.20", optional = true }
@@ -63,6 +64,7 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06", "way
 approx = "0.5"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image_dds = { version = "0.7", default-features = false, features = ["encode"], optional = true }
 pollster = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -83,6 +85,7 @@ default = [
   "eframe-default-fonts",
   "flac",
   "gles",
+  "gpu-texture-compression",
   "meshpart",
   "metal",
   "mp3",
@@ -96,6 +99,7 @@ default = [
 bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 default-fonts = []
 default-skybox = []
+gpu-texture-compression = ["dep:image_dds"]
 meshpart = ["dep:gltf"]
 persistence = ["dep:base64", "dep:renfs"]
 physics = ["dep:rapier3d"]

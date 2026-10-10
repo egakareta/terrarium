@@ -3,6 +3,39 @@
 These recreated textures provide tiled color, normal, and roughness maps for
 Roblox-inspired materials. The source images were generated with AI assistance.
 
+## Using built-in materials
+
+Load a material into a workspace and assign it to a part:
+
+```rust
+let wood = workspace.load_builtin_texture(BuiltinMaterial::Wood)?;
+workspace.add_child(Part::new().with_material(wood));
+```
+
+`BuiltinMaterial::ALL` lists every available material. Maps are decoded and
+registered the first time a material is loaded into a workspace; later loads
+reuse those texture handles. Available maps are used when present; missing
+maps use the renderer's neutral defaults.
+
+## Bundled maps
+
+Built-in maps are embedded as ETC1S Basis Universal data at the encoder's
+minimum quality, capped at 512 pixels on the longest edge, with mipmaps
+omitted. The 86 maps total about 1.62 MiB; full-resolution WebP source maps are
+not bundled. Mipmaps are generated after decoding when the renderer prepares a
+material. To rebuild from externally stored WebP sources, use the upstream
+Basis Universal encoder with ETC1S, minimum quality, 512-pixel maximum
+dimensions, and mip generation off.
+
+## GPU-compressed uploads
+
+On native targets, the default `gpu-texture-compression` Cargo feature enables
+BC7 uploads when the selected WGPU adapter supports BC textures. Material maps
+are transcoded to RGBA8 when loaded, then encoded to BC7 on the CPU before GPU
+upload, including their mip chains. Adapters without BC support and WebAssembly
+use RGBA8 uploads instead. Initial transcoding and upload, plus later texture
+edits, incur CPU work.
+
 ## Projection
 
 Built-in material maps use world-space triplanar projection. The renderer
@@ -18,6 +51,6 @@ very different texture coordinates and mapped lighting normals. A neutral
 normal sample on every projection must blend back to the original geometric
 normal, while non-neutral samples must perturb that normal continuously.
 
-Custom SurfaceAppearance maps should keep their authored mesh UVs and use
-the UV derivatives to construct their tangent frame; they do not use triplanar
+Custom SurfaceAppearance maps should keep their authored mesh UVs and use the
+UV derivatives to construct their tangent frame; they do not use triplanar
 projection.

@@ -38,7 +38,8 @@ pub struct TextureSet {
 ///
 /// Note that [`crate::HasBasePart::color`] still multiplies every face.
 ///
-/// Texture sampling for each slot uses that slot's [`Material::filter`].
+/// Texture sampling for each slot uses that slot's [`Material::filter`] and
+/// [`Material::projection`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
     base_color: [f32; 4],
@@ -47,6 +48,7 @@ pub struct Material {
     emissive: [f32; 3],
     textures: TextureSet,
     filter: TextureFilter,
+    projection: TextureProjection,
 }
 
 impl Default for Material {
@@ -67,6 +69,7 @@ pub(crate) const DEFAULT_MATERIAL: Material = Material {
         emissive: None,
     },
     filter: TextureFilter::Trilinear,
+    projection: TextureProjection::Uv,
 };
 
 impl Material {
@@ -98,6 +101,11 @@ impl Material {
     /// Texture sampling filter used for this material's texture maps.
     pub fn filter(&self) -> TextureFilter {
         self.filter
+    }
+
+    /// Texture coordinate projection used by this material's maps.
+    pub fn projection(&self) -> TextureProjection {
+        self.projection
     }
 
     /// Sets the RGBA multiplier for the base color. Values are not clamped on assignment.
@@ -169,6 +177,12 @@ impl Material {
         self
     }
 
+    /// Returns a copy of this material with a texture coordinate projection assigned.
+    pub fn with_projection(mut self, projection: TextureProjection) -> Self {
+        self.projection = projection;
+        self
+    }
+
     /// Creates a material whose base color comes from an RGB tint.
     pub fn from_color(color: Color3) -> Self {
         Self {
@@ -223,6 +237,18 @@ pub enum TextureColorSpace {
     Srgb,
     /// Data maps such as normals and metallic-roughness.
     Linear,
+}
+
+/// Projection used to sample a material's texture maps.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum TextureProjection {
+    /// Samples the authored mesh UV coordinates. This is the default and is
+    /// appropriate for glTF materials and other UV-authored surfaces.
+    #[default]
+    Uv,
+    /// Samples all three world-space planes and blends them by the geometric
+    /// normal. Coordinates repeat once per world unit.
+    Triplanar,
 }
 
 /// Texture sampling filter used by a [`Material`].
@@ -434,6 +460,9 @@ pub enum TextureError {
     /// The image decoder could not read the supplied bytes.
     #[error("could not decode image data: {0}")]
     ImageDecode(#[from] image::ImageError),
+    /// An embedded Basis Universal material texture could not be transcoded.
+    #[error("could not transcode Basis Universal texture data")]
+    BasisDecode,
     /// Width or height was zero.
     #[error("texture dimensions must be greater than zero")]
     ZeroDimensions,
@@ -918,6 +947,7 @@ mod tests {
         assert_eq!(material.base_color(), [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(material.metallic(), 0.0);
         assert_eq!(material.roughness(), 0.5);
+        assert_eq!(material.projection(), TextureProjection::Uv);
         assert!(material.textures().base_color.is_none());
         assert!(material.textures().normal.is_none());
         assert!(material.textures().metallic_roughness.is_none());
@@ -938,7 +968,8 @@ mod tests {
             .with_roughness(0.7)
             .with_emissive([0.8, 0.9, 1.0])
             .with_textures(textures)
-            .with_filter(TextureFilter::Nearest);
+            .with_filter(TextureFilter::Nearest)
+            .with_projection(TextureProjection::Triplanar);
 
         assert_eq!(material.base_color(), [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(material.metallic(), 0.6);
@@ -946,6 +977,7 @@ mod tests {
         assert_eq!(material.emissive(), [0.8, 0.9, 1.0]);
         assert_eq!(material.textures(), textures);
         assert_eq!(material.filter(), TextureFilter::Nearest);
+        assert_eq!(material.projection(), TextureProjection::Triplanar);
     }
 
     #[test]

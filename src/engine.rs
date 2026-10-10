@@ -119,6 +119,24 @@ fn default_headless_render_state(
     }
 }
 
+fn request_supported_texture_compression(options: &mut egui_wgpu::WgpuConfiguration) {
+    if let egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
+        let device_descriptor = setup.device_descriptor.clone();
+        setup.device_descriptor = Arc::new(move |adapter| {
+            let descriptor = device_descriptor(adapter);
+            #[cfg(all(feature = "gpu-texture-compression", not(target_arch = "wasm32")))]
+            {
+                let mut descriptor = descriptor;
+                descriptor.required_features |=
+                    adapter.features() & egui_wgpu::wgpu::Features::TEXTURE_COMPRESSION_BC;
+                descriptor
+            }
+            #[cfg(not(all(feature = "gpu-texture-compression", not(target_arch = "wasm32"))))]
+            descriptor
+        });
+    }
+}
+
 // WebGPU objects are not transferable between browser threads. Keep the renderer on its owning
 // thread and let the Send + Sync callback carry only an index into this thread-local registry.
 #[cfg(target_arch = "wasm32")]
@@ -352,6 +370,7 @@ impl Engine {
 
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
         (config.wgpu_options)(&mut wgpu_options);
+        request_supported_texture_compression(&mut wgpu_options);
         #[cfg(not(target_arch = "wasm32"))]
         {
             let headless_frame_limit = match config.headless {

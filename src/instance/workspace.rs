@@ -3,14 +3,35 @@ use std::rc::Rc;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    BasePart, Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
-    InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError, TextureHandle, TweenManager,
+    BasePart, BuiltinTexture, Camera, CameraController, Color3, HasBasePart, HasPVInstance,
+    Instance, InstanceData, InstanceId, InstanceLookup, Lighting, Material, Part, Texture,
+    TextureColorSpace, TextureError, TextureHandle, TextureProjection, TweenManager,
     glam::{Mat4, Vec3},
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
 #[cfg(feature = "physics")]
 use crate::{PhysicsInstance, PhysicsWorld, apply_transform};
+
+fn decode_builtin_texture(
+    bytes: &[u8],
+    color_space: TextureColorSpace,
+) -> Result<Texture, TextureError> {
+    use basisu::{DecodeFlags, TargetFormat, Transcoder};
+
+    let transcoder = Transcoder::new(bytes).map_err(|_| TextureError::BasisDecode)?;
+    if transcoder.layer_count() != 1 {
+        return Err(TextureError::BasisDecode);
+    }
+    let (width, height) = transcoder.base_dimensions();
+    let pixels = transcoder.transcode(0, TargetFormat::Rgba32, DecodeFlags::NONE);
+    Texture::with_color_space(
+        width,
+        height,
+        pixels.map_err(|_| TextureError::BasisDecode)?,
+        color_space,
+    )
+}
 
 /// Parameters for querying colliders intersecting a world-space box.
 #[cfg(feature = "physics")]
@@ -73,6 +94,7 @@ pub struct Workspace {
     #[cfg(feature = "meshpart")]
     meshes: Vec<MeshHandle>,
     textures: Vec<Texture>,
+    builtin_textures: Vec<Option<Material>>,
     texture_revisions: Vec<u64>,
     texture_revision: u64,
     /// Scene-wide lighting configuration.
@@ -99,6 +121,7 @@ impl Workspace {
             #[cfg(feature = "meshpart")]
             meshes: Vec::new(),
             textures: Vec::new(),
+            builtin_textures: vec![None; BuiltinTexture::COUNT],
             texture_revisions: Vec::new(),
             texture_revision: 0,
             lighting: Lighting::default(),
@@ -164,6 +187,60 @@ impl Workspace {
         self.texture_revision = self.texture_revision.wrapping_add(1);
         self.texture_revisions.push(self.texture_revision);
         Ok(handle)
+    }
+
+    /// Loads a built-in material's maps into this workspace and returns the
+    /// triplanar material. Repeated loads in the same workspace reuse its
+    /// registered textures.
+    pub fn load_builtin_texture(
+        &mut self,
+        builtin: BuiltinTexture,
+    ) -> Result<Material, TextureError> {
+        let index = builtin.index();
+        if let Some(material) = self.builtin_textures[index] {
+            return Ok(material);
+        }
+
+        let assets = builtin.assets();
+        let base_color = decode_builtin_texture(assets.base_color, TextureColorSpace::Srgb)?;
+        let normal = assets
+            .normal
+            .map(|bytes| decode_builtin_texture(bytes, TextureColorSpace::Linear))
+            .transpose()?;
+        let roughness = assets
+            .roughness
+            .map(|bytes| {
+                let roughness = decode_builtin_texture(bytes, TextureColorSpace::Linear)?;
+                let mut pixels = Vec::with_capacity(roughness.pixels.len());
+                for pixel in roughness.pixels.chunks_exact(4) {
+                    pixels.extend_from_slice(&[255, pixel[0], 255, 255]);
+                }
+                Texture::linear(roughness.width, roughness.height, pixels)
+            })
+            .transpose()?;
+
+        let base_color = self.add_texture(base_color)?;
+        let normal = normal
+            .map(|texture| self.add_texture(texture))
+            .transpose()?;
+        let roughness_map = roughness
+            .map(|texture| self.add_texture(texture))
+            .transpose()?;
+        let material = Material::default()
+            .with_base_color_texture(base_color)
+            .with_metallic(builtin.metallic())
+            .with_roughness(if roughness_map.is_some() {
+                1.0
+            } else {
+                builtin.fallback_roughness()
+            })
+            .with_projection(TextureProjection::Triplanar);
+        let material = normal.map_or(material, |handle| material.with_normal_texture(handle));
+        let material = roughness_map.map_or(material, |handle| {
+            material.with_metallic_roughness_texture(handle)
+        });
+        self.builtin_textures[index] = Some(material);
+        Ok(material)
     }
 
     /// Returns a CPU-side texture by its workspace-local handle.
@@ -390,6 +467,7 @@ impl Clone for Workspace {
             #[cfg(feature = "meshpart")]
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
+            builtin_textures: self.builtin_textures.clone(),
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
             lighting: self.lighting.clone(),
@@ -896,5 +974,41 @@ mod tests {
                 })
                 .is_err()
         );
+    }
+
+    #[test]
+    fn builtin_texture_loads_maps_with_triplanar_projection() {
+        let mut workspace = Workspace::new();
+        let material = workspace
+            .load_builtin_texture(BuiltinTexture::Wood)
+            .unwrap();
+
+        assert_eq!(material.projection(), TextureProjection::Triplanar);
+        assert_eq!(material.metallic(), 0.0);
+        assert_eq!(material.roughness(), 1.0);
+
+        let textures = material.textures();
+        let base_color = workspace.get_texture(textures.base_color.unwrap()).unwrap();
+        let normal = workspace.get_texture(textures.normal.unwrap()).unwrap();
+        let metallic_roughness = workspace
+            .get_texture(textures.metallic_roughness.unwrap())
+            .unwrap();
+
+        assert_eq!(base_color.color_space, TextureColorSpace::Srgb);
+        assert_eq!(normal.color_space, TextureColorSpace::Linear);
+        assert_eq!(metallic_roughness.color_space, TextureColorSpace::Linear);
+        assert_eq!((base_color.width, base_color.height), (512, 512));
+        assert_eq!(metallic_roughness.pixel(0, 0)[2], 255);
+    }
+
+    #[test]
+    fn every_builtin_texture_map_can_be_loaded() {
+        for builtin in BuiltinTexture::ALL {
+            let mut workspace = Workspace::new();
+            let material = workspace
+                .load_builtin_texture(builtin)
+                .unwrap_or_else(|error| panic!("{builtin:?} could not load: {error}"));
+            assert_eq!(material.projection(), TextureProjection::Triplanar);
+        }
     }
 }

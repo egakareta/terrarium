@@ -59,6 +59,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         include_bytes!("../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
+    let brick = engine.load_builtin_texture(BuiltinTexture::Brick)?;
 
     let ground = engine.add_child_ref(
         Part::new()
@@ -79,6 +80,14 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
                 .with_material(Material::textured(cobblestone).with_roughness(0.82)),
         );
     }
+
+    ground.add_child(
+        Part::new()
+            .with_shape(PartShape::Block)
+            .with_position(Vec3::new(0.0, 5.0, -10.0))
+            .with_size(Vec3::new(2.0, 2.0, 2.0))
+            .with_material(brick),
+    );
 
     let tower = engine.add_child_with(
         Part::new()
