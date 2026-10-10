@@ -12,11 +12,8 @@ use std::{
 use serde::{Serialize, de::DeserializeOwned};
 use slotmap::SlotMap;
 
-use crate::{
-    Signal,
-    events::EventScheduler,
-    glam::{EulerRot, Mat4, Quat, Vec3},
-};
+use crate::{Signal, events::EventScheduler};
+
 mod camera;
 mod events;
 mod light;
@@ -24,6 +21,7 @@ mod light;
 mod meshpart;
 mod outline;
 mod part;
+mod pv;
 #[cfg(feature = "sound")]
 mod sound;
 mod workspace;
@@ -34,6 +32,7 @@ pub use light::*;
 pub use meshpart::*;
 pub use outline::*;
 pub use part::*;
+pub use pv::*;
 #[cfg(feature = "sound")]
 pub use sound::*;
 pub use workspace::*;
@@ -1077,187 +1076,6 @@ impl dyn Instance {
         } else {
             Err(self)
         }
-    }
-}
-
-/// An object that has a physical location in the world.
-#[derive(Debug)]
-pub struct PVInstance {
-    pivot: Mat4,
-    pub(crate) signals: Option<InstanceSignals>,
-}
-
-impl Clone for PVInstance {
-    fn clone(&self) -> Self {
-        Self {
-            pivot: self.pivot,
-            signals: None,
-        }
-    }
-}
-
-impl Default for PVInstance {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PVInstance {
-    /// Creates an instance at the identity transform.
-    pub fn new() -> Self {
-        Self {
-            pivot: Mat4::IDENTITY,
-            signals: None,
-        }
-    }
-
-    /// Creates a new instance from a world-space transform.
-    pub fn from_world_transform(transform: Mat4) -> Self {
-        Self {
-            pivot: transform,
-            signals: None,
-        }
-    }
-
-    fn set_pivot(&mut self, pivot: Mat4) {
-        if self.pivot != pivot {
-            self.pivot = pivot;
-            if let Some(signals) = &self.signals {
-                signals.emit_changed(InstanceProperty::Transform);
-            }
-        }
-    }
-
-    pub(crate) fn pose_from_transform(transform: Mat4) -> Mat4 {
-        let (_, rotation, translation) = transform.to_scale_rotation_translation();
-        Mat4::from_rotation_translation(rotation, translation)
-    }
-}
-
-/// Access to the underlying [`PVInstance`].
-pub trait HasPVInstance {
-    /// Returns shared access to the underlying [`PVInstance`].
-    fn pv(&self) -> &PVInstance;
-
-    /// Returns mutable access to the underlying [`PVInstance`].
-    fn pv_mut(&mut self) -> &mut PVInstance;
-
-    /// The world-space transform of the instance's pivot.
-    fn pivot(&self) -> Mat4 {
-        self.pv().pivot
-    }
-
-    /// Returns the position and orientation (rigid pose), ignoring the pivot's scale.
-    fn pose(&self) -> Mat4 {
-        PVInstance::pose_from_transform(self.pivot())
-    }
-
-    /// Returns the translation component of the pivot.
-    fn position(&self) -> Vec3 {
-        self.pivot().w_axis.truncate()
-    }
-
-    /// Returns XYZ Euler orientation angles in degrees.
-    fn orientation(&self) -> Vec3 {
-        let (_, rotation, _) = self.pivot().to_scale_rotation_translation();
-        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
-
-        Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
-    }
-
-    /// Returns the normalized world-space direction of local `-Z`.
-    fn forward(&self) -> Vec3 {
-        self.pose()
-            .transform_vector3(Vec3::NEG_Z)
-            .normalize_or_zero()
-    }
-
-    /// Replaces the instance's position, orientation and scale.
-    fn with_pivot(mut self, pivot: Mat4) -> Self
-    where
-        Self: Sized,
-    {
-        self.pv_mut().set_pivot(pivot);
-        self
-    }
-
-    /// Replaces the position and orientation (rigid pose) while preserving the current scale.
-    fn with_pose(mut self, pose: Mat4) -> Self
-    where
-        Self: Sized,
-    {
-        let pivot = self.pivot();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut()
-            .set_pivot(PVInstance::pose_from_transform(pose) * Mat4::from_scale(size));
-        self
-    }
-
-    /// Replaces the per-axis scale while preserving the current position and orientation (rigid pose).
-    fn with_size(mut self, size: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        let pivot = self.pivot();
-        self.pv_mut()
-            .set_pivot(PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size));
-        self
-    }
-
-    /// Replaces the translation while preserving the current orientation and size.
-    fn with_position(mut self, position: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        let pivot = self.pivot();
-        let (_, rotation, _) = pivot.to_scale_rotation_translation();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().set_pivot(
-            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size),
-        );
-        self
-    }
-
-    /// Replaces the XYZ Euler orientation in degrees while preserving position and size.
-    fn with_orientation(mut self, orientation: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        let pivot = self.pivot();
-        let position = self.position();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().set_pivot(
-            Mat4::from_rotation_translation(
-                Quat::from_euler(
-                    EulerRot::XYZ,
-                    orientation.x.to_radians(),
-                    orientation.y.to_radians(),
-                    orientation.z.to_radians(),
-                ),
-                position,
-            ) * Mat4::from_scale(size),
-        );
-        self
-    }
-}
-
-impl HasPVInstance for PVInstance {
-    fn pv(&self) -> &PVInstance {
-        self
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        self
-    }
-}
-
-impl<T: HasPVInstance + ?Sized> HasPVInstance for &mut T {
-    fn pv(&self) -> &PVInstance {
-        (**self).pv()
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        (**self).pv_mut()
     }
 }
 

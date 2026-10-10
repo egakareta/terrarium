@@ -76,23 +76,22 @@
         font-size: 0.9rem;
       }
       .example-modal {
-        width: min(1200px, calc(100vw - 32px));
-        height: min(800px, calc(100dvh - 32px));
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100dvh;
         max-width: none;
         max-height: none;
+        margin: 0;
         padding: 0;
-        border: 1px solid #36333f;
-        border-radius: 12px;
-        background: #101014;
+        border: 0;
+        box-sizing: border-box;
         color: inherit;
         overflow: hidden;
       }
       .example-modal[open] {
         display: flex;
         flex-direction: column;
-      }
-      .example-modal::backdrop {
-        background: #000b;
       }
       .modal-toolbar {
         display: flex;
@@ -223,7 +222,6 @@
     <dialog class="example-modal" id="example-modal" aria-labelledby="example-title">
       <div class="modal-toolbar">
         <h2 id="example-title">example</h2>
-        <a id="example-full-size" target="_blank" rel="noopener">open full size ↗</a>
         <button type="button" id="example-close" aria-label="Close example" autofocus>close</button>
       </div>
       <iframe id="example-preview" title="Example preview" allowfullscreen></iframe>
@@ -231,7 +229,6 @@
     <script>
       const modal = document.getElementById("example-modal");
       const title = document.getElementById("example-title");
-      const fullSize = document.getElementById("example-full-size");
       const preview = document.getElementById("example-preview");
       let activeLink;
 
@@ -250,7 +247,6 @@
           event.preventDefault();
           activeLink = link;
           title.textContent = link.dataset.example;
-          fullSize.href = link.href;
           preview.title = `${link.dataset.example} example`;
           preview.src = link.href;
           modal.showModal();
@@ -288,7 +284,6 @@
       modal.addEventListener("close", () => {
         preview.removeAttribute("src");
         preview.title = "Example preview";
-        fullSize.removeAttribute("href");
         document.body.classList.remove("modal-open");
         activeLink?.focus();
         activeLink = undefined;

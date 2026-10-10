@@ -32,10 +32,11 @@ name = "gpu"
 required-features = ["meshpart"]
 
 [dependencies]
-bevy_app = { version = "0.19", features = ["web"], optional = true }
-bevy_ecs = { version = "0.19", optional = true }
-bevy_tasks = { version = "0.19", optional = true }
-bevy_time = { version = "0.19", optional = true }
+base64 = { version = "0.23", optional = true }
+bevy_app = { version = "0.20", features = ["web"], optional = true }
+bevy_ecs = { version = "0.20", optional = true }
+bevy_tasks = { version = "0.20", optional = true }
+bevy_time = { version = "0.20", optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 eframe = { version = "0.36", default-features = false, features = [
   "wgpu_no_default_features",
@@ -48,6 +49,7 @@ gltf = { version = "1", optional = true }
 image = { version = "0.25", default-features = false, features = ["webp"] }
 log = "0.4"
 rapier3d = { version = "0.36", optional = true }
+renfs = { version = "0.2", optional = true }
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -84,6 +86,7 @@ default = [
   "meshpart",
   "metal",
   "mp3",
+  "persistence",
   "physics",
   "sound",
   "vorbis",
@@ -95,6 +98,7 @@ default-fonts = []
 default-skybox = []
 meshpart = ["dep:gltf"]
 physics = ["dep:rapier3d"]
+persistence = ["dep:base64", "dep:renfs"]
 sound = ["dep:euphorium"]
 
 # you usually want this since this also comes with emojis
