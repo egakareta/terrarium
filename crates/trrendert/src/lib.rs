@@ -1,7 +1,14 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "devtools")]
+extern crate self as trrendert;
+
 pub use glam;
+
+/// Field reflection and property editing for the devtools inspector.
+#[cfg(feature = "devtools")]
+pub mod devtools;
 
 mod color3;
 mod face;

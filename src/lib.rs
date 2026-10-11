@@ -46,6 +46,9 @@ pub mod cookbook {
     pub mod quick_start {}
 }
 
+/// Workspace inspection and editing, available with the `devtools` feature.
+#[cfg(feature = "devtools")]
+pub use trdevtools as devtools;
 #[cfg(feature = "dynamic_linking")]
 #[doc(inline)]
 pub use trdylib::*;

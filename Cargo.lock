@@ -4197,6 +4197,7 @@ dependencies = [
  "bevy_ecs",
  "getrandom 0.4.3",
  "pollster",
+ "trdevtools",
  "trdylib",
  "trinternal",
 ]
@@ -4332,6 +4333,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "trdevtools"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "serde_json",
+ "trscene",
+]
+
+[[package]]
+name = "trdevtools-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "trdevtools",
+]
+
+[[package]]
 name = "trdylib"
 version = "0.1.0"
 dependencies = [
@@ -4363,6 +4384,7 @@ dependencies = [
  "log",
  "pollster",
  "slotmap",
+ "trdevtools",
  "trfont",
  "trrender",
  "trscene",
@@ -4422,7 +4444,9 @@ dependencies = [
  "bytemuck",
  "glam 0.34.1",
  "image",
+ "serde_json",
  "thiserror 2.0.21",
+ "trdevtools-derive",
 ]
 
 [[package]]

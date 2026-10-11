@@ -11,6 +11,8 @@ license.workspace = true
 resolver = "3"
 members = [
   ".",
+  "crates/trdevtools/",
+  "crates/trdevtools-derive/",
   "crates/trclipboard/",
   "crates/trdylib/",
   "crates/trengine/",
@@ -23,6 +25,8 @@ members = [
 ]
 default-members = [
   ".",
+  "crates/trdevtools/",
+  "crates/trdevtools-derive/",
   "crates/trclipboard/",
   "crates/trdylib/",
   "crates/trengine/",
@@ -43,6 +47,8 @@ repository = "https://github.com/egakareta/terrarium"
 license = "MIT"
 
 [workspace.dependencies]
+trdevtools = { path = "crates/trdevtools/", version = "0.1", default-features = false }
+trdevtools-derive = { path = "crates/trdevtools-derive/", version = "0.1" }
 trclipboard = { path = "crates/trclipboard/", version = "0.1" }
 trdylib = { path = "crates/trdylib/", version = "0.1" }
 trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
@@ -85,8 +91,13 @@ required-features = ["clipboard"]
 name = "gpu"
 required-features = ["meshpart"]
 
+[[test]]
+name = "devtools"
+required-features = ["devtools"]
+
 [dependencies]
 trdylib = { workspace = true, optional = true }
+trdevtools = { workspace = true, optional = true }
 trinternal = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -99,9 +110,10 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
 dynamic_linking = ["dep:trdylib"]
+devtools = ["trinternal/devtools", "dep:trdevtools"]
 
 # auto-managed by cargo-forward-flags
-# <forward trinternal>
+# <forward trinternal exclude="devtools">
 asio = ["trinternal?/asio"]
 bevy = ["trinternal?/bevy"]
 cli = ["trinternal?/cli"]

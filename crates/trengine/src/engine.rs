@@ -149,6 +149,9 @@ pub struct Engine {
     renderer: RendererHandle,
     /// The [`Workspace`] rendered by this engine.
     pub workspace: Workspace,
+    /// The F12 workspace inspector, initially hidden.
+    #[cfg(feature = "devtools")]
+    pub devtools: trdevtools::Devtools,
     creation_context: eframe::CreationContext<'static>,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
@@ -191,6 +194,8 @@ impl Engine {
         Ok(Self {
             renderer,
             workspace,
+            #[cfg(feature = "devtools")]
+            devtools: trdevtools::Devtools::default(),
             creation_context: Self::owned_creation_context(creation_context),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
@@ -467,6 +472,8 @@ impl eframe::App for Engine {
         if let Err(error) = self.render(ui) {
             log::error!("scene preparation failed: {error}");
         }
+        #[cfg(feature = "devtools")]
+        self.devtools.show(ui.ctx(), &mut self.workspace);
     }
 }
 
@@ -560,6 +567,8 @@ impl<A: App> eframe::App for AppAdapter<A> {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         with_engine(&self.engine, |engine| {
             self.app.render(engine, ui, frame);
+            #[cfg(feature = "devtools")]
+            engine.devtools.show(ui.ctx(), &mut engine.workspace);
         });
     }
 

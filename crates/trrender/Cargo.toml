@@ -21,4 +21,5 @@ wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 # <forward trrendert>
 default-materials = ["trrendert/default-materials"]
 default-skybox = ["trrendert/default-skybox"]
+devtools = ["trrendert/devtools"]
 # </forward>

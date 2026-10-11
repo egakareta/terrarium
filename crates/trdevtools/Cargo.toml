@@ -1,0 +1,16 @@
+[package]
+name = "trdevtools"
+version.workspace = true
+edition.workspace = true
+description = "Workspace inspection tools for Terrarium."
+documentation.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+egui = "0.36"
+trscene = { workspace = true, features = ["devtools"] }
+
+[dev-dependencies]
+serde_json = "1"
+trscene = { workspace = true, features = ["devtools"] }

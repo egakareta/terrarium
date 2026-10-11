@@ -7,7 +7,9 @@ use crate::{Color3, InstanceData, OutlineMode};
 /// a part outlines that part and the other renderable children of the part's
 /// parent. Multiple outline instances may select different groups and modes.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct Outline {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     instance: InstanceData,
     mode: OutlineMode,
     color: Color3,
@@ -87,7 +89,12 @@ impl Outline {
     }
 }
 
-crate::impl_instance!(Outline, class_name = "Outline", data = instance,);
+crate::impl_instance!(
+    Outline,
+    class_name = "Outline",
+    data = instance,
+    inspect = Outline,
+);
 
 #[cfg(test)]
 mod tests {

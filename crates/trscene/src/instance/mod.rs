@@ -141,9 +141,12 @@ macro_rules! impl_instance {
     (
         $type:ty,
         class_name = $class_name:literal,
-        data = $data:ident $(.$data_tail:ident)* $(,)?
+        data = $data:ident $(.$data_tail:ident)* $(, inspect = $inspect:ty)? $(,)?
     ) => {
         impl $crate::Instance for $type {
+            $(
+                $crate::__impl_instance_inspection!($inspect);
+            )?
             fn class_name(&self) -> &'static str {
                 $class_name
             }
@@ -257,6 +260,42 @@ macro_rules! impl_instance {
     };
 }
 
+/// Implements the feature-dependent portion of [`impl_instance!`].
+#[doc(hidden)]
+#[cfg(feature = "devtools")]
+#[macro_export]
+macro_rules! __impl_instance_inspection {
+    ($type:ty) => {
+        fn properties(&self) -> Vec<$crate::devtools::Property> {
+            <$type as $crate::devtools::Inspect>::properties(self)
+        }
+
+        fn validate_property(
+            &self,
+            path: &str,
+            value: &$crate::devtools::PropertyValue,
+        ) -> Result<(), $crate::devtools::PropertyError> {
+            <$type as $crate::devtools::Inspect>::validate_property(self, path, value)
+        }
+
+        fn set_property(
+            &mut self,
+            path: &str,
+            value: $crate::devtools::PropertyValue,
+        ) -> Result<(), $crate::devtools::PropertyError> {
+            <$type as $crate::devtools::Inspect>::set_property(self, path, value)
+        }
+    };
+}
+
+/// Implements the feature-dependent portion of [`impl_instance!`].
+#[doc(hidden)]
+#[cfg(not(feature = "devtools"))]
+#[macro_export]
+macro_rules! __impl_instance_inspection {
+    ($type:ty) => {};
+}
+
 impl InstanceId {
     fn new() -> Self {
         instance_ids()
@@ -267,12 +306,18 @@ impl InstanceId {
 }
 
 #[derive(Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub(crate) struct InstanceData {
     name: String,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     id: InstanceId,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     parent: Option<InstanceId>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     children: Vec<Box<dyn Instance>>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     sibling_index: usize,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     lookup: Weak<InstanceLookup>,
     attributes: Attributes,
 }
@@ -421,6 +466,46 @@ impl Clone for InstanceData {
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
 pub trait Instance: Any + Debug + InstanceClone {
+    /// Returns fields exposed to the devtools inspector.
+    ///
+    /// Custom instances expose their name by default. Derive
+    /// [`crate::devtools::Inspect`] and forward the inspection methods to
+    /// expose their fields automatically.
+    #[cfg(feature = "devtools")]
+    fn properties(&self) -> Vec<crate::devtools::Property> {
+        vec![crate::devtools::Property::new(
+            "name",
+            crate::devtools::PropertyValue::Text(self.name().to_owned()),
+        )]
+    }
+
+    /// Validates an edit without changing this instance.
+    #[cfg(feature = "devtools")]
+    fn validate_property(
+        &self,
+        path: &str,
+        value: &crate::devtools::PropertyValue,
+    ) -> Result<(), crate::devtools::PropertyError> {
+        self.clone_box().set_property(path, value.clone())
+    }
+
+    /// Applies an edit to a field exposed by [`Self::properties`].
+    #[cfg(feature = "devtools")]
+    fn set_property(
+        &mut self,
+        path: &str,
+        value: crate::devtools::PropertyValue,
+    ) -> Result<(), crate::devtools::PropertyError> {
+        if path != "name" {
+            return Err(crate::devtools::PropertyError::NotFound);
+        }
+        let crate::devtools::PropertyValue::Text(name) = value else {
+            return Err(crate::devtools::PropertyError::InvalidValue);
+        };
+        self.set_name(name);
+        Ok(())
+    }
+
     /// The concrete class name of this instance.
     fn class_name(&self) -> &'static str;
 

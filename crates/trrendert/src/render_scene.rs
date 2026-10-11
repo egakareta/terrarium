@@ -3,6 +3,7 @@ use glam::Mat4;
 use crate::{Color3, Face, Lighting, Mesh, MeshMaterialSlots, PartShape, Texture, TextureHandle};
 
 /// Rendering technique used by an outline.
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum OutlineMode {
     /// Hard screen-space edge over the selected object group.

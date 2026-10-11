@@ -79,10 +79,15 @@ pub enum GltfError {
 /// transform, size, tint, and collision metadata use the same API as
 /// [`crate::Part`].
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct MeshPart {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     basepart: BasePart,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     mesh: MeshHandle,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     mesh_revision: u64,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     bounding_radius: f32,
     pub(crate) material_slots: MeshMaterialSlots,
 }
@@ -317,7 +322,12 @@ impl MeshPart {
     }
 }
 
-crate::impl_instance!(MeshPart, class_name = "MeshPart", data = basepart.instance,);
+crate::impl_instance!(
+    MeshPart,
+    class_name = "MeshPart",
+    data = basepart.instance,
+    inspect = MeshPart,
+);
 
 /// Access to the underlying [`MeshPart`].
 pub trait HasMeshPart {

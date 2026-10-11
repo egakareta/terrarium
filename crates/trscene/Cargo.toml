@@ -31,6 +31,7 @@ sound = ["dep:euphorium"]
 # <forward trrendert>
 default-materials = ["trrendert/default-materials"]
 default-skybox = ["trrendert/default-skybox"]
+devtools = ["trrendert/devtools"]
 # </forward>
 
 # <forward euphorium exclude="parking_lot_core">
