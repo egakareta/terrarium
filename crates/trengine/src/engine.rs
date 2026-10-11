@@ -440,6 +440,74 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     delta
 }
 
+fn configure_egui_style(context: &egui::Context) {
+    let surface = egui::Color32::from_rgb(13, 20, 30);
+    let window = egui::Color32::from_rgb(19, 29, 42);
+    let widget = egui::Color32::from_rgb(26, 39, 53);
+    let hovered = egui::Color32::from_rgb(35, 56, 70);
+    let active = egui::Color32::from_rgb(28, 75, 76);
+    let accent = egui::Color32::from_rgb(77, 215, 194);
+    let text = egui::Color32::from_rgb(230, 238, 245);
+    let muted_text = egui::Color32::from_rgb(148, 167, 183);
+    let border = egui::Color32::from_rgb(48, 69, 84);
+
+    context.all_styles_mut(|style| {
+        style.animation_time = 0.16;
+
+        let visuals = &mut style.visuals;
+        *visuals = egui::Visuals::dark();
+        visuals.override_text_color = Some(text);
+        visuals.weak_text_color = Some(muted_text);
+        visuals.hyperlink_color = accent;
+        visuals.faint_bg_color = egui::Color32::from_rgb(18, 29, 40);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(8, 12, 18);
+        visuals.text_edit_bg_color = Some(widget);
+        visuals.code_bg_color = widget;
+        visuals.panel_fill = surface;
+        visuals.window_fill = window;
+        visuals.window_stroke = egui::Stroke::new(1.0, border);
+        visuals.window_corner_radius = egui::CornerRadius::same(10);
+        visuals.selection.bg_fill = egui::Color32::from_rgb(34, 87, 85);
+        visuals.selection.stroke = egui::Stroke::new(1.0, accent);
+
+        let widgets = &mut visuals.widgets;
+        widgets.noninteractive.bg_fill = surface;
+        widgets.noninteractive.weak_bg_fill = surface;
+        widgets.noninteractive.fg_stroke.color = text;
+
+        widgets.inactive.bg_fill = widget;
+        widgets.inactive.weak_bg_fill = widget;
+        widgets.inactive.bg_stroke = egui::Stroke::new(1.0, border);
+        widgets.inactive.fg_stroke.color = text;
+
+        widgets.hovered.bg_fill = hovered;
+        widgets.hovered.weak_bg_fill = hovered;
+        widgets.hovered.bg_stroke = egui::Stroke::new(1.0, accent);
+        widgets.hovered.fg_stroke.color = text;
+
+        widgets.active.bg_fill = active;
+        widgets.active.weak_bg_fill = active;
+        widgets.active.bg_stroke = egui::Stroke::new(1.0, accent);
+        widgets.active.fg_stroke.color = text;
+
+        widgets.open.bg_fill = active;
+        widgets.open.weak_bg_fill = active;
+        widgets.open.bg_stroke = egui::Stroke::new(1.0, accent);
+        widgets.open.fg_stroke.color = text;
+
+        for widget in [
+            &mut widgets.noninteractive,
+            &mut widgets.inactive,
+            &mut widgets.hovered,
+            &mut widgets.active,
+            &mut widgets.open,
+        ] {
+            widget.corner_radius = egui::CornerRadius::same(4);
+        }
+    });
+    context.set_theme(egui::ThemePreference::Dark);
+}
+
 fn prepare_workspace(
     renderer: &RendererHandle,
     workspace: &mut Workspace,
@@ -729,6 +797,7 @@ impl<'a> Terrarium<'a> {
                     .egui_ctx
                     .set_fonts(trfont::font_definitions());
             }
+            configure_egui_style(&creation_context.egui_ctx);
             let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
             #[cfg(feature = "bevy")]
             let mut engine = engine;
