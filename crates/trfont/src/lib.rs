@@ -20,6 +20,8 @@ pub fn font_definitions() -> egui::FontDefinitions {
     {
         let mut tweak = egui::FontTweak::default();
         tweak.coords.push(b"wght", 400.0);
+        let mut monospace_tweak = tweak.clone();
+        monospace_tweak.y_offset_factor = 0.05;
 
         fonts.font_data.insert(
             PROPORTIONAL_FONT_NAME.to_owned(),
@@ -32,7 +34,7 @@ pub fn font_definitions() -> egui::FontDefinitions {
             MONOSPACE_FONT_NAME.to_owned(),
             Arc::new(
                 egui::FontData::from_static(include_bytes!("bin/SUSEMono-VariableFont_wght.ttf"))
-                    .tweak(tweak),
+                    .tweak(monospace_tweak),
             ),
         );
         fonts.families.insert(
