@@ -12,10 +12,11 @@ resolver = "3"
 members = [
   ".",
   "crates/egui-text-outline/",
-  "crates/trdevtools/",
-  "crates/trdevtools-derive/",
   "crates/trclipboard/",
+  "crates/trdevtools-derive/",
+  "crates/trdevtools/",
   "crates/trdylib/",
+  "crates/tregui/",
   "crates/trengine/",
   "crates/trfont/",
   "crates/trinternal/",
@@ -27,10 +28,11 @@ members = [
 default-members = [
   ".",
   "crates/egui-text-outline/",
-  "crates/trdevtools/",
-  "crates/trdevtools-derive/",
   "crates/trclipboard/",
+  "crates/trdevtools-derive/",
+  "crates/trdevtools/",
   "crates/trdylib/",
+  "crates/tregui/",
   "crates/trengine/",
   "crates/trfont/",
   "crates/trinternal/",
@@ -50,10 +52,11 @@ license = "MIT"
 
 [workspace.dependencies]
 egui-text-outline = { path = "crates/egui-text-outline/", version = "0.1" }
+trclipboard = { path = "crates/trclipboard/", version = "0.1" }
 trdevtools = { path = "crates/trdevtools/", version = "0.1", default-features = false }
 trdevtools-derive = { path = "crates/trdevtools-derive/", version = "0.1" }
-trclipboard = { path = "crates/trclipboard/", version = "0.1" }
 trdylib = { path = "crates/trdylib/", version = "0.1" }
+tregui = { path = "crates/tregui/", version = "0.1", default-features = false }
 trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
 trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
 trinternal = { path = "crates/trinternal/", version = "0.1" }
@@ -99,8 +102,8 @@ name = "devtools"
 required-features = ["devtools"]
 
 [dependencies]
-trdylib = { workspace = true, optional = true }
 trdevtools = { workspace = true, optional = true }
+trdylib = { workspace = true, optional = true }
 trinternal = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -112,8 +115,8 @@ pollster = "1"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
+devtools = ["dep:trdevtools", "trinternal/devtools"]
 dynamic_linking = ["dep:trdylib"]
-devtools = ["trinternal/devtools", "dep:trdevtools"]
 
 # auto-managed by cargo-forward-flags
 # <forward trinternal exclude="devtools">
@@ -136,6 +139,7 @@ mp3 = ["trinternal?/mp3"]
 mp4 = ["trinternal?/mp4"]
 nightly = ["trinternal?/nightly"]
 persistence = ["trinternal?/persistence"]
+phosphor = ["trinternal?/phosphor"]
 physics = ["trinternal?/physics"]
 sound = ["trinternal?/sound"]
 vorbis = ["trinternal?/vorbis"]

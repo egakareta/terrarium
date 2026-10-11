@@ -1,19 +1,14 @@
 use std::collections::HashMap;
 
 use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
-use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewState};
+use tregui::{
+    egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder, TreeViewState},
+    egui_phosphor::regular,
+    egui_text_outline,
+};
 use trscene::{Instance, InstanceId, Workspace};
 
 use super::{Property, PropertyError, PropertyValue};
-
-egui_phosphor::subset! {
-    pub mod devtools_icons {
-        use regular::{
-            ARROW_COUNTER_CLOCKWISE, CAMERA, CUBE, FOLDER, GEAR, LIGHTBULB,
-            SLIDERS_HORIZONTAL, TREE_STRUCTURE, TRASH,
-        };
-    }
-}
 
 /// Properties shared by the current selection.
 #[derive(Clone, Debug)]
@@ -185,18 +180,12 @@ impl Devtools {
             .resizable(true)
             .show(context, |ui| {
                 ui.horizontal(|ui| {
-                    ui.menu_button(
-                        format!("{} Panels", devtools_icons::regular::SLIDERS_HORIZONTAL),
-                        |ui| {
-                            self.show_panel_toggle(ui, DevtoolsTab::Explorer);
-                            self.show_panel_toggle(ui, DevtoolsTab::Properties);
-                        },
-                    );
+                    ui.menu_button(format!("{} Panels", regular::SLIDERS_HORIZONTAL), |ui| {
+                        self.show_panel_toggle(ui, DevtoolsTab::Explorer);
+                        self.show_panel_toggle(ui, DevtoolsTab::Properties);
+                    });
                     if ui
-                        .button(format!(
-                            "{} Reset layout",
-                            devtools_icons::regular::ARROW_COUNTER_CLOCKWISE
-                        ))
+                        .button(format!("{} Reset layout", regular::ARROW_COUNTER_CLOCKWISE))
                         .clicked()
                     {
                         self.dock_state = default_dock_state();
@@ -206,10 +195,7 @@ impl Devtools {
                     delete_clicked = ui
                         .add_enabled(
                             self.selected.iter().any(|&id| id != workspace.id()),
-                            egui::Button::new(format!(
-                                "{} Delete selection",
-                                devtools_icons::regular::TRASH
-                            )),
+                            egui::Button::new(format!("{} Delete selection", regular::TRASH)),
                         )
                         .clicked();
                 });
@@ -287,8 +273,8 @@ enum DevtoolsTab {
 impl DevtoolsTab {
     fn title(self) -> String {
         match self {
-            Self::Explorer => format!("{} Explorer", devtools_icons::regular::TREE_STRUCTURE),
-            Self::Properties => format!("{} Properties", devtools_icons::regular::GEAR),
+            Self::Explorer => format!("{} Explorer", regular::TREE_STRUCTURE),
+            Self::Properties => format!("{} Properties", regular::GEAR),
         }
     }
 }
@@ -542,11 +528,7 @@ fn compatible(a: &PropertyValue, b: &PropertyValue) -> bool {
     }
 }
 
-fn build_tree(
-    builder: &mut egui_ltreeview::TreeViewBuilder<'_, InstanceId>,
-    instance: &dyn Instance,
-    root: bool,
-) {
+fn build_tree(builder: &mut TreeViewBuilder<'_, InstanceId>, instance: &dyn Instance, root: bool) {
     let label = format!("{} ({})", instance.name(), instance.class_name());
     if instance.children().is_empty() {
         let icon = icon_for_instance(instance);
@@ -562,7 +544,7 @@ fn build_tree(
             NodeBuilder::dir(instance.id())
                 .default_open(root)
                 .icon(|ui| {
-                    ui.label(devtools_icons::regular::FOLDER);
+                    ui.label(regular::FOLDER);
                 })
                 .label(label),
         );
@@ -577,9 +559,9 @@ fn build_tree(
 
 fn icon_for_instance(instance: &dyn Instance) -> &'static str {
     match instance.class_name() {
-        "Camera" => devtools_icons::regular::CAMERA,
-        "PointLight" | "SpotLight" | "SurfaceLight" => devtools_icons::regular::LIGHTBULB,
-        _ => devtools_icons::regular::CUBE,
+        "Camera" => regular::CAMERA,
+        "PointLight" | "SpotLight" | "SurfaceLight" => regular::LIGHTBULB,
+        _ => regular::CUBE,
     }
 }
 

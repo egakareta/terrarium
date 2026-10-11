@@ -2,9 +2,10 @@
 #![doc = include_str!("../README.md")]
 
 pub use eframe::{self, egui, egui_wgpu, wgpu};
-pub use egui_phosphor;
 #[cfg(feature = "devtools")]
 pub use trdevtools;
+#[cfg(feature = "phosphor")]
+pub use tregui::egui_phosphor;
 pub use trfont;
 pub use trrender;
 pub use trscene;

@@ -795,9 +795,16 @@ impl<'a> Terrarium<'a> {
             let font_definitions = is_bundled_fonts.then(trfont::font_definitions);
             #[cfg(not(feature = "default-fonts"))]
             let font_definitions: Option<egui::FontDefinitions> = None;
-            if let Some(mut font_definitions) = font_definitions {
-                #[cfg(feature = "default-fonts")]
-                egui_phosphor::add_to_fonts(&mut font_definitions, egui_phosphor::Variant::Regular);
+            #[cfg(feature = "devtools")]
+            let font_definitions = {
+                let mut fonts = font_definitions.unwrap_or_default();
+                tregui::egui_phosphor::add_to_fonts(
+                    &mut fonts,
+                    tregui::egui_phosphor::Variant::Regular,
+                );
+                Some(fonts)
+            };
+            if let Some(font_definitions) = font_definitions {
                 creation_context.egui_ctx.set_fonts(font_definitions);
             }
             configure_egui_style(&creation_context.egui_ctx);

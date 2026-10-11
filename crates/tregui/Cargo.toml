@@ -1,0 +1,85 @@
+[package]
+name = "tregui"
+version.workspace = true
+edition.workspace = true
+description = "Curated egui widgets used by Terrarium."
+documentation = "https://docs.rs/tregui"
+repository.workspace = true
+license.workspace = true
+autoexamples = false
+
+[dependencies]
+egui = "0.36"
+egui-text-outline = { workspace = true, optional = true }
+egui_ltreeview = { version = "0.9", optional = true }
+egui-phosphor = { version = "0.14", default-features = false, features = [
+  "regular",
+], optional = true }
+egui_taffy = { version = "0.14", optional = true }
+
+[dev-dependencies]
+eframe = { version = "0.36", default-features = false, features = [
+  "wgpu_no_default_features",
+  "wayland",
+] }
+
+[features]
+default = []
+ltreeview = ["dep:egui_ltreeview"]
+phosphor = ["dep:egui-phosphor"]
+phosphor-subset = ["phosphor", "egui-phosphor/subset"]
+text-outline = ["dep:egui-text-outline"]
+taffy = ["dep:egui_taffy"]
+all = ["ltreeview", "phosphor", "taffy", "text-outline"]
+
+[[example]]
+name = "ltreeview_basic"
+required-features = ["ltreeview"]
+
+[[example]]
+name = "ltreeview_selection"
+required-features = ["ltreeview"]
+
+[[example]]
+name = "ltreeview_custom_nodes"
+required-features = ["ltreeview"]
+
+[[example]]
+name = "phosphor_basic"
+required-features = ["phosphor"]
+
+[[example]]
+name = "phosphor_toolbar"
+required-features = ["phosphor"]
+
+[[example]]
+name = "phosphor_subset"
+required-features = ["phosphor-subset"]
+
+[[example]]
+name = "taffy_flex_row"
+required-features = ["taffy"]
+
+[[example]]
+name = "taffy_flex_column"
+required-features = ["taffy"]
+
+[[example]]
+name = "taffy_flex_wrap"
+required-features = ["taffy"]
+
+[[example]]
+name = "taffy_grid"
+required-features = ["taffy"]
+
+[[example]]
+name = "taffy_responsive"
+required-features = ["taffy"]
+
+[[example]]
+name = "taffy_egui_widgets"
+required-features = ["taffy"]
+
+[[example]]
+name = "text_outline_basic"
+required-features = ["text-outline"]
