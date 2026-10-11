@@ -11,7 +11,11 @@ fn camera_controller_update(bencher: &mut Bencher) {
     let mut controller = CameraController::new(6.0, 0.0025);
 
     bencher.iter(|| {
-        black_box(&mut controller).update_camera(black_box(&mut camera), black_box(1.0 / 60.0));
+        black_box(&mut controller).update_camera(
+            black_box(&mut camera),
+            None,
+            black_box(1.0 / 60.0),
+        );
         black_box(camera.pivot());
     });
 }

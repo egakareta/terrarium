@@ -152,6 +152,10 @@ fn slot_metallic(set_index: u32, slot: u32) -> f32 {
     return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 2u).x;
 }
 
+fn slot_uses_triplanar(set_index: u32, slot: u32) -> bool {
+    return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 2u).y > 0.5;
+}
+
 struct VertexInput {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
@@ -309,6 +313,146 @@ fn unpack_normal(surface_sample: vec4<f32>) -> vec3<f32> {
     let xy = surface_sample.xy * 2.0 - 1.0;
     let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
     return normalize(vec3<f32>(xy, z));
+}
+
+fn unpack_triplanar_normal(surface_sample: vec4<f32>) -> vec3<f32> {
+    // Byte value 128 is the neutral normal. The tolerance covers quantization
+    // when linear map channels are carried by the packed sRGB texture format.
+    let encoded_xy = clamp(
+        (surface_sample.xy * 255.0 - vec2<f32>(128.0)) / 127.0,
+        vec2<f32>(-1.0),
+        vec2<f32>(1.0),
+    );
+    let xy = select(encoded_xy, vec2<f32>(0.0), abs(encoded_xy) < vec2<f32>(0.003));
+    let z = sqrt(max(1.0 - dot(xy, xy), 0.0));
+    return normalize(vec3<f32>(xy, z));
+}
+
+struct TriplanarCoordinates {
+    x: vec2<f32>,
+    x_dx: vec2<f32>,
+    x_dy: vec2<f32>,
+    y: vec2<f32>,
+    y_dx: vec2<f32>,
+    y_dy: vec2<f32>,
+    z: vec2<f32>,
+    z_dx: vec2<f32>,
+    z_dy: vec2<f32>,
+    weights: vec3<f32>,
+};
+
+fn triplanar_coordinates(
+    world_position: vec3<f32>,
+    world_normal: vec3<f32>,
+    position_dx: vec3<f32>,
+    position_dy: vec3<f32>,
+) -> TriplanarCoordinates {
+    let sign_x = select(-1.0, 1.0, world_normal.x >= 0.0);
+    let sign_y = select(-1.0, 1.0, world_normal.y >= 0.0);
+    let sign_z = select(-1.0, 1.0, world_normal.z >= 0.0);
+    let absolute_normal = abs(world_normal);
+    let squared_normal = absolute_normal * absolute_normal;
+    let weights = squared_normal * squared_normal;
+    let normalized_weights = weights / max(dot(weights, vec3<f32>(1.0)), 0.000001);
+    return TriplanarCoordinates(
+        vec2<f32>(-sign_x * world_position.z, world_position.y),
+        vec2<f32>(-sign_x * position_dx.z, position_dx.y),
+        vec2<f32>(-sign_x * position_dy.z, position_dy.y),
+        vec2<f32>(world_position.x, -sign_y * world_position.z),
+        vec2<f32>(position_dx.x, -sign_y * position_dx.z),
+        vec2<f32>(position_dy.x, -sign_y * position_dy.z),
+        vec2<f32>(sign_z * world_position.x, world_position.y),
+        vec2<f32>(sign_z * position_dx.x, position_dx.y),
+        vec2<f32>(sign_z * position_dy.x, position_dy.y),
+        normalized_weights,
+    );
+}
+
+fn sample_base_color_triplanar(
+    slot: u32,
+    coordinates: TriplanarCoordinates,
+) -> vec4<f32> {
+    let x = sample_base_color(slot, coordinates.x, coordinates.x_dx, coordinates.x_dy);
+    let y = sample_base_color(slot, coordinates.y, coordinates.y_dx, coordinates.y_dy);
+    let z = sample_base_color(slot, coordinates.z, coordinates.z_dx, coordinates.z_dy);
+    return x * coordinates.weights.x + y * coordinates.weights.y + z * coordinates.weights.z;
+}
+
+fn sample_emissive_triplanar(
+    slot: u32,
+    coordinates: TriplanarCoordinates,
+) -> vec4<f32> {
+    let x = sample_emissive(slot, coordinates.x, coordinates.x_dx, coordinates.x_dy);
+    let y = sample_emissive(slot, coordinates.y, coordinates.y_dx, coordinates.y_dy);
+    let z = sample_emissive(slot, coordinates.z, coordinates.z_dx, coordinates.z_dy);
+    return x * coordinates.weights.x + y * coordinates.weights.y + z * coordinates.weights.z;
+}
+
+fn tangent_from_projection_axis(axis: vec3<f32>, world_normal: vec3<f32>) -> vec3<f32> {
+    let projected = axis - world_normal * dot(axis, world_normal);
+    if dot(projected, projected) > 0.000001 {
+        return normalize(projected);
+    }
+    let fallback_axis = select(
+        vec3<f32>(1.0, 0.0, 0.0),
+        vec3<f32>(0.0, 1.0, 0.0),
+        abs(world_normal.x) > 0.9,
+    );
+    return normalize(fallback_axis - world_normal * dot(fallback_axis, world_normal));
+}
+
+fn normal_from_projection(
+    tangent_normal: vec3<f32>,
+    world_normal: vec3<f32>,
+    projection_tangent: vec3<f32>,
+    projection_bitangent: vec3<f32>,
+) -> vec3<f32> {
+    let tangent = tangent_from_projection_axis(projection_tangent, world_normal);
+    let projected_bitangent = projection_bitangent
+        - world_normal * dot(projection_bitangent, world_normal)
+        - tangent * dot(projection_bitangent, tangent);
+    var bitangent = normalize(cross(world_normal, tangent));
+    if dot(projected_bitangent, projected_bitangent) > 0.000001 {
+        bitangent = normalize(projected_bitangent);
+    }
+    return normalize(
+        tangent * tangent_normal.x + bitangent * tangent_normal.y + world_normal * tangent_normal.z,
+    );
+}
+
+fn triplanar_mapped_normal(
+    x_sample: vec4<f32>,
+    y_sample: vec4<f32>,
+    z_sample: vec4<f32>,
+    world_normal: vec3<f32>,
+    coordinates: TriplanarCoordinates,
+) -> vec3<f32> {
+    let sign_x = select(-1.0, 1.0, world_normal.x >= 0.0);
+    let sign_y = select(-1.0, 1.0, world_normal.y >= 0.0);
+    let sign_z = select(-1.0, 1.0, world_normal.z >= 0.0);
+    let x_normal = normal_from_projection(
+        unpack_triplanar_normal(x_sample),
+        world_normal,
+        vec3<f32>(0.0, 0.0, -sign_x),
+        vec3<f32>(0.0, 1.0, 0.0),
+    );
+    let y_normal = normal_from_projection(
+        unpack_triplanar_normal(y_sample),
+        world_normal,
+        vec3<f32>(1.0, 0.0, 0.0),
+        vec3<f32>(0.0, 0.0, -sign_y),
+    );
+    let z_normal = normal_from_projection(
+        unpack_triplanar_normal(z_sample),
+        world_normal,
+        vec3<f32>(sign_z, 0.0, 0.0),
+        vec3<f32>(0.0, 1.0, 0.0),
+    );
+    return normalize(
+        x_normal * coordinates.weights.x
+            + y_normal * coordinates.weights.y
+            + z_normal * coordinates.weights.z,
+    );
 }
 
 fn sample_surface(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
@@ -525,25 +669,70 @@ fn shadow_texel_size(cascade: u32) -> f32 {
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let uv_dx = dpdx(vertex.uv);
     let uv_dy = dpdy(vertex.uv);
+    let position_dx = dpdx(vertex.world_position);
+    let position_dy = dpdy(vertex.world_position);
     let slot_factors = slot_base_color(vertex.material_set, vertex.material_slot);
     let slot_emissive_roughness =
         slot_emissive_roughness(vertex.material_set, vertex.material_slot);
     let slot_metallic = slot_metallic(vertex.material_set, vertex.material_slot);
-    let base_color_sample = sample_base_color(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
-    let base_color = base_color_sample * vertex.vertex_color * vertex.tint * slot_factors;
-    // The normal (RG) and metallic-roughness (B=metallic, A=roughness) live in
-    // the same surface layer, so one fetch serves both: previously this sampled
-    // the identical texel twice with bitwise-identical results.
-    let surface_sample = sample_surface(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
-    let emissive_sample = sample_emissive(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
-    let normal_sample = unpack_normal(surface_sample);
-    let metallic_roughness_sample = vec4<f32>(0.0, surface_sample.a, surface_sample.b, 1.0);
     let world_normal = normalize(vertex.normal);
-    let tangent = normalize(vertex.tangent.xyz - world_normal * dot(world_normal, vertex.tangent.xyz));
-    let bitangent = normalize(cross(world_normal, tangent)) * vertex.tangent.w;
-    let mapped_normal = normalize(
-        tangent * normal_sample.x + bitangent * normal_sample.y + world_normal * normal_sample.z,
-    );
+    let uses_triplanar = slot_uses_triplanar(vertex.material_set, vertex.material_slot);
+    var base_color_sample = vec4<f32>(0.0);
+    var surface_sample = vec4<f32>(0.0);
+    var emissive_sample = vec4<f32>(0.0);
+    var mapped_normal = world_normal;
+    if uses_triplanar {
+        let coordinates = triplanar_coordinates(
+            vertex.world_position,
+            world_normal,
+            position_dx,
+            position_dy,
+        );
+        base_color_sample = sample_base_color_triplanar(vertex.material_slot, coordinates);
+        let surface_x = sample_surface(
+            vertex.material_slot,
+            coordinates.x,
+            coordinates.x_dx,
+            coordinates.x_dy,
+        );
+        let surface_y = sample_surface(
+            vertex.material_slot,
+            coordinates.y,
+            coordinates.y_dx,
+            coordinates.y_dy,
+        );
+        let surface_z = sample_surface(
+            vertex.material_slot,
+            coordinates.z,
+            coordinates.z_dx,
+            coordinates.z_dy,
+        );
+        surface_sample = surface_x * coordinates.weights.x
+            + surface_y * coordinates.weights.y
+            + surface_z * coordinates.weights.z;
+        emissive_sample = sample_emissive_triplanar(vertex.material_slot, coordinates);
+        mapped_normal = triplanar_mapped_normal(
+            surface_x,
+            surface_y,
+            surface_z,
+            world_normal,
+            coordinates,
+        );
+    } else {
+        base_color_sample = sample_base_color(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+        surface_sample = sample_surface(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+        emissive_sample = sample_emissive(vertex.material_slot, vertex.uv, uv_dx, uv_dy);
+        let normal_sample = unpack_normal(surface_sample);
+        let tangent = normalize(vertex.tangent.xyz - world_normal * dot(world_normal, vertex.tangent.xyz));
+        let bitangent = normalize(cross(world_normal, tangent)) * vertex.tangent.w;
+        mapped_normal = normalize(
+            tangent * normal_sample.x + bitangent * normal_sample.y + world_normal * normal_sample.z,
+        );
+    }
+    let base_color = base_color_sample * vertex.vertex_color * vertex.tint * slot_factors;
+    // The normal (RG) and metallic-roughness (B=metallic, A=roughness) share
+    // the surface layer, so each projection sample supplies both.
+    let metallic_roughness_sample = vec4<f32>(0.0, surface_sample.a, surface_sample.b, 1.0);
 
     let metallic = clamp(
         slot_metallic * metallic_roughness_sample.b,

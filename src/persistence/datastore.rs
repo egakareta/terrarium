@@ -45,15 +45,15 @@ pub enum DataStoreError {
 /// static PLAYER_DATA: LocalDataStore =
 ///     LocalDataStore::new("my-game", "players");
 ///
-/// # async fn example() -> Result<(), terrarium::DataStoreError> {
+/// # fn example() -> Result<(), terrarium::DataStoreError> {
 /// #[derive(serde::Serialize, serde::Deserialize)]
 /// struct Profile {
 ///     coins: u32,
 /// }
 ///
-/// let profile: Option<Profile> = PLAYER_DATA.get("user:42").await?;
+/// let profile: Option<Profile> = PLAYER_DATA.get("user:42")?;
 /// if let Some(profile) = profile {
-///     PLAYER_DATA.set("user:42", &profile).await?;
+///     PLAYER_DATA.set("user:42", &profile)?;
 /// }
 /// # Ok(())
 /// # }
@@ -89,17 +89,17 @@ impl LocalDataStore {
     }
 
     /// Reads and deserializes the value for `key`, or returns `None` if it is absent.
-    pub async fn get<T>(&self, key: &str) -> Result<Option<T>, DataStoreError>
+    pub fn get<T>(&self, key: &str) -> Result<Option<T>, DataStoreError>
     where
         T: DeserializeOwned,
     {
         let path = self.value_path(key)?;
-        let directory = self.directory().await?;
-        if !directory.exists(&path).await? {
+        let directory = self.directory()?;
+        if !directory.exists_sync(&path)? {
             return Ok(None);
         }
 
-        let bytes = directory.read_file(&path).await?;
+        let bytes = directory.read_file_sync(&path)?;
         let entry: StoredValue = serde_json::from_slice(&bytes)?;
         if entry.format_version != VALUE_FORMAT_VERSION {
             return Err(DataStoreError::UnsupportedFormatVersion(
@@ -114,39 +114,39 @@ impl LocalDataStore {
     ///
     /// Concurrent writes to the same key are last-write-wins. This operation
     /// does not provide cross-tab or cross-process transaction guarantees.
-    pub async fn set<T>(&self, key: &str, value: &T) -> Result<(), DataStoreError>
+    pub fn set<T>(&self, key: &str, value: &T) -> Result<(), DataStoreError>
     where
         T: Serialize + ?Sized,
     {
         let path = self.value_path(key)?;
-        let directory = self.directory().await?;
+        let directory = self.directory()?;
         let entry = StoredValue {
             format_version: VALUE_FORMAT_VERSION,
             value: serde_json::to_value(value)?,
         };
         let bytes = serde_json::to_vec(&entry)?;
-        directory.write_file(&path, &bytes).await?;
+        directory.write_file_sync(&path, &bytes)?;
         Ok(())
     }
 
     /// Deletes `key`, returning whether a value existed.
-    pub async fn delete(&self, key: &str) -> Result<bool, DataStoreError> {
+    pub fn delete(&self, key: &str) -> Result<bool, DataStoreError> {
         let path = self.value_path(key)?;
-        let directory = self.directory().await?;
-        if !directory.exists(&path).await? {
+        let directory = self.directory()?;
+        if !directory.exists_sync(&path)? {
             return Ok(false);
         }
 
-        directory.unlink(&path).await?;
+        directory.unlink_sync(&path)?;
         Ok(true)
     }
 
-    async fn directory(&self) -> Result<renfs::Directory, DataStoreError> {
+    fn directory(&self) -> Result<renfs::Directory, DataStoreError> {
         validate_name(&self.app_name, "application name")?;
         validate_name(&self.store_name, "store name")?;
 
         let directory = renfs::app_dir(&self.app_name)?;
-        directory.mkdir(&self.store_name, true).await?;
+        directory.mkdir_sync(&self.store_name, true)?;
         Ok(directory)
     }
 
@@ -210,25 +210,23 @@ mod tests {
         let app_directory = renfs::app_dir(&app_name).unwrap();
         let _cleanup = TestAppDirectory(app_directory.as_path().into());
 
-        pollster::block_on(async {
-            let key = "user/42";
-            assert_eq!(store.get::<Profile>(key).await.unwrap(), None);
+        let key = "user/42";
+        assert_eq!(store.get::<Profile>(key).unwrap(), None);
 
-            store.set(key, &Profile { coins: 125 }).await.unwrap();
-            assert_eq!(
-                store.get::<Profile>(key).await.unwrap(),
-                Some(Profile { coins: 125 })
-            );
+        store.set(key, &Profile { coins: 125 }).unwrap();
+        assert_eq!(
+            store.get::<Profile>(key).unwrap(),
+            Some(Profile { coins: 125 })
+        );
 
-            store.set(key, &Profile { coins: 200 }).await.unwrap();
-            assert_eq!(
-                store.get::<Profile>(key).await.unwrap(),
-                Some(Profile { coins: 200 })
-            );
+        store.set(key, &Profile { coins: 200 }).unwrap();
+        assert_eq!(
+            store.get::<Profile>(key).unwrap(),
+            Some(Profile { coins: 200 })
+        );
 
-            assert!(store.delete(key).await.unwrap());
-            assert!(!store.delete(key).await.unwrap());
-            assert_eq!(store.get::<Profile>(key).await.unwrap(), None);
-        });
+        assert!(store.delete(key).unwrap());
+        assert!(!store.delete(key).unwrap());
+        assert_eq!(store.get::<Profile>(key).unwrap(), None);
     }
 }
