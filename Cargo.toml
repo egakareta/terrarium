@@ -24,6 +24,7 @@ members = [
   "crates/trrender/",
   "crates/trrendert/",
   "crates/trscene/",
+  "crates/trtask/",
 ]
 default-members = [
   ".",
@@ -40,6 +41,7 @@ default-members = [
   "crates/trrender/",
   "crates/trrendert/",
   "crates/trscene/",
+  "crates/trtask/",
 ]
 
 [workspace.package]
@@ -64,6 +66,7 @@ trpersistence = { path = "crates/trpersistence/", version = "0.1" }
 trrender = { path = "crates/trrender/", version = "0.1" }
 trrendert = { path = "crates/trrendert/", version = "0.1" }
 trscene = { path = "crates/trscene/", version = "0.1" }
+trtask = { path = "crates/trtask/", version = "0.1" }
 
 [[example]]
 name = "bevy"

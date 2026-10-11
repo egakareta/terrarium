@@ -9,6 +9,7 @@ use tregui::{
 use trscene::{Instance, InstanceId, Workspace};
 
 use super::{Property, PropertyError, PropertyValue};
+use crate::font_market::FontMarket;
 
 /// Properties shared by the current selection.
 #[derive(Clone, Debug)]
@@ -34,6 +35,8 @@ pub struct Devtools {
     last_input_frame: Option<u64>,
     error: Option<String>,
     json_drafts: HashMap<String, String>,
+    font_market: FontMarket,
+    base_font_definitions: Option<egui::FontDefinitions>,
     dock_state: DockState<DevtoolsTab>,
     tree_state: TreeViewState<InstanceId>,
 }
@@ -48,6 +51,8 @@ impl Default for Devtools {
             last_input_frame: None,
             error: None,
             json_drafts: HashMap::new(),
+            font_market: FontMarket::default(),
+            base_font_definitions: None,
             dock_state: default_dock_state(),
             tree_state: TreeViewState::default(),
         }
@@ -76,11 +81,14 @@ impl Devtools {
         &self.selected
     }
 
+    /// Sets the application's starting fonts used when Font Market applies a downloaded font.
+    pub fn set_base_font_definitions(&mut self, fonts: egui::FontDefinitions) {
+        self.base_font_definitions = Some(fonts);
+    }
+
     /// Selects a row using the same modifiers as the workspace tree.
     ///
-    /// `visible_order` lists expanded rows from top to bottom. Shift selects
-    /// the inclusive range from the anchor; Ctrl/Command+Shift adds that range
-    /// to the selection. If the anchor is collapsed, Shift selects only `id`.
+    /// `visible_order` lists expanded rows from top to bottom.
     pub fn select(
         &mut self,
         id: InstanceId,
@@ -183,6 +191,7 @@ impl Devtools {
                     ui.menu_button(format!("{} Panels", regular::SLIDERS_HORIZONTAL), |ui| {
                         self.show_panel_toggle(ui, DevtoolsTab::Explorer);
                         self.show_panel_toggle(ui, DevtoolsTab::Properties);
+                        self.show_panel_toggle(ui, DevtoolsTab::FontMarket);
                     });
                     if ui
                         .button(format!("{} Reset layout", regular::ARROW_COUNTER_CLOCKWISE))
@@ -200,8 +209,6 @@ impl Devtools {
                         .clicked();
                 });
                 ui.separator();
-                ui.small("Ctrl/⌘-click: toggle · Shift-click: range · Delete: destroy · F12: hide");
-                ui.separator();
                 let mut viewer = DevtoolsTabViewer {
                     workspace,
                     selected: &mut self.selected,
@@ -210,6 +217,9 @@ impl Devtools {
                     selection_changed: &mut tree_selection_changed,
                     error: &mut self.error,
                     json_drafts: &mut self.json_drafts,
+                    font_market: &mut self.font_market,
+                    base_font_definitions: self.base_font_definitions.as_ref(),
+                    context,
                     panel_layers: &mut panel_layers,
                 };
                 DockArea::new(&mut self.dock_state)
@@ -268,6 +278,7 @@ impl Devtools {
 enum DevtoolsTab {
     Explorer,
     Properties,
+    FontMarket,
 }
 
 impl DevtoolsTab {
@@ -275,6 +286,7 @@ impl DevtoolsTab {
         match self {
             Self::Explorer => format!("{} Explorer", regular::TREE_STRUCTURE),
             Self::Properties => format!("{} Properties", regular::GEAR),
+            Self::FontMarket => format!("{} Font Market", regular::TEXT_T),
         }
     }
 }
@@ -287,6 +299,9 @@ struct DevtoolsTabViewer<'a> {
     selection_changed: &'a mut bool,
     error: &'a mut Option<String>,
     json_drafts: &'a mut HashMap<String, String>,
+    font_market: &'a mut FontMarket,
+    base_font_definitions: Option<&'a egui::FontDefinitions>,
+    context: &'a egui::Context,
     panel_layers: &'a mut Vec<egui::LayerId>,
 }
 
@@ -306,6 +321,10 @@ impl TabViewer for DevtoolsTabViewer<'_> {
         match tab {
             DevtoolsTab::Explorer => self.show_explorer(ui),
             DevtoolsTab::Properties => self.show_properties(ui),
+            DevtoolsTab::FontMarket => {
+                self.font_market
+                    .show(ui, self.context, self.base_font_definitions)
+            }
         }
     }
 }
@@ -410,7 +429,7 @@ impl DevtoolsTabViewer<'_> {
 }
 
 fn default_dock_state() -> DockState<DevtoolsTab> {
-    let mut state = DockState::new(vec![DevtoolsTab::Explorer]);
+    let mut state = DockState::new(vec![DevtoolsTab::Explorer, DevtoolsTab::FontMarket]);
     state
         .main_surface_mut()
         .split_below(NodeIndex::root(), 0.55, vec![DevtoolsTab::Properties]);

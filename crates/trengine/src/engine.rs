@@ -804,13 +804,21 @@ impl<'a> Terrarium<'a> {
                 );
                 Some(fonts)
             };
+            #[cfg(feature = "devtools")]
+            let base_font_definitions = font_definitions
+                .clone()
+                .unwrap_or_else(egui::FontDefinitions::default);
             if let Some(font_definitions) = font_definitions {
                 creation_context.egui_ctx.set_fonts(font_definitions);
             }
             configure_egui_style(&creation_context.egui_ctx);
             let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
-            #[cfg(feature = "bevy")]
+            #[cfg(any(feature = "bevy", feature = "devtools"))]
             let mut engine = engine;
+            #[cfg(feature = "devtools")]
+            engine
+                .devtools
+                .set_base_font_definitions(base_font_definitions);
             #[cfg(feature = "bevy")]
             if let Some(app) = bevy_app {
                 engine.bevy_app = Some(crate::bevy::attach_app(
