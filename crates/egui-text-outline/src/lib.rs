@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! Outlined text labels built on egui's text layout and painter APIs.
+#![doc = include_str!("../README.md")]
 
 use std::sync::Arc;
 
