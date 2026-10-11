@@ -10,11 +10,11 @@
 
 - `mise run check` is the CI lint/format gate. It runs `cargo clippy --all-targets --all-features --workspace -- -D warnings`, then Rust and Oxfmt checks.
 - `mise run format` modifies files; `mise run format:cargo` formats Rust and `mise run format:oxfmt` formats TOML/YAML. The pre-commit hook runs `mise run format` and stages formatter changes.
-- `mise run test` runs `cargo test --workspace --all-targets --all-features`, covering all packages and targets. For focused checks, use `cargo test -p terrarium --all-features --lib <filter>`, `cargo test -p monorepo --all-features --example app app_loads`, or `cargo test -p monorepo --all-features --test gpu <filter>`.
+- `mise run test` runs `cargo test --workspace --all-targets --all-features`, covering all packages and targets. For focused checks, use `cargo test -p trinternal --all-features --lib <filter>`, `cargo test -p terrarium --all-features --example app app_loads`, or `cargo test -p terrarium --all-features --test gpu <filter>`.
 
 ## Features And Entrypoints
 
-- The root `monorepo` package forwards optional features to `terrarium`; the library's default feature set is defined in `crates/terrarium/Cargo.toml`. Use `--all-features` for CI parity.
+- The root `terrarium` package forwards optional features to `trinternal`; the library's default feature set is defined in `crates/trinternal/Cargo.toml`. Use `--all-features` for CI parity.
 
 ## Code Style
 

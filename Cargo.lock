@@ -2496,17 +2496,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "monorepo"
-version = "0.1.0"
-dependencies = [
- "approx",
- "bevy_ecs",
- "getrandom 0.4.3",
- "pollster",
- "terrarium",
-]
-
-[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4204,11 +4193,12 @@ dependencies = [
 name = "terrarium"
 version = "0.1.0"
 dependencies = [
- "trclipboard",
- "trengine",
- "trpersistence",
- "trrender",
- "trscene",
+ "approx",
+ "bevy_ecs",
+ "getrandom 0.4.3",
+ "pollster",
+ "trdylib",
+ "trinternal",
 ]
 
 [[package]]
@@ -4342,6 +4332,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "trdylib"
+version = "0.1.0"
+dependencies = [
+ "trinternal",
+]
+
+[[package]]
 name = "tree_magic_mini"
 version = "3.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4381,6 +4378,17 @@ name = "trfont"
 version = "0.1.0"
 dependencies = [
  "egui",
+]
+
+[[package]]
+name = "trinternal"
+version = "0.1.0"
+dependencies = [
+ "trclipboard",
+ "trengine",
+ "trpersistence",
+ "trrender",
+ "trscene",
 ]
 
 [[package]]

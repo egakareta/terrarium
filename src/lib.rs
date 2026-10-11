@@ -46,10 +46,9 @@ pub mod cookbook {
     pub mod quick_start {}
 }
 
-#[cfg(feature = "clipboard")]
-pub use trclipboard::*;
-pub use trengine::*;
-#[cfg(feature = "persistence")]
-pub use trpersistence::*;
-pub use trrender::*;
-pub use trscene::*;
+#[cfg(feature = "dynamic_linking")]
+#[doc(inline)]
+pub use trdylib::*;
+#[cfg(not(feature = "dynamic_linking"))]
+#[doc(inline)]
+pub use trinternal::*;

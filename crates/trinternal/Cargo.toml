@@ -1,9 +1,9 @@
 [package]
-name = "terrarium"
+name = "trinternal"
 version.workspace = true
 edition.workspace = true
-description.workspace = true
-documentation.workspace = true
+description = "Internal implementation crate for Terrarium."
+documentation = "https://docs.rs/trinternal"
 repository.workspace = true
 license.workspace = true
 

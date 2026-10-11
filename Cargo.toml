@@ -1,21 +1,21 @@
 [package]
-name = "monorepo"
+name = "terrarium"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
 documentation.workspace = true
 repository.workspace = true
 license.workspace = true
-publish = false
 
 [workspace]
 resolver = "3"
 members = [
   ".",
-  "crates/terrarium/",
   "crates/trclipboard/",
+  "crates/trdylib/",
   "crates/trengine/",
   "crates/trfont/",
+  "crates/trinternal/",
   "crates/trpersistence/",
   "crates/trrender/",
   "crates/trrendert/",
@@ -23,10 +23,11 @@ members = [
 ]
 default-members = [
   ".",
-  "crates/terrarium/",
   "crates/trclipboard/",
+  "crates/trdylib/",
   "crates/trengine/",
   "crates/trfont/",
+  "crates/trinternal/",
   "crates/trpersistence/",
   "crates/trrender/",
   "crates/trrendert/",
@@ -42,10 +43,11 @@ repository = "https://github.com/egakareta/terrarium"
 license = "MIT"
 
 [workspace.dependencies]
-terrarium = { path = "crates/terrarium/", version = "0.1" }
 trclipboard = { path = "crates/trclipboard/", version = "0.1" }
+trdylib = { path = "crates/trdylib/", version = "0.1" }
 trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
 trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
+trinternal = { path = "crates/trinternal/", version = "0.1" }
 trpersistence = { path = "crates/trpersistence/", version = "0.1" }
 trrender = { path = "crates/trrender/", version = "0.1" }
 trrendert = { path = "crates/trrendert/", version = "0.1" }
@@ -84,7 +86,8 @@ name = "gpu"
 required-features = ["meshpart"]
 
 [dependencies]
-terrarium = { workspace = true }
+trdylib = { workspace = true, optional = true }
+trinternal = { workspace = true, optional = true }
 
 [dev-dependencies]
 approx = "0.5"
@@ -95,33 +98,35 @@ pollster = "1"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
+dynamic_linking = ["dep:trdylib"]
+
 # auto-managed by cargo-forward-flags
-# <forward terrarium>
-asio = ["terrarium/asio"]
-bevy = ["terrarium/bevy"]
-cli = ["terrarium/cli"]
-clipboard = ["terrarium/clipboard"]
-compat = ["terrarium/compat"]
-default-fonts = ["terrarium/default-fonts"]
-default-materials = ["terrarium/default-materials"]
-default-skybox = ["terrarium/default-skybox"]
-dx12 = ["terrarium/dx12"]
-eframe-default-fonts = ["terrarium/eframe-default-fonts"]
-flac = ["terrarium/flac"]
-gles = ["terrarium/gles"]
-jack = ["terrarium/jack"]
-meshpart = ["terrarium/meshpart"]
-metal = ["terrarium/metal"]
-mp3 = ["terrarium/mp3"]
-mp4 = ["terrarium/mp4"]
-nightly = ["terrarium/nightly"]
-persistence = ["terrarium/persistence"]
-physics = ["terrarium/physics"]
-sound = ["terrarium/sound"]
-vorbis = ["terrarium/vorbis"]
-vulkan = ["terrarium/vulkan"]
-wav = ["terrarium/wav"]
-webgl = ["terrarium/webgl"]
-webgpu = ["terrarium/webgpu"]
-x11 = ["terrarium/x11"]
+# <forward trinternal>
+asio = ["trinternal?/asio"]
+bevy = ["trinternal?/bevy"]
+cli = ["trinternal?/cli"]
+clipboard = ["trinternal?/clipboard"]
+compat = ["trinternal?/compat"]
+default-fonts = ["trinternal?/default-fonts"]
+default-materials = ["trinternal?/default-materials"]
+default-skybox = ["trinternal?/default-skybox"]
+dx12 = ["trinternal?/dx12"]
+eframe-default-fonts = ["trinternal?/eframe-default-fonts"]
+flac = ["trinternal?/flac"]
+gles = ["trinternal?/gles"]
+jack = ["trinternal?/jack"]
+meshpart = ["trinternal?/meshpart"]
+metal = ["trinternal?/metal"]
+mp3 = ["trinternal?/mp3"]
+mp4 = ["trinternal?/mp4"]
+nightly = ["trinternal?/nightly"]
+persistence = ["trinternal?/persistence"]
+physics = ["trinternal?/physics"]
+sound = ["trinternal?/sound"]
+vorbis = ["trinternal?/vorbis"]
+vulkan = ["trinternal?/vulkan"]
+wav = ["trinternal?/wav"]
+webgl = ["trinternal?/webgl"]
+webgpu = ["trinternal?/webgpu"]
+x11 = ["trinternal?/x11"]
 # </forward>
