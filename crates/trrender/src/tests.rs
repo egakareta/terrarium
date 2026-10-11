@@ -1,0 +1,216 @@
+use super::*;
+use crate::{MeshMaterialSlots, RenderCamera, glam::Quat};
+
+fn camera(position: Vec3, target: Vec3, aspect: f32) -> RenderCamera {
+    let direction = (target - position).normalize_or_zero();
+    let yaw = direction.x.atan2(-direction.z);
+    let pitch = direction.y.asin();
+    let pose = Mat4::from_rotation_translation(
+        Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
+        position,
+    );
+    let fovy = 60.0_f32.to_radians();
+    let znear = 0.1;
+    let zfar = 200.0;
+    let projection = glam::camera::rh::proj::directx::perspective(fovy, aspect, znear, zfar);
+    RenderCamera {
+        pivot: pose,
+        pose,
+        view_projection: projection * pose.inverse(),
+        projection,
+        forward: pose.transform_vector3(Vec3::NEG_Z).normalize_or_zero(),
+        fovy,
+        aspect,
+        znear,
+        zfar,
+    }
+}
+
+#[test]
+fn surface_packing_preserves_normal_xy_and_material_channels() {
+    let normal = Texture::linear(1, 1, vec![10, 20, 30, 255]).unwrap();
+    let metallic_roughness = Texture::linear(1, 1, vec![40, 50, 60, 255]).unwrap();
+
+    assert_eq!(
+        pack_surface_pixels(&normal, &metallic_roughness, 1, 1),
+        vec![10, 20, 60, 50]
+    );
+}
+
+#[test]
+fn material_shader_validates_with_explicit_texture_gradients() {
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("shader.wgsl"))
+        .expect("material shader should parse");
+    let mut validator = wgpu::naga::valid::Validator::new(
+        wgpu::naga::valid::ValidationFlags::all(),
+        wgpu::naga::valid::Capabilities::empty(),
+    );
+    validator
+        .validate(&module)
+        .expect("material shader should validate");
+}
+
+#[test]
+fn skybox_shader_validates() {
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("skybox.wgsl"))
+        .expect("skybox shader should parse");
+    let mut validator = wgpu::naga::valid::Validator::new(
+        wgpu::naga::valid::ValidationFlags::all(),
+        wgpu::naga::valid::Capabilities::empty(),
+    );
+    validator
+        .validate(&module)
+        .expect("skybox shader should validate");
+}
+
+#[test]
+fn scene_composite_shader_validates() {
+    let module = wgpu::naga::front::wgsl::parse_str(include_str!("blit.wgsl"))
+        .expect("scene composite shader should parse");
+    let mut validator = wgpu::naga::valid::Validator::new(
+        wgpu::naga::valid::ValidationFlags::all(),
+        wgpu::naga::valid::Capabilities::empty(),
+    );
+    validator
+        .validate(&module)
+        .expect("scene composite shader should validate");
+}
+
+#[test]
+fn outline_shaders_validate() {
+    for source in [include_str!("outline.wgsl"), include_str!("copy.wgsl")] {
+        let module =
+            wgpu::naga::front::wgsl::parse_str(source).expect("outline shader should parse");
+        let mut validator = wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::empty(),
+        );
+        validator
+            .validate(&module)
+            .expect("outline shader should validate");
+    }
+}
+
+#[test]
+fn material_set_keys_resolve_unset_slots_to_the_default_material() {
+    let top = Material::default()
+        .with_base_color([0.1, 0.4, 0.2, 1.0])
+        .with_metallic(0.1)
+        .with_roughness(0.9)
+        .with_emissive([0.0, 0.0, 0.0]);
+    let mut materials = MeshMaterialSlots::default();
+    materials.set(Face::Top, top);
+
+    let vec4s = MaterialSetKey::from_materials(&materials).vec4s();
+    // The Top override carries its own factors.
+    assert_eq!(vec4s[0], [0.1, 0.4, 0.2, 1.0]);
+    assert_eq!(vec4s[1], [0.0, 0.0, 0.0, 0.9]);
+    assert_eq!(vec4s[2][0], 0.1);
+    // Unset slots fall back to the default material.
+    assert_eq!(vec4s[3], [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(vec4s[4], [0.0, 0.0, 0.0, 0.5]);
+    assert_eq!(vec4s[5][0], 0.0);
+}
+
+#[test]
+fn material_set_keys_distinguish_per_face_factors() {
+    let copper_material = Material::default().with_metallic(0.82);
+    let mut copper = MeshMaterialSlots::default();
+    let mut copper_clone = MeshMaterialSlots::default();
+    let mut copper_top_metal = MeshMaterialSlots::default();
+    for face in Face::ALL {
+        copper.set(face, copper_material);
+        copper_clone.set(face, copper_material);
+        copper_top_metal.set(face, copper_material);
+    }
+    copper_top_metal.set(Face::Top, Material::default().with_metallic(0.1));
+
+    assert_eq!(
+        MaterialSetKey::from_materials(&copper),
+        MaterialSetKey::from_materials(&copper_clone)
+    );
+    assert_ne!(
+        MaterialSetKey::from_materials(&copper),
+        MaterialSetKey::from_materials(&copper_top_metal)
+    );
+}
+
+#[test]
+fn compact_normal_scales_match_inverse_transpose_for_trs() {
+    let rotation = Quat::from_euler(crate::glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
+    let pivot = Mat4::from_rotation_translation(rotation, Vec3::new(1.0, -2.0, 3.0));
+    let size = Vec3::new(0.82, 1.1, 0.6);
+    let model = pivot * Mat4::from_scale(size);
+    let scales = normal_scales_from_model(&model);
+    let columns = [
+        (model.x_axis.truncate() * scales[0]).to_array(),
+        (model.y_axis.truncate() * scales[1]).to_array(),
+        (model.z_axis.truncate() * scales[2]).to_array(),
+    ];
+    let reference = model.inverse().transpose().to_cols_array_2d();
+    for (computed, expected) in columns.iter().zip([
+        [reference[0][0], reference[0][1], reference[0][2]],
+        [reference[1][0], reference[1][1], reference[1][2]],
+        [reference[2][0], reference[2][1], reference[2][2]],
+    ]) {
+        for (a, b) in computed.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-5, "got {computed:?}, want {expected:?}");
+        }
+    }
+}
+
+#[test]
+fn frustum_culling_keeps_visible_and_rejects_outside() {
+    let camera = camera(Vec3::new(0.0, 2.0, 6.0), Vec3::ZERO, 16.0 / 9.0);
+    let planes = frustum_planes(camera.view_projection);
+    assert!(sphere_visible(&planes, Vec3::ZERO, 0.5));
+    // Far behind the camera must be culled.
+    assert!(!sphere_visible(&planes, Vec3::new(0.0, 2.0, 20.0), 0.5));
+    // Far beyond far plane must be culled.
+    assert!(!sphere_visible(
+        &planes,
+        camera.position() + camera.forward * 500.0,
+        0.5
+    ));
+}
+
+#[test]
+fn frustum_culling_keeps_negatively_scaled_parts_near_the_frustum_edge() {
+    let camera = camera(Vec3::ZERO, Vec3::NEG_Z, 1.0);
+    let depth = 4.0;
+    let horizontal_edge = depth * (camera.fovy * 0.5).tan() * camera.aspect;
+    let pivot = Mat4::from_scale_rotation_translation(
+        Vec3::new(-4.0, 1.0, 1.0),
+        Quat::IDENTITY,
+        Vec3::new(horizontal_edge + 2.0, 0.0, -depth),
+    );
+    let planes = frustum_planes(camera.view_projection);
+    let radius = scaled_bounding_radius(PartShape::Block.bounding_radius(), pivot);
+
+    assert!(sphere_visible(&planes, pivot.w_axis.truncate(), radius));
+}
+
+#[test]
+fn shadow_cascades_cover_their_camera_frustum_slices() {
+    let camera = camera(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
+    let (matrices, splits, texel_sizes) =
+        light_view_projections(&camera, Vec3::new(-0.45, 0.85, 0.35), MAX_SHADOW_MAP_SIZE);
+    let mut near = camera.znear;
+
+    for cascade in 0..SHADOW_CASCADE_COUNT {
+        assert!(splits[cascade] > near);
+        assert!(texel_sizes[cascade] > 0.0);
+        for corner in camera_frustum_slice_corners(&camera, near, splits[cascade]) {
+            let clip = matrices[cascade] * corner.extend(1.0);
+            let projected = clip.truncate() / clip.w;
+            assert!(projected.x.abs() <= 1.0, "cascade {cascade}: {projected:?}");
+            assert!(projected.y.abs() <= 1.0, "cascade {cascade}: {projected:?}");
+            assert!(
+                (0.0..=1.0).contains(&projected.z),
+                "cascade {cascade}: {projected:?}"
+            );
+        }
+        near = splits[cascade];
+    }
+    assert!((splits[SHADOW_CASCADE_COUNT - 1] - SHADOW_DISTANCE).abs() < 1e-4);
+}

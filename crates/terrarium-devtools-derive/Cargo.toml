@@ -1,0 +1,22 @@
+[package]
+name = "terrarium-devtools-derive"
+version.workspace = true
+edition.workspace = true
+description = "Field reflection derives for Terrarium's devtools inspector."
+documentation.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro-crate = "3"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[dev-dependencies]
+tr = { package = "terrarium", path = "../terrarium", default-features = false, features = [
+  "devtools",
+] }

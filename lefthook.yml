@@ -3,3 +3,5 @@ pre-commit:
     format:
       run: mise run format
       stage_fixed: true
+    forward:
+      run: mise exec -- cargo-forward-flags --workspace
