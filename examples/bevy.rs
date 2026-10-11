@@ -1,7 +1,8 @@
 //! Bevy systems driving ordinary Terrarium instances.
 
+use bevy_ecs::prelude::*;
 use terrarium::{
-    bevy::{app, ecs::prelude::*, time::Time},
+    bevy::{app as bevy_app, ecs as bevy_ecs, time::Time},
     glam::Vec3,
     *,
 };
@@ -94,10 +95,10 @@ fn setup(mut scene: NonSendMut<Workspace>, mut orbits: ResMut<Orbits>) {
 }
 
 fn main() {
-    let mut app = app::App::new();
+    let mut app = bevy_app::App::new();
     app.init_resource::<Orbits>()
-        .add_systems(app::Startup, setup)
-        .add_systems(app::Update, animate_orbits);
+        .add_systems(bevy_app::Startup, setup)
+        .add_systems(bevy_app::Update, animate_orbits);
 
     Terrarium::new()
         .with_bevy(app)

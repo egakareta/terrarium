@@ -1,0 +1,24 @@
+[package]
+name = "trrender"
+version.workspace = true
+edition.workspace = true
+description = "Shared render data types and assets for Terrarium."
+documentation = "https://docs.rs/trrender"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+glam = { version = "0.34", default-features = false, features = ["std"] }
+rustc-hash = "2"
+slotmap = "1"
+thiserror = "2"
+trrendert = { workspace = true }
+web-time = "1"
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
+
+[features]
+# <forward trrendert>
+default-materials = ["trrendert/default-materials"]
+default-skybox = ["trrendert/default-skybox"]
+# </forward>

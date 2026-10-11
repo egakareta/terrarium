@@ -37,26 +37,26 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     engine.lighting.with_clock_time(18.0);
 
     let dirt = engine.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/dirt.png"),
+        include_bytes!("../crates/terrarium/fixtures/dirt.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let cobblestone = engine.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/cobblestone.png"),
+        include_bytes!("../crates/terrarium/fixtures/cobblestone.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let grass_top = engine.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/grass_top.png"),
+        include_bytes!("../crates/terrarium/fixtures/grass_top.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let grass_side = engine.add_texture(
         Texture::from_bytes(
-            include_bytes!("../assets/grass_side.png"),
+            include_bytes!("../crates/terrarium/fixtures/grass_side.png"),
             TextureColorSpace::Srgb,
         )?
         .rotate180(),
     )?;
     let festival_lantern = engine.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/festival_lantern.png"),
+        include_bytes!("../crates/terrarium/fixtures/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let ground = engine.add_child_ref(
@@ -79,7 +79,6 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         );
     }
 
-    #[cfg(feature = "default-materials")]
     ground.add_child(
         Part::new()
             .with_shape(PartShape::Block)
