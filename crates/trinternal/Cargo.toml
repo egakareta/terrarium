@@ -11,8 +11,6 @@ license.workspace = true
 trclipboard = { workspace = true, optional = true }
 trengine = { workspace = true }
 trpersistence = { workspace = true, optional = true }
-trrender = { workspace = true }
-trscene = { workspace = true }
 
 [features]
 default = [
@@ -38,6 +36,9 @@ default = [
 
 clipboard = ["dep:trclipboard"]
 persistence = ["dep:trpersistence"]
+
+# <forward trclipboard>
+# </forward>
 
 # <forward trengine>
 asio = ["trengine/asio"]
@@ -65,4 +66,7 @@ wav = ["trengine/wav"]
 webgl = ["trengine/webgl"]
 webgpu = ["trengine/webgpu"]
 x11 = ["trengine/x11"]
+# </forward>
+
+# <forward trpersistence>
 # </forward>

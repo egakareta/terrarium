@@ -4387,8 +4387,6 @@ dependencies = [
  "trclipboard",
  "trengine",
  "trpersistence",
- "trrender",
- "trscene",
 ]
 
 [[package]]
