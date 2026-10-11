@@ -8,13 +8,16 @@ use glam::Vec3;
 use crate::{Instance, InstanceData, InstanceId, scene::audio::velocity};
 
 #[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 struct SoundSettings {
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     source: SoundSource,
     volume: f32,
     playback_speed: f32,
     looping: bool,
     spatial_enabled: bool,
     emitter_offset: Vec3,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     spatial: SpatialSound,
 }
 
@@ -71,10 +74,15 @@ impl Drop for SoundPlayback {
 /// settings, but not playback or queued requests. Destroying a sound removes its
 /// backend voice immediately.
 #[derive(Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct Sound {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     instance: InstanceData,
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     settings: SoundSettings,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     commands: VecDeque<PlaybackCommand>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     playback: Option<SoundPlayback>,
 }
 
@@ -239,7 +247,12 @@ impl Clone for Sound {
     }
 }
 
-crate::impl_instance!(Sound, class_name = "Sound", data = instance,);
+crate::impl_instance!(
+    Sound,
+    class_name = "Sound",
+    data = instance,
+    inspect = Sound,
+);
 
 /// Authored sound properties, available on owned sounds and mutable sound references.
 pub trait HasSound {

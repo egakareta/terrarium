@@ -9,10 +9,15 @@ use crate::{
 
 /// A perspective camera with a world-space pivot.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct Camera {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     pub(crate) instance: InstanceData,
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     pub(crate) pv_instance: PVInstance,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     subject: Option<InstanceId>,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -166,7 +171,12 @@ impl Camera {
     }
 }
 
-crate::impl_instance!(Camera, class_name = "Camera", data = instance,);
+crate::impl_instance!(
+    Camera,
+    class_name = "Camera",
+    data = instance,
+    inspect = Camera,
+);
 
 /// Physical keyboard keys assigned to camera movement and orbit actions.
 #[derive(Clone, Debug, Eq, PartialEq)]

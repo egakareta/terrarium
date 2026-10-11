@@ -55,6 +55,7 @@ rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slotmap = "1"
+terrarium-devtools-derive = { version = "0.1.0", path = "devtools-derive", optional = true }
 thiserror = "2"
 web-time = "1"
 wgpu = { version = "30", default-features = false, features = ["std"] }
@@ -109,6 +110,7 @@ bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 default-fonts = []
 default-materials = ["dep:basisu"]
 default-skybox = []
+devtools = ["dep:terrarium-devtools-derive"]
 meshpart = ["dep:gltf"]
 persistence = ["dep:base64", "dep:renfs"]
 physics = ["dep:rapier3d"]

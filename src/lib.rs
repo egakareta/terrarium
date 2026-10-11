@@ -1,6 +1,9 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "devtools")]
+extern crate self as terrarium;
+
 /// # Introduction
 ///
 /// Terrarium is a simple, extensible 3D engine for Rust. It stands on two
@@ -59,6 +62,9 @@ pub use winit;
 #[cfg(feature = "bevy")]
 pub mod bevy;
 mod clipboard;
+/// Workspace inspection and editing, available with the `devtools` feature.
+#[cfg(feature = "devtools")]
+pub mod devtools;
 mod engine;
 mod instance;
 mod interpolation;

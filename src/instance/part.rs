@@ -8,8 +8,11 @@ use crate::{
 /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
 /// [`Part`] builds on it with a primitive shape and material.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct BasePart {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     pub(crate) instance: InstanceData,
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     pub(crate) pv_instance: PVInstance,
     color: Color3,
     transparency: f32,
@@ -38,7 +41,12 @@ impl Default for BasePart {
     }
 }
 
-crate::impl_instance!(BasePart, class_name = "BasePart", data = instance,);
+crate::impl_instance!(
+    BasePart,
+    class_name = "BasePart",
+    data = instance,
+    inspect = BasePart,
+);
 
 impl HasPVInstance for BasePart {
     fn pv(&self) -> &PVInstance {
@@ -219,7 +227,9 @@ impl<T: HasMaterials + ?Sized> HasMaterials for &mut T {
 
 /// A visible scene object rendered with one of the built-in primitive shapes.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct Part {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     basepart: BasePart,
     shape: PartShape,
     pub(crate) material_slots: MeshMaterialSlots,
@@ -284,7 +294,12 @@ impl<T: HasPart + ?Sized> HasPart for &mut T {
     }
 }
 
-crate::impl_instance!(Part, class_name = "Part", data = basepart.instance,);
+crate::impl_instance!(
+    Part,
+    class_name = "Part",
+    data = basepart.instance,
+    inspect = Part,
+);
 
 impl HasPVInstance for Part {
     fn pv(&self) -> &PVInstance {

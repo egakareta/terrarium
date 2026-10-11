@@ -2,6 +2,7 @@ use crate::{Color3, Skybox, glam::Vec3};
 
 /// The high-level lighting model used by a [`Lighting`] configuration.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub enum LightingStyle {
     /// Physically based lighting with directional shadows.
     #[default]
@@ -32,6 +33,7 @@ impl std::error::Error for TimeOfDayError {}
 /// Properties are automatically sanitized, keeping malformed configuration from
 /// reaching WGSL.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct Lighting {
     /// Indoor/global ambient color.
     pub ambient: Color3,
@@ -65,9 +67,12 @@ pub struct Lighting {
     pub shadow_color: Color3,
     /// Directional shadow filter size from hard (`0`) to soft (`1`).
     pub shadow_softness: f32,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     skybox: Option<Skybox>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     skybox_revision: u64,
     clock_time: f32,
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     direction_override: Option<Vec3>,
 }
 

@@ -5,6 +5,7 @@ use crate::{
 
 /// The primitive geometry available to a [`crate::Part`].
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub enum PartShape {
     #[default]
     /// A six-sided box.

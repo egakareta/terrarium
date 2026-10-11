@@ -6,7 +6,9 @@ use crate::{Color3, Face, InstanceData};
 /// zero, brightness is nonnegative, and angles and ranges are clamped to valid
 /// values.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct LightProperties {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     pub(crate) instance: InstanceData,
     color: Color3,
     brightness: f32,
@@ -219,7 +221,9 @@ impl<T: HasSurfaceLight + ?Sized> HasSurfaceLight for &mut T {
 /// A point light renders when it is a descendant of a [`crate::BasePart`],
 /// [`crate::Part`], or `MeshPart` (when that feature is enabled).
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct PointLight {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     light: LightProperties,
     range: f32,
 }
@@ -261,14 +265,21 @@ impl HasPointLight for PointLight {
     }
 }
 
-crate::impl_instance!(PointLight, class_name = "PointLight", data = light.instance,);
+crate::impl_instance!(
+    PointLight,
+    class_name = "PointLight",
+    data = light.instance,
+    inspect = PointLight,
+);
 
 /// A cone light emitted from one face of its nearest physical ancestor.
 ///
 /// The renderer derives a finite influence distance from brightness so spot
 /// lights remain bounded without an additional range property.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct SpotLight {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     light: LightProperties,
     /// Part face from which the cone emits.
     face: Face,
@@ -317,14 +328,21 @@ impl HasSpotLight for SpotLight {
     }
 }
 
-crate::impl_instance!(SpotLight, class_name = "SpotLight", data = light.instance,);
+crate::impl_instance!(
+    SpotLight,
+    class_name = "SpotLight",
+    data = light.instance,
+    inspect = SpotLight,
+);
 
 /// An area light emitted across one face of its nearest physical ancestor.
 ///
 /// Surface lights use the ancestor's face dimensions while shading, producing
 /// softer distance falloff than a point-like spot light without extra draws.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct SurfaceLight {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     light: LightProperties,
     /// Part face that acts as the emitting surface.
     face: Face,
@@ -374,6 +392,7 @@ crate::impl_instance!(
     SurfaceLight,
     class_name = "SurfaceLight",
     data = light.instance,
+    inspect = SurfaceLight,
 );
 
 #[cfg(test)]

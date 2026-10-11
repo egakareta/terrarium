@@ -62,25 +62,37 @@ pub enum WorkspacePreset {
 
 /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
 #[derive(Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct Workspace {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     instance: Box<InstanceData>,
     /// The camera used when this workspace is rendered.
     pub current_camera: Camera,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     camera_controller: CameraController,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     tween_manager: TweenManager,
     #[cfg(feature = "physics")]
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     physics: PhysicsWorld,
     #[cfg(feature = "sound")]
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     pub(crate) audio: AudioRuntime,
     #[cfg(feature = "meshpart")]
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     meshes: Vec<MeshHandle>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     textures: Vec<Texture>,
     #[cfg(feature = "default-materials")]
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     builtin_materials: Vec<Option<Material>>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     texture_revisions: Vec<u64>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     texture_revision: u64,
     /// Scene-wide lighting configuration.
     pub lighting: Lighting,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     pub(crate) lookup: Rc<InstanceLookup>,
 }
 
@@ -428,7 +440,12 @@ impl Default for Workspace {
     }
 }
 
-crate::impl_instance!(Workspace, class_name = "Workspace", data = instance,);
+crate::impl_instance!(
+    Workspace,
+    class_name = "Workspace",
+    data = instance,
+    inspect = Workspace,
+);
 
 #[cfg(test)]
 mod tests {

@@ -7,7 +7,9 @@ use crate::{
 
 /// An object that has a physical location in the world.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct PVInstance {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
     pivot: Mat4,
 }
 
