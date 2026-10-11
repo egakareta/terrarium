@@ -2499,6 +2499,10 @@ dependencies = [
 name = "monorepo"
 version = "0.1.0"
 dependencies = [
+ "approx",
+ "bevy_ecs",
+ "getrandom 0.4.3",
+ "pollster",
  "terrarium",
 ]
 
@@ -4200,28 +4204,11 @@ dependencies = [
 name = "terrarium"
 version = "0.1.0"
 dependencies = [
- "approx",
- "bevy_app",
- "bevy_ecs",
- "bevy_tasks",
- "bevy_time",
- "console_error_panic_hook",
- "eframe",
- "env_logger",
- "getrandom 0.4.3",
- "glam 0.34.1",
- "log",
- "pollster",
- "slotmap",
  "trclipboard",
+ "trengine",
  "trpersistence",
  "trrender",
  "trscene",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "wgpu",
- "winit",
 ]
 
 [[package]]
@@ -4363,6 +4350,37 @@ dependencies = [
  "memchr",
  "nom 8.0.0",
  "petgraph",
+]
+
+[[package]]
+name = "trengine"
+version = "0.1.0"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_tasks",
+ "bevy_time",
+ "console_error_panic_hook",
+ "eframe",
+ "env_logger",
+ "log",
+ "pollster",
+ "slotmap",
+ "trfont",
+ "trrender",
+ "trscene",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "trfont"
+version = "0.1.0"
+dependencies = [
+ "egui",
 ]
 
 [[package]]

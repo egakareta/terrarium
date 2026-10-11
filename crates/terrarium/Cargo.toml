@@ -7,52 +7,12 @@ documentation.workspace = true
 repository.workspace = true
 license.workspace = true
 
-[[test]]
-name = "bevy"
-required-features = ["bevy"]
-
-[[test]]
-name = "clipboard"
-required-features = ["clipboard"]
-
-[[test]]
-name = "gpu"
-required-features = ["meshpart"]
-
 [dependencies]
-bevy_app = { version = "0.20", features = ["web"], optional = true }
-bevy_ecs = { version = "0.20", optional = true }
-bevy_tasks = { version = "0.20", optional = true }
-bevy_time = { version = "0.20", optional = true }
-eframe = { version = "0.36", default-features = false, features = [
-  "wgpu_no_default_features",
-  "wayland",
-] }
-env_logger = "0.11"
-glam = { version = "0.34", default-features = false, features = ["std"] }
-log = "0.4"
-slotmap = "1"
 trclipboard = { workspace = true, optional = true }
+trengine = { workspace = true }
 trpersistence = { workspace = true, optional = true }
 trrender = { workspace = true }
 trscene = { workspace = true }
-wgpu = { version = "30", default-features = false, features = ["std"] }
-winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
-
-[dev-dependencies]
-approx = "0.5"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-pollster = "1"
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-console_error_panic_hook = "0.1"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
-
-[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
 default = [
@@ -62,7 +22,7 @@ default = [
   "default-materials",
   "default-skybox",
   "dx12",
-  "eframe-default-fonts",
+  "eframe-default-fonts", # you usually want this since this also comes with emojis
   "flac",
   "gles",
   "meshpart",
@@ -75,41 +35,34 @@ default = [
   "wav",
   "webgpu",
 ]
-bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
+
 clipboard = ["dep:trclipboard"]
-default-fonts = []
 persistence = ["dep:trpersistence"]
 
-# you usually want this since this also comes with emojis
-eframe-default-fonts = ["eframe/default_fonts"]
-
-# shared
-default-materials = ["trrender/default-materials", "trscene/default-materials"]
-default-skybox = ["trrender/default-skybox", "trscene/default-skybox"]
-
-# <forward trscene exclude="default-materials,default-skybox">
-asio = ["trscene/asio"]
-cli = ["trscene/cli"]
-flac = ["trscene/flac"]
-jack = ["trscene/jack"]
-meshpart = ["trscene/meshpart"]
-mp3 = ["trscene/mp3"]
-mp4 = ["trscene/mp4"]
-nightly = ["trscene/nightly"]
-physics = ["trscene/physics"]
-sound = ["trscene/sound"]
-vorbis = ["trscene/vorbis"]
-wav = ["trscene/wav"]
+# <forward trengine>
+asio = ["trengine/asio"]
+bevy = ["trengine/bevy"]
+cli = ["trengine/cli"]
+compat = ["trengine/compat"]
+default-fonts = ["trengine/default-fonts"]
+default-materials = ["trengine/default-materials"]
+default-skybox = ["trengine/default-skybox"]
+dx12 = ["trengine/dx12"]
+eframe-default-fonts = ["trengine/eframe-default-fonts"]
+flac = ["trengine/flac"]
+gles = ["trengine/gles"]
+jack = ["trengine/jack"]
+meshpart = ["trengine/meshpart"]
+metal = ["trengine/metal"]
+mp3 = ["trengine/mp3"]
+mp4 = ["trengine/mp4"]
+nightly = ["trengine/nightly"]
+physics = ["trengine/physics"]
+sound = ["trengine/sound"]
+vorbis = ["trengine/vorbis"]
+vulkan = ["trengine/vulkan"]
+wav = ["trengine/wav"]
+webgl = ["trengine/webgl"]
+webgpu = ["trengine/webgpu"]
+x11 = ["trengine/x11"]
 # </forward>
-
-# 3d graphics
-dx12 = ["wgpu/dx12"]
-gles = ["wgpu/gles"]
-metal = ["wgpu/metal"]
-webgpu = ["wgpu/webgpu"]
-
-# for production, enabling these is a good idea
-compat = ["vulkan", "webgl", "x11"]
-vulkan = ["wgpu/vulkan"]
-webgl = ["wgpu/webgl"]
-x11 = ["eframe/x11", "winit/x11"]

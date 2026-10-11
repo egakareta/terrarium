@@ -1,0 +1,69 @@
+[package]
+name = "trengine"
+version.workspace = true
+edition.workspace = true
+description = "Eframe and WGPU application runtime for Terrarium."
+documentation = "https://docs.rs/trengine"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+bevy_app = { version = "0.20", features = ["web"], optional = true }
+bevy_ecs = { version = "0.20", optional = true }
+bevy_tasks = { version = "0.20", optional = true }
+bevy_time = { version = "0.20", optional = true }
+eframe = { version = "0.36", default-features = false, features = [
+  "wgpu_no_default_features",
+  "wayland",
+] }
+env_logger = "0.11"
+log = "0.4"
+slotmap = "1"
+trfont = { workspace = true }
+trrender = { workspace = true }
+trscene = { workspace = true }
+wgpu = { version = "30", default-features = false, features = ["std"] }
+winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pollster = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
+
+[features]
+bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
+default-fonts = ["trfont/default-fonts"]
+default-materials = ["trrender/default-materials", "trscene/default-materials"]
+default-skybox = ["trrender/default-skybox", "trscene/default-skybox"]
+eframe-default-fonts = ["eframe/default_fonts"]
+x11 = ["eframe/x11", "winit/x11"]
+
+# <forward trscene exclude="default-materials,default-skybox">
+asio = ["trscene/asio"]
+cli = ["trscene/cli"]
+flac = ["trscene/flac"]
+jack = ["trscene/jack"]
+meshpart = ["trscene/meshpart"]
+mp3 = ["trscene/mp3"]
+mp4 = ["trscene/mp4"]
+nightly = ["trscene/nightly"]
+physics = ["trscene/physics"]
+sound = ["trscene/sound"]
+vorbis = ["trscene/vorbis"]
+wav = ["trscene/wav"]
+# </forward>
+
+# 3d graphics
+dx12 = ["wgpu/dx12"]
+gles = ["wgpu/gles"]
+metal = ["wgpu/metal"]
+vulkan = ["wgpu/vulkan"]
+webgl = ["wgpu/webgl"]
+webgpu = ["wgpu/webgpu"]
+
+# for production, enabling these is a good idea
+compat = ["vulkan", "webgl", "x11"]

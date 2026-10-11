@@ -5,16 +5,15 @@ use std::rc::Rc;
 #[cfg(target_arch = "wasm32")]
 use std::rc::{Rc, Weak};
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::{
     cell::RefCell,
     ops::{Deref, DerefMut},
-    sync::Arc,
 };
 
 use crate::{
-    RendererError, Workspace, WorkspacePreset, eframe, egui, egui_wgpu,
-    render_adapter::RenderAdapter,
+    trscene::{Workspace, WorkspacePreset},
+    *,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -25,50 +24,6 @@ unsafe extern "C" {
 }
 
 const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
-
-/// Name of the proportional font bundled in Terrarium.
-pub const PROPORTIONAL_FONT_NAME: &str = "Outfit";
-/// Name of the monospace font bundled in Terrarium.
-pub const MONOSPACE_FONT_NAME: &str = "SUSEMono";
-
-/// Returns [`egui`] font definitions using fonts bundled in Terrarium.
-pub fn font_definitions() -> egui::FontDefinitions {
-    #[cfg(feature = "default-fonts")]
-    {
-        let mut fonts = egui::FontDefinitions::default();
-        let mut tweak = egui::FontTweak::default();
-        tweak.coords.push(b"wght", 400.0);
-
-        fonts.font_data.insert(
-            PROPORTIONAL_FONT_NAME.to_owned(),
-            Arc::new(
-                egui::FontData::from_static(include_bytes!("bin/Outfit-VariableFont_wght.ttf"))
-                    .tweak(tweak.clone()),
-            ),
-        );
-        fonts.font_data.insert(
-            MONOSPACE_FONT_NAME.to_owned(),
-            Arc::new(
-                egui::FontData::from_static(include_bytes!("bin/SUSEMono-VariableFont_wght.ttf"))
-                    .tweak(tweak.clone()),
-            ),
-        );
-        fonts.families.insert(
-            egui::FontFamily::Proportional,
-            vec![PROPORTIONAL_FONT_NAME.to_owned()],
-        );
-        fonts.families.insert(
-            egui::FontFamily::Monospace,
-            vec![MONOSPACE_FONT_NAME.to_owned()],
-        );
-        fonts
-    }
-
-    #[cfg(not(feature = "default-fonts"))]
-    {
-        egui::FontDefinitions::default()
-    }
-}
 
 /// Error returned while creating an application.
 pub type AppCreationError = Box<dyn std::error::Error + Send + Sync>;
@@ -761,7 +716,9 @@ impl<'a> Terrarium<'a> {
         let app_creator: eframe::AppCreator<'static> = Box::new(move |creation_context| {
             #[cfg(feature = "default-fonts")]
             if is_bundled_fonts {
-                creation_context.egui_ctx.set_fonts(font_definitions());
+                creation_context
+                    .egui_ctx
+                    .set_fonts(trfont::font_definitions());
             }
             let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
             #[cfg(feature = "bevy")]

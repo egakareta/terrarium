@@ -7,7 +7,7 @@ use std::sync::{Mutex, OnceLock};
 #[cfg(feature = "meshpart")]
 use slotmap::Key;
 
-use crate::{Workspace, egui_wgpu};
+use crate::{egui_wgpu, trscene::Workspace};
 
 #[cfg(feature = "meshpart")]
 mod viewport;

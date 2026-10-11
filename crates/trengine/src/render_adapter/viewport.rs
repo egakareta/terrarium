@@ -1,7 +1,8 @@
-use super::*;
-use crate::Instance;
+use trscene::Instance;
 
-/// An offscreen scene that can be rendered into an egui texture or a CPU-side [`Image`].
+use super::*;
+
+/// An offscreen scene that can be rendered into an egui texture or a CPU-side [`trrender::Image`].
 ///
 /// A viewport owns a workspace, so callers can add materials, lights, or more
 /// instances through [`Self::workspace_mut`] after creating it from a mesh.

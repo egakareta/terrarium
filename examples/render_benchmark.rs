@@ -378,27 +378,27 @@ fn create_benchmark_workspace(
 /// sharing a single material.
 fn load_benchmark_materials(workspace: &mut Workspace) -> Result<Vec<Material>, RendererError> {
     let cobblestone = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../crates/terrarium/fixtures/cobblestone.png"),
+        include_bytes!("../assets/cobblestone.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let dirt = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../crates/terrarium/fixtures/dirt.png"),
+        include_bytes!("../assets/dirt.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let grass_top = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../crates/terrarium/fixtures/grass_top.png"),
+        include_bytes!("../assets/grass_top.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let grass_side = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../crates/terrarium/fixtures/grass_side.png"),
+        include_bytes!("../assets/grass_side.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let castle_brick = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../crates/terrarium/fixtures/castle_brick.png"),
+        include_bytes!("../assets/castle_brick.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let festival_lantern = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../crates/terrarium/fixtures/festival_lantern.png"),
+        include_bytes!("../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
 

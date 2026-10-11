@@ -1,0 +1,15 @@
+[package]
+name = "trfont"
+version.workspace = true
+edition.workspace = true
+description = "Bundled fonts and egui font definitions for Terrarium."
+documentation = "https://docs.rs/trfont"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+egui = "0.36"
+
+[features]
+default = ["default-fonts"]
+default-fonts = []

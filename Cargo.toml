@@ -14,17 +14,23 @@ members = [
   ".",
   "crates/terrarium/",
   "crates/trclipboard/",
+  "crates/trengine/",
+  "crates/trfont/",
   "crates/trpersistence/",
   "crates/trrender/",
-  "crates/trscene/",
   "crates/trrendert/",
+  "crates/trscene/",
 ]
 default-members = [
   ".",
   "crates/terrarium/",
+  "crates/trclipboard/",
+  "crates/trengine/",
+  "crates/trfont/",
+  "crates/trpersistence/",
   "crates/trrender/",
-  "crates/trscene/",
   "crates/trrendert/",
+  "crates/trscene/",
 ]
 
 [workspace.package]
@@ -36,12 +42,14 @@ repository = "https://github.com/egakareta/terrarium"
 license = "MIT"
 
 [workspace.dependencies]
-terrarium = { version = "0.1", path = "crates/terrarium/" }
-trclipboard = { version = "0.1", path = "crates/trclipboard/" }
-trpersistence = { version = "0.1", path = "crates/trpersistence/" }
-trrender = { version = "0.1", path = "crates/trrender/" }
-trscene = { version = "0.1", path = "crates/trscene/" }
-trrendert = { version = "0.1", path = "crates/trrendert/" }
+terrarium = { path = "crates/terrarium/", version = "0.1" }
+trclipboard = { path = "crates/trclipboard/", version = "0.1" }
+trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
+trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
+trpersistence = { path = "crates/trpersistence/", version = "0.1" }
+trrender = { path = "crates/trrender/", version = "0.1" }
+trrendert = { path = "crates/trrendert/", version = "0.1" }
+trscene = { path = "crates/trscene/", version = "0.1" }
 
 [[example]]
 name = "bevy"
@@ -63,8 +71,28 @@ required-features = ["physics"]
 name = "sound"
 required-features = ["sound"]
 
+[[test]]
+name = "bevy"
+required-features = ["bevy"]
+
+[[test]]
+name = "clipboard"
+required-features = ["clipboard"]
+
+[[test]]
+name = "gpu"
+required-features = ["meshpart"]
+
 [dependencies]
 terrarium = { workspace = true }
+
+[dev-dependencies]
+approx = "0.5"
+bevy_ecs = "0.20"
+pollster = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
 # auto-managed by cargo-forward-flags
