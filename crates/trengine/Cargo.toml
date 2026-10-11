@@ -2,7 +2,7 @@
 name = "trengine"
 version.workspace = true
 edition.workspace = true
-description = "Eframe and WGPU application runtime for Terrarium."
+description = "eframe and wgpu application runtime for Terrarium."
 documentation = "https://docs.rs/trengine"
 repository.workspace = true
 license.workspace = true
