@@ -83,11 +83,13 @@ persistence = ["dep:trpersistence"]
 # you usually want this since this also comes with emojis
 eframe-default-fonts = ["eframe/default_fonts"]
 
-# <forward trscene>
+# shared
+default-materials = ["trrender/default-materials", "trscene/default-materials"]
+default-skybox = ["trrender/default-skybox", "trscene/default-skybox"]
+
+# <forward trscene exclude="default-materials,default-skybox">
 asio = ["trscene/asio"]
 cli = ["trscene/cli"]
-default-materials = ["trscene/default-materials"]
-default-skybox = ["trscene/default-skybox"]
 flac = ["trscene/flac"]
 jack = ["trscene/jack"]
 meshpart = ["trscene/meshpart"]
