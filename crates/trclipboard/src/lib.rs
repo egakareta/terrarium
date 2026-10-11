@@ -1,3 +1,7 @@
+#![deny(missing_docs)]
+
+//! Cross-platform clipboard text access.
+
 /// A failure to initialize or access the clipboard.
 #[derive(Debug, thiserror::Error)]
 #[error("clipboard error: {0}")]
@@ -21,7 +25,7 @@ static FALLBACK_TEXT: std::sync::Mutex<String> = std::sync::Mutex::new(String::n
 /// Android and iOS, use an in-process text buffer shared by all handles.
 ///
 /// ```no_run
-/// use terrarium::{Clipboard, ClipboardError};
+/// use trclipboard::{Clipboard, ClipboardError};
 ///
 /// # async fn example() -> Result<(), ClipboardError> {
 /// let mut clipboard = Clipboard::new()?;
@@ -48,7 +52,7 @@ impl Clipboard {
                 any(unix, windows),
                 not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
             ))]
-            inner: arboard::Clipboard::new().map_err(|e| ClipboardError(e.to_string()))?,
+            inner: arboard::Clipboard::new().map_err(|error| ClipboardError(error.to_string()))?,
         })
     }
 
@@ -64,13 +68,13 @@ impl Clipboard {
         {
             self.inner
                 .get_text()
-                .map_err(|e| ClipboardError(e.to_string()))
+                .map_err(|error| ClipboardError(error.to_string()))
         }
         #[cfg(target_arch = "wasm32")]
         {
             let text = wasm_bindgen_futures::JsFuture::from(web_clipboard()?.read_text())
                 .await
-                .map_err(|e| ClipboardError(format!("{e:?}")))?;
+                .map_err(|error| ClipboardError(format!("{error:?}")))?;
             text.as_string()
                 .ok_or_else(|| ClipboardError("clipboard did not return text".into()))
         }
@@ -100,13 +104,13 @@ impl Clipboard {
         {
             self.inner
                 .set_text(text)
-                .map_err(|e| ClipboardError(e.to_string()))
+                .map_err(|error| ClipboardError(error.to_string()))
         }
         #[cfg(target_arch = "wasm32")]
         {
             wasm_bindgen_futures::JsFuture::from(web_clipboard()?.write_text(text))
                 .await
-                .map_err(|e| ClipboardError(format!("{e:?}")))?;
+                .map_err(|error| ClipboardError(format!("{error:?}")))?;
             Ok(())
         }
         #[cfg(not(any(

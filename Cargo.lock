@@ -2496,6 +2496,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "monorepo"
+version = "0.1.0"
+dependencies = [
+ "terrarium",
+]
+
+[[package]]
 name = "moxcms"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3485,9 +3492,9 @@ checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 
 [[package]]
 name = "rapier3d"
-version = "0.36.0"
+version = "0.36.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2e2b20538584bb3ba5bfe6a66c2d9a242ee17d15e5398be0fa35279c7d73739"
+checksum = "033e2edc815d61ab97bd74ed5d1cbea5ebe575218774a7cfedbd3551f0033317"
 dependencies = [
  "approx",
  "arrayvec",
@@ -3790,9 +3797,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "1741ab7a6cc54a03a89b5d563ed60075c277d9e3cfa73ad0c1f23f23974703c6"
 dependencies = [
  "itoa",
  "memchr",
@@ -4194,7 +4201,6 @@ name = "terrarium"
 version = "0.1.0"
 dependencies = [
  "approx",
- "arboard",
  "base64 0.23.1",
  "basisu",
  "bevy_app",
@@ -4219,6 +4225,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "thiserror 2.0.21",
+ "trclipboard",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4345,6 +4352,17 @@ name = "tracing-core"
 version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
+
+[[package]]
+name = "trclipboard"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "thiserror 2.0.21",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
 
 [[package]]
 name = "tree_magic_mini"

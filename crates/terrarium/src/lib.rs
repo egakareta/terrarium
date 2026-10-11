@@ -58,7 +58,6 @@ pub use winit;
 // actual stuff
 #[cfg(feature = "bevy")]
 pub mod bevy;
-mod clipboard;
 mod engine;
 mod instance;
 mod interpolation;
@@ -68,7 +67,6 @@ mod primitive;
 mod renderer;
 mod scene;
 
-pub use clipboard::*;
 pub use engine::*;
 pub use instance::*;
 pub use interpolation::*;
@@ -77,3 +75,4 @@ pub use persistence::*;
 pub use primitive::*;
 pub use renderer::*;
 pub use scene::*;
+pub use trclipboard::{Clipboard, ClipboardError};
