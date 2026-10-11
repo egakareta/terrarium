@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! Shared render data types and assets for Terrarium.
+#![doc = include_str!("../README.md")]
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, OnceLock};

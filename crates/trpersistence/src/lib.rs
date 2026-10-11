@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! Local persistent key-value storage backed by RenFS.
+#![doc = include_str!("../README.md")]
 
 use std::borrow::Cow;
 

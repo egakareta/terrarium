@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! Rendering data types and assets shared by Terrarium.
+#![doc = include_str!("../README.md")]
 
 pub use glam;
 

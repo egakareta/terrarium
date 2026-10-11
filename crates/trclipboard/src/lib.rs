@@ -1,6 +1,5 @@
 #![deny(missing_docs)]
-
-//! Cross-platform clipboard text access.
+#![doc = include_str!("../README.md")]
 
 /// A failure to initialize or access the clipboard.
 #[derive(Debug, thiserror::Error)]

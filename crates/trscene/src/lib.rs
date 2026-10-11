@@ -1,5 +1,5 @@
 #![deny(missing_docs)]
-//! Scene graph, workspace, and scene integrations for Terrarium.
+#![doc = include_str!("../README.md")]
 
 pub use egui;
 #[cfg(feature = "sound")]
