@@ -313,6 +313,46 @@ fn multi_selection_edits_common_fields_and_reports_mixed_values() {
 }
 
 #[test]
+fn clock_time_edits_replace_the_sun_override_and_wrap_the_displayed_time() {
+    let mut workspace = Workspace::new();
+    workspace.lighting.with_sun_direction(Vec3::Y);
+    let original_time = workspace.lighting.clock_time();
+    let root = workspace.id();
+    let mut devtools = Devtools::default();
+    devtools.select(root, Modifiers::NONE, &[root]);
+    assert_eq!(
+        devtools.edit_property(
+            &mut workspace,
+            "lighting.clock_time",
+            PropertyValue::Number(f32::NAN),
+        ),
+        Err(PropertyError::InvalidValue)
+    );
+    assert_eq!(workspace.lighting.clock_time(), original_time);
+    assert_eq!(workspace.lighting.sun_direction(), Vec3::Y);
+    devtools
+        .edit_property(
+            &mut workspace,
+            "lighting.clock_time",
+            PropertyValue::Number(30.0),
+        )
+        .unwrap();
+    let mut expected = terrarium::Lighting::new();
+    expected.with_clock_time(30.0);
+    assert_eq!(workspace.lighting.clock_time(), 6.0);
+    assert!(
+        workspace
+            .lighting
+            .sun_direction()
+            .abs_diff_eq(expected.sun_direction(), 1e-6)
+    );
+    assert!(devtools.properties(&workspace).iter().any(|field| {
+        field.property.path == "lighting.clock_time"
+            && field.property.value == PropertyValue::Number(6.0)
+    }));
+}
+
+#[test]
 fn reflected_edits_change_transforms_shapes_materials_and_attributes() {
     let mut workspace = Workspace::new();
     let mut parent = Part::new();

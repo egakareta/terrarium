@@ -8,6 +8,8 @@ use std::{
 /// Fields are inspected recursively. `#[inspect(flatten)]` exposes inherited
 /// fields at the same level; `#[inspect(readonly)]` displays a debug value;
 /// `#[inspect(skip)]` omits runtime storage. Field types must implement [`Inspect`].
+/// `#[inspect(setter = method)]` applies validated edits through an `&mut self`
+/// method that accepts the updated field value. These fields must also be [`Clone`].
 pub use terrarium_devtools_derive::Inspect;
 
 use crate::{

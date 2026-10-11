@@ -71,6 +71,7 @@ pub struct Lighting {
     skybox: Option<Skybox>,
     #[cfg_attr(feature = "devtools", inspect(skip))]
     skybox_revision: u64,
+    #[cfg_attr(feature = "devtools", inspect(setter = with_clock_time))]
     clock_time: f32,
     #[cfg_attr(feature = "devtools", inspect(readonly))]
     direction_override: Option<Vec3>,

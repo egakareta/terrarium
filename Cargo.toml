@@ -3,6 +3,11 @@ name = "terrarium"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["devtools-derive"]
+default-members = ["."]
+resolver = "3"
+
 [[example]]
 name = "bevy"
 required-features = ["bevy"]

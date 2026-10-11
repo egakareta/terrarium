@@ -2,7 +2,7 @@
 
 ## Structure
 
-- This is one Rust crate, not a Cargo workspace.
+- This is a Cargo workspace. `terrarium` is the runtime library and the default member; `devtools-derive` provides its optional `Inspect` procedural macro.
 - The main runtime path is `Terrarium -> Engine -> Workspace/Renderer`: `Workspace` owns the scene tree, camera, lighting, textures, meshes, and optional physics; `Renderer` is the eframe/WGPU renderer.
 - `src/lib.rs` has `#![deny(missing_docs)]`; document every new public item.
 
@@ -10,7 +10,7 @@
 
 - `mise run check` is the CI lint/format gate. It runs `cargo clippy --all-targets --all-features --workspace -- -D warnings`, then Rust and Oxfmt checks.
 - `mise run format` modifies files; `mise run format:cargo` formats Rust and `mise run format:oxfmt` formats TOML/YAML. The pre-commit hook runs `mise run format` and stages formatter changes.
-- `mise run test` runs `cargo test --all-targets --all-features`. For focused checks, use `cargo test --all-features --lib <filter>`, `cargo test --all-features --example app app_loads`, or `cargo test --all-features --test gpu <filter>`.
+- `mise run test` runs `cargo test --all-targets --all-features --workspace`, including the derive crate's downstream integration tests. For focused checks, use `cargo test --all-features --lib <filter>`, `cargo test --all-features --example app app_loads`, or `cargo test --all-features --test gpu <filter>`.
 
 ## Features And Entrypoints
 
