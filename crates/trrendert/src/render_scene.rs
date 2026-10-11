@@ -44,7 +44,9 @@ pub struct RenderScene<'a> {
 }
 
 impl<'asset> RenderScene<'asset> {
-    pub(crate) fn nodes(&self) -> RenderNodeIter<'_, 'asset> {
+    /// Iterates over the scene nodes with their resolved world transforms.
+    #[doc(hidden)]
+    pub fn nodes(&self) -> impl Iterator<Item = (&RenderNode<'asset>, Mat4)> + '_ {
         RenderNodeIter {
             stack: self
                 .nodes

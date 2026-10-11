@@ -1,5 +1,22 @@
 use super::*;
 
+fn mesh_vertex_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+    const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
+        0 => Float32x3,
+        1 => Float32x3,
+        2 => Float32x2,
+        3 => Float32x4,
+        4 => Float32x4,
+        5 => Uint32,
+    ];
+
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: ATTRIBUTES,
+    }
+}
+
 impl Renderer {
     /// Creates a renderer for the supplied WGPU device, queue, and output format.
     pub fn new(
@@ -442,7 +459,7 @@ impl Renderer {
                         constants: &shader_constants,
                         ..Default::default()
                     },
-                    buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
+                    buffers: &[Some(mesh_vertex_layout()), Some(InstanceRaw::layout())],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -504,7 +521,10 @@ impl Renderer {
                     constants: &shader_constants,
                     ..Default::default()
                 },
-                buffers: &[Some(Vertex::layout()), Some(InstanceRaw::shadow_layout())],
+                buffers: &[
+                    Some(mesh_vertex_layout()),
+                    Some(InstanceRaw::shadow_layout()),
+                ],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -580,7 +600,7 @@ impl Renderer {
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
-        let mask_vertex_buffers = [Some(Vertex::layout()), Some(InstanceRaw::layout())];
+        let mask_vertex_buffers = [Some(mesh_vertex_layout()), Some(InstanceRaw::layout())];
         let toon_mask_targets = [Some(wgpu::ColorTargetState {
             format: wgpu::TextureFormat::Rgba8Unorm,
             blend: Some(wgpu::BlendState::REPLACE),
@@ -707,7 +727,7 @@ impl Renderer {
                     module: &outline_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[Some(Vertex::layout()), Some(InstanceRaw::layout())],
+                    buffers: &[Some(mesh_vertex_layout()), Some(InstanceRaw::layout())],
                 },
                 primitive: wgpu::PrimitiveState {
                     cull_mode: Some(wgpu::Face::Front),

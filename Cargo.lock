@@ -4385,15 +4385,25 @@ dependencies = [
 name = "trrender"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
+ "glam 0.34.1",
+ "rustc-hash 2.1.3",
+ "slotmap",
+ "thiserror 2.0.21",
+ "trrendert",
+ "web-time",
+ "wgpu",
+]
+
+[[package]]
+name = "trrendert"
+version = "0.1.0"
+dependencies = [
  "basisu",
  "bytemuck",
  "glam 0.34.1",
  "image",
- "rustc-hash 2.1.3",
- "slotmap",
  "thiserror 2.0.21",
- "web-time",
- "wgpu",
 ]
 
 [[package]]

@@ -61,24 +61,6 @@ impl Vertex {
             material_slot: material_slot.material_index() as u32,
         }
     }
-
-    /// Returns the WGPU vertex-buffer layout used by the built-in mesh pipeline.
-    pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
-        const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
-        0 => Float32x3,
-        1 => Float32x3,
-            2 => Float32x2,
-            3 => Float32x4,
-            4 => Float32x4,
-            5 => Uint32,
-        ];
-
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: ATTRIBUTES,
-        }
-    }
 }
 
 /// Appends one triangle using default UVs and the directional slot matching its

@@ -8,16 +8,17 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-basisu = { version = "0.1", default-features = false, features = ["std"], optional = true }
 bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.34", default-features = false, features = ["std"] }
-image = { version = "0.25", default-features = false, features = ["webp"] }
 rustc-hash = "2"
 slotmap = "1"
 thiserror = "2"
+trrendert = { workspace = true }
 web-time = "1"
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl"] }
 
 [features]
-default-materials = ["dep:basisu"]
-default-skybox = []
+# <forward trrendert>
+default-materials = ["trrendert/default-materials"]
+default-skybox = ["trrendert/default-skybox"]
+# </forward>

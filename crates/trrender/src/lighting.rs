@@ -1,397 +1,553 @@
-use glam::Vec3;
+use super::*;
 
-use crate::{Color3, Skybox};
+impl Renderer {
+    pub(super) fn prepare_local_lights(
+        &mut self,
+        scene: &RenderScene<'_>,
+        camera_planes: &[Vec4; 6],
+    ) -> PreparedLocalShadows {
+        let camera = &scene.camera;
+        let mut candidates = std::mem::take(&mut self.local_light_scratch);
+        candidates.clear();
 
-/// The high-level lighting model used by a [`Lighting`] configuration.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum LightingStyle {
-    /// Physically based lighting with directional shadows.
-    #[default]
-    Realistic,
-    /// A softer model with less directional contrast.
-    Soft,
-}
+        for (node, parent_transform) in scene.nodes() {
+            let Some(light) = &node.light else {
+                continue;
+            };
+            let candidate = match light.kind {
+                RenderLightKind::Point { range } => {
+                    point_light_candidate(light, parent_transform, range, camera, camera_planes)
+                }
+                RenderLightKind::Spot { face, angle } => directional_light_candidate(
+                    light,
+                    parent_transform,
+                    face,
+                    angle,
+                    false,
+                    camera,
+                    camera_planes,
+                ),
+                RenderLightKind::Surface { face, angle } => directional_light_candidate(
+                    light,
+                    parent_transform,
+                    face,
+                    angle,
+                    true,
+                    camera,
+                    camera_planes,
+                ),
+            };
+            if let Some(candidate) = candidate {
+                candidates.push(candidate);
+            }
+        }
 
-/// Errors returned when parsing a time-of-day value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TimeOfDayError {
-    /// The value was not in `HH:MM:SS` form or contained an invalid component.
-    InvalidFormat,
-}
+        if candidates.len() > MAX_LOCAL_LIGHTS {
+            candidates.select_nth_unstable_by(MAX_LOCAL_LIGHTS, |a, b| b.score.total_cmp(&a.score));
+            candidates.truncate(MAX_LOCAL_LIGHTS);
+        }
+        candidates.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
 
-impl std::fmt::Display for TimeOfDayError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidFormat => formatter.write_str("time of day must be HH:MM:SS"),
+        let mut uniform = LocalLightsUniform::zeroed();
+        let mut shadow_planes = [[Vec4::ZERO; 6]; MAX_LOCAL_SHADOW_LAYERS];
+        let mut shadow_excluded_casters = [None; MAX_LOCAL_SHADOW_LAYERS];
+        let mut shadow_layer_count = 0;
+        for (light_index, candidate) in candidates.iter_mut().enumerate() {
+            let requested_layers = candidate.shadow_layer_count;
+            if requested_layers != 0
+                && shadow_layer_count + requested_layers <= MAX_LOCAL_SHADOW_LAYERS
+            {
+                candidate.raw.params[1] = shadow_layer_count as f32;
+                candidate.raw.params[2] = requested_layers as f32;
+                for matrix in candidate
+                    .shadow_view_projections
+                    .iter()
+                    .take(requested_layers)
+                {
+                    let layer = shadow_layer_count;
+                    uniform.shadow_view_projections[layer] = matrix.to_cols_array_2d();
+                    shadow_planes[layer] = frustum_planes(*matrix);
+                    shadow_excluded_casters[layer] = Some(candidate.shadow_excluded_caster);
+                    self.queue.write_buffer(
+                        &self.shadow_camera_buffer,
+                        (SHADOW_CASCADE_COUNT + layer) as u64
+                            * u64::from(self.shadow_camera_stride),
+                        bytemuck::bytes_of(&ShadowCameraUniform {
+                            light_view_projection: matrix.to_cols_array_2d(),
+                        }),
+                    );
+                    shadow_layer_count += 1;
+                }
+            }
+            uniform.lights[light_index] = candidate.raw;
+        }
+        uniform.params[0] = candidates.len() as u32;
+        self.queue
+            .write_buffer(&self.local_lights_buffer, 0, bytemuck::bytes_of(&uniform));
+        if shadow_layer_count != 0 && self._local_shadow_texture.width() != LOCAL_SHADOW_MAP_SIZE {
+            let (texture, view, layer_views) =
+                create_local_shadow_texture(&self.device, LOCAL_SHADOW_MAP_SIZE);
+            self._local_shadow_texture = texture;
+            self.local_shadow_view = view;
+            self.local_shadow_layer_views = layer_views;
+            self.refresh_environment_binding();
+        }
+        self.local_shadow_layer_count = shadow_layer_count;
+        self.local_light_scratch = candidates;
+        PreparedLocalShadows {
+            planes: shadow_planes,
+            excluded_casters: shadow_excluded_casters,
         }
     }
 }
 
-impl std::error::Error for TimeOfDayError {}
-
-/// Scene-wide lighting settings.
-///
-/// Properties are automatically sanitized, keeping malformed configuration from
-/// reaching WGSL.
-#[derive(Clone, Debug)]
-pub struct Lighting {
-    /// Indoor/global ambient color.
-    pub ambient: Color3,
-    /// Multiplier for direct sunlight.
-    pub brightness: f32,
-    /// Tint applied to downward-facing surfaces.
-    pub color_shift_bottom: Color3,
-    /// Tint applied to upward-facing surfaces.
-    pub color_shift_top: Color3,
-    /// Diffuse contribution from the environment cubemap.
-    pub environment_diffuse_scale: f32,
-    /// Specular contribution from the environment cubemap.
-    pub environment_specular_scale: f32,
-    /// Exposure compensation in stops.
-    pub exposure_compensation: f32,
-    /// Fog color.
-    pub fog_color: Color3,
-    /// Distance at which fog starts.
-    pub fog_start: f32,
-    /// Distance at which fog reaches full strength.
-    pub fog_end: f32,
-    /// Geographic latitude used to tilt the sun path, in degrees.
-    pub geographic_latitude: f32,
-    /// Whether directional shadows are enabled.
-    pub global_shadows: bool,
-    /// The requested lighting style.
-    pub lighting_style: LightingStyle,
-    /// Outdoor ambient color.
-    pub outdoor_ambient: Color3,
-    /// Tint used for fully shadowed direct light.
-    pub shadow_color: Color3,
-    /// Directional shadow filter size from hard (`0`) to soft (`1`).
-    pub shadow_softness: f32,
-    skybox: Option<Skybox>,
-    skybox_revision: u64,
-    clock_time: f32,
-    direction_override: Option<Vec3>,
+fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, Vec4, Vec4) {
+    let (_, rotation, translation) = parent.transform.to_scale_rotation_translation();
+    let pose = Mat4::from_rotation_translation(rotation, translation);
+    let size = parent.transform.to_scale_rotation_translation().0.abs();
+    let (normal, normal_extent, axis_u, half_width, axis_v, half_height) = match face {
+        Face::Top => (
+            Vec3::Y,
+            size.y * 0.5,
+            Vec3::X,
+            size.x * 0.5,
+            Vec3::Z,
+            size.z * 0.5,
+        ),
+        Face::Bottom => (
+            Vec3::NEG_Y,
+            size.y * 0.5,
+            Vec3::X,
+            size.x * 0.5,
+            Vec3::Z,
+            size.z * 0.5,
+        ),
+        Face::Front => (
+            Vec3::Z,
+            size.z * 0.5,
+            Vec3::X,
+            size.x * 0.5,
+            Vec3::Y,
+            size.y * 0.5,
+        ),
+        Face::Back => (
+            Vec3::NEG_Z,
+            size.z * 0.5,
+            Vec3::X,
+            size.x * 0.5,
+            Vec3::Y,
+            size.y * 0.5,
+        ),
+        Face::Left => (
+            Vec3::NEG_X,
+            size.x * 0.5,
+            Vec3::Z,
+            size.z * 0.5,
+            Vec3::Y,
+            size.y * 0.5,
+        ),
+        Face::Right => (
+            Vec3::X,
+            size.x * 0.5,
+            Vec3::Z,
+            size.z * 0.5,
+            Vec3::Y,
+            size.y * 0.5,
+        ),
+    };
+    let direction = pose.transform_vector3(normal).normalize_or_zero();
+    let position = translation + direction * normal_extent;
+    let axis_u = pose
+        .transform_vector3(axis_u)
+        .normalize_or_zero()
+        .extend(half_width);
+    let axis_v = pose
+        .transform_vector3(axis_v)
+        .normalize_or_zero()
+        .extend(half_height);
+    (position, direction, axis_u, axis_v)
 }
 
-impl Default for Lighting {
-    fn default() -> Self {
-        Self {
-            ambient: Color3::BLACK,
-            brightness: 2.0,
-            color_shift_bottom: Color3::BLACK,
-            color_shift_top: Color3::BLACK,
-            environment_diffuse_scale: 1.0,
-            environment_specular_scale: 1.0,
-            exposure_compensation: 0.0,
-            fog_color: Color3::new(0.75, 0.75, 0.75),
-            fog_start: 0.0,
-            fog_end: 100_000.0,
-            geographic_latitude: 0.0,
-            global_shadows: true,
-            lighting_style: LightingStyle::Realistic,
-            outdoor_ambient: Color3::new(0.5, 0.5, 0.5),
-            shadow_color: Color3::BLACK,
-            shadow_softness: 0.2,
-            #[cfg(feature = "default-skybox")]
-            skybox: Some(Skybox::default()),
-            #[cfg(not(feature = "default-skybox"))]
-            skybox: None,
-            #[cfg(feature = "default-skybox")]
-            skybox_revision: 1,
-            #[cfg(not(feature = "default-skybox"))]
-            skybox_revision: 0,
-            clock_time: 12.0,
-            direction_override: None,
-        }
-    }
+fn local_light_color(color: Color3, brightness: f32) -> Option<([f32; 4], f32)> {
+    let brightness = finite_nonnegative(brightness);
+    let color = lighting_color(color);
+    let color_strength = color[0].max(color[1]).max(color[2]);
+    (brightness > 0.0 && color_strength > 0.0).then_some((color, brightness))
 }
 
-impl Lighting {
-    /// Default direction toward the midday sun.
-    pub const DEFAULT_SUN_DIRECTION: Vec3 = Vec3::new(-0.45, 0.85, 0.35);
-
-    /// Creates lighting settings.
-    ///
-    /// Equivalent to [`Lighting::default()`].
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Returns the lighting skybox, if one is set.
-    ///
-    /// New lighting configurations default to an embedded cross-layout
-    /// skybox. When no skybox is set, the renderer clears to its clear color.
-    pub fn skybox(&self) -> Option<&Skybox> {
-        self.skybox.as_ref()
-    }
-
-    /// Replaces the lighting skybox.
-    ///
-    pub fn with_skybox(&mut self, skybox: Skybox) -> &mut Self {
-        self.skybox = Some(skybox);
-        self.skybox_revision = self.skybox_revision.wrapping_add(1);
-        self
-    }
-
-    /// Removes the lighting skybox.
-    pub fn clear_skybox(&mut self) {
-        self.skybox = None;
-        self.skybox_revision = self.skybox_revision.wrapping_add(1);
-    }
-
-    /// Returns the revision of the lighting skybox.
-    pub fn skybox_revision(&self) -> u64 {
-        self.skybox_revision
-    }
-
-    /// Returns the time of day in hours in `[0, 24)`.
-    pub fn clock_time(&self) -> f32 {
-        self.clock_time
-    }
-
-    /// Sets the time of day in hours and moves the sun along its path.
-    ///
-    pub fn with_clock_time(&mut self, hours: f32) -> &mut Self {
-        self.clock_time = wrap_clock_time(hours);
-        self.direction_override = None;
-        self
-    }
-
-    /// Advances the time of day by `hours_per_second` for the elapsed real time.
-    ///
-    /// Non-finite inputs are ignored. Positive rates move time forward and
-    /// negative rates move it backward.
-    pub fn advance_clock_time(&mut self, delta_seconds: f32, hours_per_second: f32) -> &mut Self {
-        if delta_seconds.is_finite() && hours_per_second.is_finite() {
-            self.with_clock_time(self.clock_time + delta_seconds * hours_per_second);
-        }
-        self
-    }
-
-    /// Returns the time as a `HH:MM:SS` string.
-    pub fn time_of_day(&self) -> String {
-        let total_seconds = (self.clock_time * 3600.0).round() as u32 % (24 * 60 * 60);
-        let hours = total_seconds / 3600;
-        let minutes = total_seconds / 60 % 60;
-        let seconds = total_seconds % 60;
-        format!("{hours:02}:{minutes:02}:{seconds:02}")
-    }
-
-    /// Parses and sets a `HH:MM:SS` time.
-    ///
-    pub fn with_time_of_day(&mut self, time: &str) -> Result<&mut Self, TimeOfDayError> {
-        let mut components = time.split(':');
-        let hours = components
-            .next()
-            .and_then(|value| value.parse::<u32>().ok());
-        let minutes = components
-            .next()
-            .and_then(|value| value.parse::<u32>().ok());
-        let seconds = components
-            .next()
-            .and_then(|value| value.parse::<u32>().ok());
-        if components.next().is_some()
-            || hours.is_none()
-            || minutes.is_none()
-            || seconds.is_none()
-            || minutes.unwrap_or(60) >= 60
-            || seconds.unwrap_or(60) >= 60
-            || hours.unwrap_or(24) >= 24
-        {
-            return Err(TimeOfDayError::InvalidFormat);
-        }
-        self.with_clock_time(
-            hours.unwrap() as f32
-                + minutes.unwrap() as f32 / 60.0
-                + seconds.unwrap() as f32 / 3600.0,
-        );
-        Ok(self)
-    }
-
-    /// Returns minutes elapsed since midnight.
-    pub fn get_minutes_after_midnight(&self) -> f32 {
-        self.clock_time * 60.0
-    }
-
-    /// Sets the time using minutes elapsed since midnight.
-    ///
-    pub fn with_minutes_after_midnight(&mut self, minutes: f32) -> &mut Self {
-        self.with_clock_time(minutes / 60.0);
-        self
-    }
-
-    /// Returns the unit vector pointing from the scene toward the sun.
-    pub fn sun_direction(&self) -> Vec3 {
-        self.direction_override
-            .unwrap_or_else(|| self.sun_direction_from_clock_time_and_latitude())
-    }
-
-    /// Returns the direction of the sun.
-    pub fn get_sun_direction(&self) -> Vec3 {
-        self.sun_direction()
-    }
-
-    /// Sets an explicit sun direction and updates `ClockTime` to its nearest
-    /// matching hour.
-    ///
-    pub fn with_sun_direction(&mut self, direction: Vec3) -> &mut Self {
-        let direction = sanitize_direction(direction);
-        self.direction_override = Some(direction);
-        self.clock_time = nearest_clock_time(direction);
-        self
-    }
-
-    /// Returns the direction of the moon, opposite the sun direction.
-    pub fn moon_direction(&self) -> Vec3 {
-        -self.sun_direction()
-    }
-
-    /// Returns the direction of the moon.
-    pub fn get_moon_direction(&self) -> Vec3 {
-        self.moon_direction()
-    }
-
-    /// Returns an approximate normalized lunar phase in `[0, 1)`.
-    ///
-    /// Terrarium has no calendar service, so this uses the current day cycle
-    /// as a deterministic phase rather than claiming a real astronomical date.
-    pub fn get_moon_phase(&self) -> f32 {
-        (self.clock_time / 24.0 + 0.5).rem_euclid(1.0)
-    }
-
-    /// Returns the sun direction for a time using the default path tilt.
-    pub fn sun_direction_from_clock_time(hours: f32) -> Vec3 {
-        base_sun_direction(wrap_clock_time(hours))
-    }
-
-    /// Returns the fraction of direct sunlight visible above the horizon.
-    pub(crate) fn daylight_factor(&self) -> f32 {
-        let height = self.sun_direction().y;
-        let normalized = ((height + 0.12) / 0.42).clamp(0.0, 1.0);
-        normalized * normalized * (3.0 - 2.0 * normalized)
-    }
-
-    pub(crate) fn render_direct_scale(&self) -> f32 {
-        let style_scale = match self.lighting_style {
-            LightingStyle::Realistic => 1.0,
-            LightingStyle::Soft => 0.72,
-        };
-        let brightness = if self.brightness.is_finite() {
-            self.brightness.max(0.0)
-        } else {
-            0.0
-        };
-        brightness * 1.5 * self.daylight_factor() * style_scale
-    }
-
-    pub(crate) fn render_exposure(&self) -> f32 {
-        if self.exposure_compensation.is_finite() {
-            self.exposure_compensation.clamp(-16.0, 16.0).exp2()
-        } else {
-            1.0
-        }
-    }
-
-    /// Returns whether the configured renderer should sample directional
-    /// shadows.
-    pub(crate) fn shadows_enabled(&self) -> bool {
-        self.global_shadows
-    }
-
-    fn sun_direction_from_clock_time_and_latitude(&self) -> Vec3 {
-        let base = base_sun_direction(self.clock_time);
-        let latitude = if self.geographic_latitude.is_finite() {
-            self.geographic_latitude.clamp(-90.0, 90.0).to_radians()
-        } else {
-            0.0
-        };
-        let (sin, cos) = latitude.sin_cos();
-        sanitize_direction(Vec3::new(
-            base.x,
-            base.y * cos - base.z * sin,
-            base.y * sin + base.z * cos,
-        ))
-    }
-}
-
-fn wrap_clock_time(hours: f32) -> f32 {
-    if hours.is_finite() {
-        hours.rem_euclid(24.0)
+fn local_light_score(
+    position: Vec3,
+    range: f32,
+    source_radius: f32,
+    color: [f32; 4],
+    brightness: f32,
+    camera_position: Vec3,
+) -> f32 {
+    let distance = (position.distance(camera_position) - source_radius).max(0.0);
+    let attenuation = if distance < range {
+        let normalized_distance = distance / range;
+        let range_falloff = (1.0 - normalized_distance.powi(4)).max(0.0);
+        range_falloff.powi(2) / distance.powi(2).max(1.0)
     } else {
-        12.0
+        0.25 / (distance - range + 1.0).powi(2)
+    };
+    color[0].max(color[1]).max(color[2]) * brightness * attenuation
+}
+
+fn directional_light_relevance(
+    camera: &RenderCamera,
+    position: Vec3,
+    direction: Vec3,
+    angle: f32,
+    range: f32,
+) -> f32 {
+    let view = camera.pose.inverse();
+    let view_position = view.transform_point3(position);
+    let view_direction = view.transform_vector3(direction);
+    let source_depth = -view_position.z;
+    let tan_half_fovy = (camera.fovy * 0.5).tan();
+    let outer_cosine = (angle * 0.5).to_radians().cos();
+    let inner_cosine = outer_cosine + (1.0 - outer_cosine) * 0.15;
+    let mut relevance: f32 = 0.0;
+
+    let mut evaluate_probe = |probe: Vec3| {
+        let probe = camera.pose.transform_point3(probe);
+        let Some(to_probe) = (probe - position).try_normalize() else {
+            return;
+        };
+        let cosine = direction.dot(to_probe);
+        let amount =
+            ((cosine - outer_cosine) / (inner_cosine - outer_cosine).max(1e-5)).clamp(0.0, 1.0);
+        let smooth_amount = amount * amount * (3.0 - 2.0 * amount);
+        relevance = relevance.max(smooth_amount);
+    };
+
+    for depth in [
+        camera.znear,
+        camera.zfar,
+        source_depth,
+        source_depth + range * 0.5,
+        source_depth + range,
+    ] {
+        let depth = depth.clamp(camera.znear, camera.zfar);
+        let half_height = depth * tan_half_fovy;
+        let half_width = half_height * camera.aspect;
+        let closest_x = view_position.x.clamp(-half_width, half_width);
+        let closest_y = view_position.y.clamp(-half_height, half_height);
+        for [x, y] in [
+            [closest_x, closest_y],
+            [0.0, 0.0],
+            [-half_width, -half_height],
+            [-half_width, half_height],
+            [half_width, -half_height],
+            [half_width, half_height],
+            [closest_x, -half_height],
+            [closest_x, half_height],
+            [-half_width, closest_y],
+            [half_width, closest_y],
+        ] {
+            evaluate_probe(Vec3::new(x, y, -depth));
+        }
+
+        if view_direction.z.abs() > 1e-6 {
+            let distance = (-depth - view_position.z) / view_direction.z;
+            if distance >= 0.0 {
+                let axis_point = view_position + view_direction * distance;
+                if axis_point.x.abs() <= half_width && axis_point.y.abs() <= half_height {
+                    evaluate_probe(axis_point);
+                }
+            }
+        } else if (depth - source_depth).abs() <= 1e-4 {
+            if view_direction.x.abs() > 1e-6 {
+                for x in [-half_width, half_width] {
+                    let distance = (x - view_position.x) / view_direction.x;
+                    let y = view_position.y + view_direction.y * distance;
+                    if distance >= 0.0 && y.abs() <= half_height {
+                        evaluate_probe(Vec3::new(x, y, -depth));
+                    }
+                }
+            }
+            if view_direction.y.abs() > 1e-6 {
+                for y in [-half_height, half_height] {
+                    let distance = (y - view_position.y) / view_direction.y;
+                    let x = view_position.x + view_direction.x * distance;
+                    if distance >= 0.0 && x.abs() <= half_width {
+                        evaluate_probe(Vec3::new(x, y, -depth));
+                    }
+                }
+            }
+        }
     }
+
+    relevance
 }
 
-fn base_sun_direction(hours: f32) -> Vec3 {
-    let angle = (hours - 12.0) / 12.0 * std::f32::consts::PI;
-    let noon = Lighting::DEFAULT_SUN_DIRECTION
-        .try_normalize()
-        .unwrap_or(Vec3::Y);
-    sanitize_direction(noon * angle.cos() - Vec3::X * angle.sin())
+fn point_light_candidate(
+    light: &RenderLight,
+    parent_transform: Mat4,
+    range: f32,
+    camera: &RenderCamera,
+    camera_planes: &[Vec4; 6],
+) -> Option<LocalLightCandidate> {
+    let (color, brightness) = local_light_color(light.color, light.brightness)?;
+    let range = finite_nonnegative(range).min(10_000.0);
+    if range <= 0.0 {
+        return None;
+    }
+    let position = parent_transform.w_axis.truncate();
+    if !sphere_visible(camera_planes, position, range) {
+        return None;
+    }
+    let shadow_view_projections = if light.shadows {
+        point_shadow_view_projections(position, 0.03, range)
+    } else {
+        [Mat4::IDENTITY; 6]
+    };
+    Some(LocalLightCandidate {
+        raw: LocalLightRaw {
+            position_range: position.extend(range).to_array(),
+            color_brightness: [color[0], color[1], color[2], brightness],
+            direction_type: [0.0, 0.0, 0.0, 0.0],
+            axis_u_half_width: [0.0; 4],
+            axis_v_half_height: [0.0; 4],
+            params: [0.0, -1.0, 0.0, 0.0],
+        },
+        shadow_view_projections,
+        shadow_layer_count: if light.shadows { 6 } else { 0 },
+        shadow_excluded_caster: light.parent_id,
+        score: local_light_score(position, range, 0.0, color, brightness, camera.position()),
+    })
 }
 
-fn sanitize_direction(direction: Vec3) -> Vec3 {
-    if direction.is_finite() {
-        direction.try_normalize().unwrap_or(Vec3::Y)
+fn directional_light_candidate(
+    light: &RenderLight,
+    parent_transform: Mat4,
+    face: Face,
+    angle: f32,
+    surface: bool,
+    camera: &RenderCamera,
+    camera_planes: &[Vec4; 6],
+) -> Option<LocalLightCandidate> {
+    let (color, brightness) = local_light_color(light.color, light.brightness)?;
+    let angle = finite_or(angle, 0.0).clamp(0.0, 180.0);
+    if angle <= 0.0 {
+        return None;
+    }
+    let range = (brightness.sqrt() * LOCAL_LIGHT_DERIVED_RANGE).clamp(0.03, LOCAL_LIGHT_MAX_RANGE);
+    let parent = LightParent {
+        transform: parent_transform,
+    };
+    let (face_position, direction, axis_u, axis_v) = light_face_frame(parent, face);
+    let position = face_position + direction * 0.01;
+    let source_radius = if surface {
+        axis_u.w.hypot(axis_v.w)
+    } else {
+        0.0
+    };
+    if direction == Vec3::ZERO || !sphere_visible(camera_planes, position, range + source_radius) {
+        return None;
+    }
+    let shadow_view_projections = if light.shadows {
+        let mut matrices = [Mat4::IDENTITY; 6];
+        matrices[0] = cone_shadow_view_projection(position, direction, angle, range);
+        matrices
+    } else {
+        [Mat4::IDENTITY; 6]
+    };
+    Some(LocalLightCandidate {
+        raw: LocalLightRaw {
+            position_range: position.extend(range).to_array(),
+            color_brightness: [color[0], color[1], color[2], brightness],
+            direction_type: direction.extend(if surface { 2.0 } else { 1.0 }).to_array(),
+            axis_u_half_width: if surface { axis_u.to_array() } else { [0.0; 4] },
+            axis_v_half_height: if surface { axis_v.to_array() } else { [0.0; 4] },
+            params: [(angle * 0.5).to_radians().cos(), -1.0, 0.0, 0.0],
+        },
+        shadow_view_projections,
+        shadow_layer_count: usize::from(light.shadows),
+        shadow_excluded_caster: light.parent_id,
+        score: local_light_score(
+            position,
+            range,
+            source_radius,
+            color,
+            brightness,
+            camera.position(),
+        ) * directional_light_relevance(camera, position, direction, angle, range),
+    })
+}
+
+pub(super) fn cone_shadow_view_projection(
+    position: Vec3,
+    direction: Vec3,
+    angle: f32,
+    range: f32,
+) -> Mat4 {
+    let up = if direction.dot(Vec3::Y).abs() > 0.98 {
+        Vec3::Z
     } else {
         Vec3::Y
-    }
+    };
+    let view = glam::camera::rh::view::look_at_mat4(position, position + direction, up);
+    let projection = glam::camera::rh::proj::directx::perspective(
+        angle.clamp(1.0, 179.0).to_radians(),
+        1.0,
+        0.03,
+        range.max(0.031),
+    );
+    projection * view
 }
 
-fn nearest_clock_time(direction: Vec3) -> f32 {
-    let direction = sanitize_direction(direction);
-    let mut best_hour = 12.0;
-    let mut best_dot = f32::NEG_INFINITY;
-    for minutes in 0..(24 * 60) {
-        let hours = minutes as f32 / 60.0;
-        let dot = base_sun_direction(hours).dot(direction);
-        if dot > best_dot {
-            best_dot = dot;
-            best_hour = hours;
+pub(super) fn point_shadow_view_projections(position: Vec3, near: f32, far: f32) -> [Mat4; 6] {
+    let directions = [
+        (Vec3::X, Vec3::NEG_Y),
+        (Vec3::NEG_X, Vec3::NEG_Y),
+        (Vec3::Y, Vec3::Z),
+        (Vec3::NEG_Y, Vec3::NEG_Z),
+        (Vec3::Z, Vec3::NEG_Y),
+        (Vec3::NEG_Z, Vec3::NEG_Y),
+    ];
+    let projection = glam::camera::rh::proj::directx::perspective(
+        std::f32::consts::FRAC_PI_2,
+        1.0,
+        near,
+        far.max(near + 0.001),
+    );
+    directions.map(|(direction, up)| {
+        projection * glam::camera::rh::view::look_at_mat4(position, position + direction, up)
+    })
+}
+
+pub(super) fn light_view_projections(
+    camera: &RenderCamera,
+    light_direction: Vec3,
+    shadow_map_size: u32,
+) -> (
+    [Mat4; SHADOW_CASCADE_COUNT],
+    [f32; SHADOW_CASCADE_COUNT],
+    [f32; SHADOW_CASCADE_COUNT],
+) {
+    let light_direction = match light_direction.try_normalize() {
+        Some(direction) => direction,
+        None => Vec3::Y,
+    };
+    let up = if light_direction.dot(Vec3::Y).abs() > 0.98 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    let light_forward = -light_direction;
+    let light_right = light_forward.cross(up).normalize();
+    let light_up = light_right.cross(light_forward).normalize();
+    let near = camera.znear.max(0.001);
+    let far = camera.zfar.min(SHADOW_DISTANCE).max(near + 0.001);
+    let mut splits = [far; SHADOW_CASCADE_COUNT];
+    let mut matrices = [Mat4::IDENTITY; SHADOW_CASCADE_COUNT];
+    let mut texel_sizes = [0.0; SHADOW_CASCADE_COUNT];
+    let mut cascade_near = near;
+
+    for cascade in 0..SHADOW_CASCADE_COUNT {
+        let fraction = (cascade + 1) as f32 / SHADOW_CASCADE_COUNT as f32;
+        let cascade_far = near * (far / near).powf(fraction);
+        splits[cascade] = cascade_far;
+
+        let corners = camera_frustum_slice_corners(camera, cascade_near, cascade_far);
+        let center = corners.iter().copied().sum::<Vec3>() / corners.len() as f32;
+        let radius = corners
+            .iter()
+            .map(|corner| corner.distance(center))
+            .fold(0.0, f32::max);
+        let extent = ((radius + 1.0 / 16.0) * 16.0).ceil() / 16.0;
+        let texel_size = 2.0 * extent / shadow_map_size as f32;
+        texel_sizes[cascade] = texel_size;
+        let center_x = center.dot(light_right);
+        let center_y = center.dot(light_up);
+        let snapped_center = center
+            + light_right * ((center_x / texel_size).round() * texel_size - center_x)
+            + light_up * ((center_y / texel_size).round() * texel_size - center_y);
+        let light_position = snapped_center + light_direction * (extent + SHADOW_CASTER_MARGIN);
+        let view = glam::camera::rh::view::look_at_mat4(light_position, snapped_center, up);
+        let (mut min_depth, mut max_depth) = (f32::MAX, f32::MIN);
+        for corner in corners {
+            let depth = -view.transform_point3(corner).z;
+            min_depth = min_depth.min(depth);
+            max_depth = max_depth.max(depth);
         }
+        let shadow_near = (min_depth - SHADOW_CASTER_MARGIN).max(0.001);
+        let shadow_far = (max_depth + SHADOW_RECEIVER_MARGIN).max(shadow_near + 0.001);
+        let projection = glam::camera::rh::proj::directx::orthographic(
+            -extent,
+            extent,
+            -extent,
+            extent,
+            shadow_near,
+            shadow_far,
+        );
+        matrices[cascade] = projection * view;
+        cascade_near = cascade_far;
     }
-    best_hour
+
+    (matrices, splits, texel_sizes)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub(super) fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
+}
 
-    #[test]
-    fn time_of_day_and_minutes_round_trip() {
-        let mut lighting = Lighting::default();
-        assert_eq!(lighting.time_of_day(), "12:00:00");
+pub(super) fn finite_nonnegative(value: f32) -> f32 {
+    finite_or(value, 0.0).max(0.0)
+}
 
-        lighting.with_time_of_day("23:15:30").unwrap();
-        assert!((lighting.clock_time() - 23.258333).abs() < 0.00001);
-        assert!((lighting.get_minutes_after_midnight() - 1395.5).abs() < 0.0001);
-        assert_eq!(lighting.time_of_day(), "23:15:30");
+pub(super) fn color_channel(value: f32) -> f32 {
+    finite_or(value, 0.0).clamp(0.0, 1.0)
+}
 
-        lighting.with_minutes_after_midnight(90.0);
-        assert_eq!(lighting.time_of_day(), "01:30:00");
-        assert_eq!(
-            lighting.with_time_of_day("not-a-time").map(|_| ()),
-            Err(TimeOfDayError::InvalidFormat)
-        );
+pub(super) fn lighting_color(color: Color3) -> [f32; 4] {
+    [
+        color_channel(color.r),
+        color_channel(color.g),
+        color_channel(color.b),
+        0.0,
+    ]
+}
 
-        lighting.with_clock_time(23.5);
-        lighting.advance_clock_time(4.0, 0.25);
-        assert!((lighting.clock_time() - 0.5).abs() < f32::EPSILON);
+pub(super) fn scaled_color(color: Color3, scale: f32) -> [f32; 4] {
+    let scale = finite_nonnegative(scale);
+    [
+        color_channel(color.r) * scale,
+        color_channel(color.g) * scale,
+        color_channel(color.b) * scale,
+        0.0,
+    ]
+}
+
+pub(super) fn pack_shadow_values(values: [f32; SHADOW_CASCADE_COUNT]) -> [[f32; 4]; 2] {
+    let mut packed = [[values[SHADOW_CASCADE_COUNT - 1]; 4]; 2];
+    for (index, value) in values.into_iter().enumerate() {
+        packed[index / 4][index % 4] = value;
     }
+    packed
+}
 
-    #[test]
-    fn night_removes_direct_sunlight_and_latitude_tilts_the_path() {
-        let mut lighting = Lighting::default();
-        lighting.with_clock_time(0.0);
-        assert_eq!(lighting.daylight_factor(), 0.0);
-        assert!(lighting.sun_direction().y < 0.0);
-
-        lighting.with_clock_time(12.0);
-        let equator_noon = lighting.sun_direction();
-        assert!(lighting.daylight_factor() > 0.99);
-
-        lighting.geographic_latitude = 45.0;
-        lighting.with_clock_time(12.0);
-        assert!((lighting.sun_direction() - equator_noon).length() > 0.01);
-    }
+pub(super) fn camera_frustum_slice_corners(
+    camera: &RenderCamera,
+    near: f32,
+    far: f32,
+) -> [Vec3; 8] {
+    let tan_half_fovy = (camera.fovy * 0.5).tan();
+    let near_height = near * tan_half_fovy;
+    let near_width = near_height * camera.aspect;
+    let far_height = far * tan_half_fovy;
+    let far_width = far_height * camera.aspect;
+    let corners = [
+        Vec3::new(-near_width, -near_height, -near),
+        Vec3::new(near_width, -near_height, -near),
+        Vec3::new(-near_width, near_height, -near),
+        Vec3::new(near_width, near_height, -near),
+        Vec3::new(-far_width, -far_height, -far),
+        Vec3::new(far_width, -far_height, -far),
+        Vec3::new(-far_width, far_height, -far),
+        Vec3::new(far_width, far_height, -far),
+    ];
+    corners.map(|corner| camera.pose.transform_point3(corner))
 }
