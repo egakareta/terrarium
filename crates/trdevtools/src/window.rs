@@ -1,8 +1,19 @@
 use std::collections::HashMap;
 
+use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
+use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewState};
 use trscene::{Instance, InstanceId, Workspace};
 
 use super::{Property, PropertyError, PropertyValue};
+
+egui_phosphor::subset! {
+    pub mod devtools_icons {
+        use regular::{
+            ARROW_COUNTER_CLOCKWISE, CAMERA, CUBE, FOLDER, GEAR, LIGHTBULB,
+            SLIDERS_HORIZONTAL, TREE_STRUCTURE, TRASH,
+        };
+    }
+}
 
 /// Properties shared by the current selection.
 #[derive(Clone, Debug)]
@@ -13,13 +24,13 @@ pub struct SelectionProperty {
     pub mixed: bool,
 }
 
-/// A floating workspace inspector with a persistent selection.
+/// A dockable workspace inspector with a persistent selection.
 ///
 /// Engines create one automatically with the `devtools` feature enabled. The
 /// window starts hidden; F12 toggles it. Ctrl-click (Command-click on macOS)
 /// toggles rows, Shift-click selects a visible range, and Delete destroys the
-/// selection while the inspector is active and no text editor has focus.
-#[derive(Default)]
+/// selection while the inspector is active and no text editor has focus. The
+/// Explorer and Properties panes can be moved, split, or detached into windows.
 pub struct Devtools {
     visible: bool,
     selected: Vec<InstanceId>,
@@ -28,6 +39,24 @@ pub struct Devtools {
     last_input_frame: Option<u64>,
     error: Option<String>,
     json_drafts: HashMap<String, String>,
+    dock_state: DockState<DevtoolsTab>,
+    tree_state: TreeViewState<InstanceId>,
+}
+
+impl Default for Devtools {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            selected: Vec::new(),
+            anchor: None,
+            active: false,
+            last_input_frame: None,
+            error: None,
+            json_drafts: HashMap::new(),
+            dock_state: default_dock_state(),
+            tree_state: TreeViewState::default(),
+        }
+    }
 }
 
 impl Devtools {
@@ -102,36 +131,7 @@ impl Devtools {
 
     /// Returns properties common to every selected instance, marking mixed values.
     pub fn properties(&self, workspace: &Workspace) -> Vec<SelectionProperty> {
-        let mut instances = self
-            .selected
-            .iter()
-            .filter_map(|&id| resolve(workspace, id));
-        let Some(first) = instances.next() else {
-            return Vec::new();
-        };
-        let mut properties: Vec<_> = first
-            .properties()
-            .into_iter()
-            .map(|property| SelectionProperty {
-                property,
-                mixed: false,
-            })
-            .collect();
-        for instance in instances {
-            let other = instance.properties();
-            properties.retain_mut(|field| {
-                let Some(value) = other.iter().find(|property| {
-                    property.path == field.property.path
-                        && compatible(&property.value, &field.property.value)
-                }) else {
-                    return false;
-                };
-                field.mixed |= value.value != field.property.value;
-                field.property.editable &= value.editable;
-                true
-            });
-        }
-        properties
+        properties_for_selection(&self.selected, workspace)
     }
 
     /// Applies an edit to a common editable field of the selection.
@@ -142,27 +142,7 @@ impl Devtools {
         value: PropertyValue,
     ) -> Result<(), PropertyError> {
         self.prune(workspace);
-        let Some(property) = self
-            .properties(workspace)
-            .into_iter()
-            .find(|property| property.property.path == path && property.property.editable)
-        else {
-            return Err(PropertyError::NotFound);
-        };
-        if !compatible(&property.property.value, &value) {
-            return Err(PropertyError::InvalidValue);
-        }
-        for &id in &self.selected {
-            resolve(workspace, id)
-                .ok_or(PropertyError::NotFound)?
-                .validate_property(path, &value)?;
-        }
-        for &id in &self.selected {
-            resolve_mut(workspace, id)
-                .ok_or(PropertyError::NotFound)?
-                .set_property(path, value.clone())?;
-        }
-        Ok(())
+        edit_selection_property(workspace, &self.selected, path, value)
     }
 
     /// Destroys selected instances and their descendants; the workspace root is retained.
@@ -193,109 +173,76 @@ impl Devtools {
             return;
         }
         let id = egui::Id::new(("terrarium_devtools", workspace.id()));
+        let dock_id = egui::Id::new(("terrarium_devtools_dock", workspace.id()));
         let mut open = true;
-        let mut click = None;
-        let mut order = Vec::new();
         let mut delete_clicked = false;
+        let mut tree_selection_changed = false;
+        let mut panel_layers = Vec::new();
         let window = egui::Window::new("DevTools")
             .id(id)
             .open(&mut open)
-            .default_size([660.0, 500.0])
+            .default_pos([48.0, 48.0])
+            .default_size([1080.0, 680.0])
             .resizable(true)
             .show(context, |ui| {
                 ui.horizontal(|ui| {
+                    ui.menu_button(
+                        format!("{} Panels", devtools_icons::regular::SLIDERS_HORIZONTAL),
+                        |ui| {
+                            self.show_panel_toggle(ui, DevtoolsTab::Explorer);
+                            self.show_panel_toggle(ui, DevtoolsTab::Properties);
+                        },
+                    );
+                    if ui
+                        .button(format!(
+                            "{} Reset layout",
+                            devtools_icons::regular::ARROW_COUNTER_CLOCKWISE
+                        ))
+                        .clicked()
+                    {
+                        self.dock_state = default_dock_state();
+                    }
+                    ui.separator();
                     ui.label(format!("{} selected", self.selected.len()));
                     delete_clicked = ui
                         .add_enabled(
                             self.selected.iter().any(|&id| id != workspace.id()),
-                            egui::Button::new("Delete selection"),
+                            egui::Button::new(format!(
+                                "{} Delete selection",
+                                devtools_icons::regular::TRASH
+                            )),
                         )
                         .clicked();
                 });
+                ui.separator();
                 ui.small("Ctrl/⌘-click: toggle · Shift-click: range · Delete: destroy · F12: hide");
                 ui.separator();
-                let tree_height = ui.available_height();
-                egui::ScrollArea::vertical()
-                    .id_salt("tree")
-                    .auto_shrink([false, false])
-                    .max_height(tree_height)
-                    .show(ui, |ui| {
-                        tree(ui, workspace, &self.selected, &mut order, &mut click, true);
-                    });
+                let mut viewer = DevtoolsTabViewer {
+                    workspace,
+                    selected: &mut self.selected,
+                    anchor: &mut self.anchor,
+                    tree_state: &mut self.tree_state,
+                    selection_changed: &mut tree_selection_changed,
+                    error: &mut self.error,
+                    json_drafts: &mut self.json_drafts,
+                    panel_layers: &mut panel_layers,
+                };
+                DockArea::new(&mut self.dock_state)
+                    .id(dock_id)
+                    .style(Style::from_egui(ui.style().as_ref()))
+                    .show_inside(ui, &mut viewer);
             });
-        let properties_window = egui::Window::new("Properties")
-            .id(egui::Id::new((
-                "terrarium_devtools_properties",
-                workspace.id(),
-            )))
-            .default_pos([680.0, 50.0])
-            .default_size([420.0, 500.0])
-            .resizable(true)
-            .show(context, |ui| {
-                if self.selected.is_empty() {
-                    ui.label("Select an instance to inspect its properties.");
-                }
-                if let Some(error) = &self.error {
-                    ui.colored_label(ui.visuals().error_fg_color, error);
-                }
-                let properties_height = ui.available_height();
-                egui::ScrollArea::vertical()
-                    .id_salt("properties")
-                    .auto_shrink([false, false])
-                    .max_height(properties_height)
-                    .show(ui, |ui| {
-                        for field in self.properties(workspace) {
-                            let mut value = field.property.value.clone();
-                            if let PropertyValue::Json(json) = &mut value
-                                && let Some(draft) = self.json_drafts.get(&field.property.path)
-                            {
-                                json.clone_from(draft);
-                            }
-                            let changed = ui
-                                .push_id(&field.property.path, |ui| {
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(&field.property.path);
-                                            if field.mixed {
-                                                ui.weak("mixed");
-                                            }
-                                        });
-                                        ui.add_enabled_ui(field.property.editable, |ui| {
-                                            edit_value(ui, &mut value)
-                                        })
-                                        .inner
-                                    })
-                                    .inner
-                                })
-                                .inner;
-                            if changed {
-                                if let PropertyValue::Json(json) = &value {
-                                    self.json_drafts
-                                        .insert(field.property.path.clone(), json.clone());
-                                }
-                                self.error = self
-                                    .edit_property(workspace, &field.property.path, value)
-                                    .err()
-                                    .map(|error| error.to_string());
-                                if self.error.is_none() {
-                                    self.json_drafts.remove(&field.property.path);
-                                }
-                            }
-                        }
-                    });
-            });
-        if let Some((id, modifiers)) = click {
-            self.select(id, modifiers, &order);
-        }
         if context.input(|input| input.pointer.any_pressed()) {
-            self.active = context
-                .input(|input| input.pointer.interact_pos())
-                .is_some_and(|position| {
-                    window.iter().chain(properties_window.iter()).any(|window| {
-                        window.response.rect.contains(position)
-                            && context.layer_id_at(position) == Some(window.response.layer_id)
-                    })
-                });
+            self.active = tree_selection_changed
+                || context
+                    .input(|input| input.pointer.interact_pos())
+                    .is_some_and(|position| {
+                        let layer = context.layer_id_at(position);
+                        window.as_ref().is_some_and(|window| {
+                            window.response.rect.contains(position)
+                                && layer == Some(window.response.layer_id)
+                        }) || layer.is_some_and(|layer| panel_layers.contains(&layer))
+                    });
         }
         if delete_clicked
             || (process_input
@@ -310,6 +257,17 @@ impl Devtools {
         show_development_notice(context);
     }
 
+    fn show_panel_toggle(&mut self, ui: &mut egui::Ui, tab: DevtoolsTab) {
+        let mut is_open = self.dock_state.find_tab(&tab).is_some();
+        if ui.checkbox(&mut is_open, tab.title()).changed() {
+            if is_open {
+                self.dock_state.main_surface_mut().push_to_focused_leaf(tab);
+            } else if let Some(path) = self.dock_state.find_tab(&tab) {
+                self.dock_state.remove_tab(path);
+            }
+        }
+    }
+
     fn prune(&mut self, workspace: &Workspace) {
         self.selected.retain(|&id| resolve(workspace, id).is_some());
         if self
@@ -321,15 +279,232 @@ impl Devtools {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum DevtoolsTab {
+    Explorer,
+    Properties,
+}
+
+impl DevtoolsTab {
+    fn title(self) -> String {
+        match self {
+            Self::Explorer => format!("{} Explorer", devtools_icons::regular::TREE_STRUCTURE),
+            Self::Properties => format!("{} Properties", devtools_icons::regular::GEAR),
+        }
+    }
+}
+
+struct DevtoolsTabViewer<'a> {
+    workspace: &'a mut Workspace,
+    selected: &'a mut Vec<InstanceId>,
+    anchor: &'a mut Option<InstanceId>,
+    tree_state: &'a mut TreeViewState<InstanceId>,
+    selection_changed: &'a mut bool,
+    error: &'a mut Option<String>,
+    json_drafts: &'a mut HashMap<String, String>,
+    panel_layers: &'a mut Vec<egui::LayerId>,
+}
+
+impl TabViewer for DevtoolsTabViewer<'_> {
+    type Tab = DevtoolsTab;
+
+    fn id(&mut self, tab: &mut Self::Tab) -> egui::Id {
+        egui::Id::new(*tab)
+    }
+
+    fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
+        tab.title().into()
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
+        self.panel_layers.push(ui.layer_id());
+        match tab {
+            DevtoolsTab::Explorer => self.show_explorer(ui),
+            DevtoolsTab::Properties => self.show_properties(ui),
+        }
+    }
+}
+
+impl DevtoolsTabViewer<'_> {
+    fn show_explorer(&mut self, ui: &mut egui::Ui) {
+        if self.tree_state.selected().as_slice() != self.selected.as_slice() {
+            self.tree_state.set_selected(self.selected.clone());
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("tree")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let (_, actions) =
+                    TreeView::new(ui.make_persistent_id(("workspace_tree", self.workspace.id())))
+                        .allow_multi_selection(true)
+                        .range_selection_modifier(egui::Modifiers::SHIFT)
+                        .set_selection_modifier(egui::Modifiers::COMMAND)
+                        .allow_drag_and_drop(false)
+                        .show_state(ui, self.tree_state, |builder| {
+                            build_tree(builder, self.workspace, true);
+                        });
+                for action in actions {
+                    if let Action::SetSelected(selection) = action {
+                        let modifiers = ui.input(|input| input.modifiers);
+                        let previous = &*self.selected;
+                        if !modifiers.shift {
+                            if selection.len() == 1 {
+                                *self.anchor = selection.first().copied();
+                            } else {
+                                let changed: Vec<_> = previous
+                                    .iter()
+                                    .filter(|id| !selection.contains(id))
+                                    .chain(selection.iter().filter(|id| !previous.contains(id)))
+                                    .copied()
+                                    .collect();
+                                if changed.len() == 1 {
+                                    *self.anchor = changed.first().copied();
+                                }
+                            }
+                        }
+                        *self.selected = selection;
+                        *self.selection_changed = true;
+                        *self.error = None;
+                        self.json_drafts.clear();
+                    }
+                }
+            });
+    }
+
+    fn show_properties(&mut self, ui: &mut egui::Ui) {
+        if self.selected.is_empty() {
+            ui.label("Select an instance to inspect its properties.");
+        }
+        if let Some(error) = self.error.as_deref() {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("properties")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for field in properties_for_selection(self.selected, self.workspace) {
+                    let mut value = field.property.value.clone();
+                    if let PropertyValue::Json(json) = &mut value
+                        && let Some(draft) = self.json_drafts.get(&field.property.path)
+                    {
+                        json.clone_from(draft);
+                    }
+                    let changed = ui
+                        .push_id(&field.property.path, |ui| {
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(&field.property.path);
+                                    if field.mixed {
+                                        ui.weak("mixed");
+                                    }
+                                });
+                                ui.add_enabled_ui(field.property.editable, |ui| {
+                                    edit_value(ui, &mut value)
+                                })
+                                .inner
+                            })
+                            .inner
+                        })
+                        .inner;
+                    if changed {
+                        let path = field.property.path;
+                        if let PropertyValue::Json(json) = &value {
+                            self.json_drafts.insert(path.clone(), json.clone());
+                        }
+                        *self.error =
+                            edit_selection_property(self.workspace, self.selected, &path, value)
+                                .err()
+                                .map(|error| error.to_string());
+                        if self.error.is_none() {
+                            self.json_drafts.remove(&path);
+                        }
+                    }
+                }
+            });
+    }
+}
+
+fn default_dock_state() -> DockState<DevtoolsTab> {
+    let mut state = DockState::new(vec![DevtoolsTab::Explorer]);
+    state
+        .main_surface_mut()
+        .split_below(NodeIndex::root(), 0.55, vec![DevtoolsTab::Properties]);
+    state
+}
+
+fn properties_for_selection(
+    selected: &[InstanceId],
+    workspace: &Workspace,
+) -> Vec<SelectionProperty> {
+    let mut instances = selected.iter().filter_map(|&id| resolve(workspace, id));
+    let Some(first) = instances.next() else {
+        return Vec::new();
+    };
+    let mut properties: Vec<_> = first
+        .properties()
+        .into_iter()
+        .map(|property| SelectionProperty {
+            property,
+            mixed: false,
+        })
+        .collect();
+    for instance in instances {
+        let other = instance.properties();
+        properties.retain_mut(|field| {
+            let Some(value) = other.iter().find(|property| {
+                property.path == field.property.path
+                    && compatible(&property.value, &field.property.value)
+            }) else {
+                return false;
+            };
+            field.mixed |= value.value != field.property.value;
+            field.property.editable &= value.editable;
+            true
+        });
+    }
+    properties
+}
+
+fn edit_selection_property(
+    workspace: &mut Workspace,
+    selected: &[InstanceId],
+    path: &str,
+    value: PropertyValue,
+) -> Result<(), PropertyError> {
+    let Some(property) = properties_for_selection(selected, workspace)
+        .into_iter()
+        .find(|property| property.property.path == path && property.property.editable)
+    else {
+        return Err(PropertyError::NotFound);
+    };
+    if !compatible(&property.property.value, &value) {
+        return Err(PropertyError::InvalidValue);
+    }
+    for &id in selected {
+        resolve(workspace, id)
+            .ok_or(PropertyError::NotFound)?
+            .validate_property(path, &value)?;
+    }
+    for &id in selected {
+        resolve_mut(workspace, id)
+            .ok_or(PropertyError::NotFound)?
+            .set_property(path, value.clone())?;
+    }
+    Ok(())
+}
+
 fn show_development_notice(context: &egui::Context) {
     egui::Area::new(egui::Id::new("terrarium_development_notice"))
         .order(egui::Order::Foreground)
         .interactable(false)
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
         .show(context, |ui| {
-            ui.colored_label(
-                egui::Color32::RED,
-                "Development build: Press F12 to enable DevTools",
+            ui.add(
+                egui_text_outline::OutlinedLabel::new(
+                    "Development build: Press F12 to enable DevTools",
+                )
+                .text_color(egui::Color32::RED)
+                .outline(egui::Stroke::new(1.5, egui::Color32::BLACK)),
             );
         });
 }
@@ -368,41 +543,44 @@ fn compatible(a: &PropertyValue, b: &PropertyValue) -> bool {
     }
 }
 
-fn tree(
-    ui: &mut egui::Ui,
+fn build_tree(
+    builder: &mut egui_ltreeview::TreeViewBuilder<'_, InstanceId>,
     instance: &dyn Instance,
-    selection: &[InstanceId],
-    order: &mut Vec<InstanceId>,
-    click: &mut Option<(InstanceId, egui::Modifiers)>,
     root: bool,
 ) {
-    order.push(instance.id());
     let label = format!("{} ({})", instance.name(), instance.class_name());
-    let id = ui.make_persistent_id(instance.id());
-    let mut row = |ui: &mut egui::Ui| {
-        let response = ui.selectable_label(selection.contains(&instance.id()), &label);
-        if response.clicked() {
-            response.surrender_focus();
-            *click = Some((instance.id(), ui.input(|input| input.modifiers)));
-        }
-    };
     if instance.children().is_empty() {
-        ui.horizontal(|ui| {
-            ui.add_space(ui.spacing().indent);
-            row(ui);
-        });
+        let icon = icon_for_instance(instance);
+        builder.node(
+            NodeBuilder::leaf(instance.id())
+                .icon(move |ui| {
+                    ui.label(icon);
+                })
+                .label(label),
+        );
     } else {
-        let header =
-            egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, root)
-                .show_header(ui, row);
-        let open = header.is_open();
-        header.body(|ui| {
-            if open {
-                for child in instance.children() {
-                    tree(ui, child.as_ref(), selection, order, click, false);
-                }
+        let is_open = builder.node(
+            NodeBuilder::dir(instance.id())
+                .default_open(root)
+                .icon(|ui| {
+                    ui.label(devtools_icons::regular::FOLDER);
+                })
+                .label(label),
+        );
+        if is_open {
+            for child in instance.children() {
+                build_tree(builder, child.as_ref(), false);
             }
-        });
+        }
+        builder.close_dir();
+    }
+}
+
+fn icon_for_instance(instance: &dyn Instance) -> &'static str {
+    match instance.class_name() {
+        "Camera" => devtools_icons::regular::CAMERA,
+        "PointLight" | "SpotLight" | "SurfaceLight" => devtools_icons::regular::LIGHTBULB,
+        _ => devtools_icons::regular::CUBE,
     }
 }
 

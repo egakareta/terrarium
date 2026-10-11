@@ -792,10 +792,13 @@ impl<'a> Terrarium<'a> {
         let app_engine_slot = engine_slot.clone();
         let app_creator: eframe::AppCreator<'static> = Box::new(move |creation_context| {
             #[cfg(feature = "default-fonts")]
-            if is_bundled_fonts {
-                creation_context
-                    .egui_ctx
-                    .set_fonts(trfont::font_definitions());
+            let font_definitions = is_bundled_fonts.then(trfont::font_definitions);
+            #[cfg(not(feature = "default-fonts"))]
+            let font_definitions: Option<egui::FontDefinitions> = None;
+            if let Some(mut font_definitions) = font_definitions {
+                #[cfg(feature = "default-fonts")]
+                egui_phosphor::add_to_fonts(&mut font_definitions, egui_phosphor::Variant::Regular);
+                creation_context.egui_ctx.set_fonts(font_definitions);
             }
             configure_egui_style(&creation_context.egui_ctx);
             let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;

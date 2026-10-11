@@ -20,7 +20,6 @@ default = [
   "default-materials",
   "default-skybox",
   "dx12",
-  "eframe-default-fonts", # you usually want this since this also comes with emojis
   "flac",
   "gles",
   "meshpart",

@@ -16,6 +16,7 @@ eframe = { version = "0.36", default-features = false, features = [
   "wgpu_no_default_features",
   "wayland",
 ] }
+egui-phosphor = { version = "0.14", features = ["subset"] }
 env_logger = "0.11"
 log = "0.4"
 slotmap = "1"

@@ -2,6 +2,7 @@
 #![doc = include_str!("../README.md")]
 
 pub use eframe::{self, egui, egui_wgpu, wgpu};
+pub use egui_phosphor;
 #[cfg(feature = "devtools")]
 pub use trdevtools;
 pub use trfont;

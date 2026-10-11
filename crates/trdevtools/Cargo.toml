@@ -9,6 +9,10 @@ license.workspace = true
 
 [dependencies]
 egui = "0.36"
+egui-text-outline = { workspace = true }
+egui_dock = "0.21"
+egui-phosphor = { version = "0.14", default-features = false, features = ["subset"] }
+egui_ltreeview = "0.9"
 trscene = { workspace = true, features = ["devtools"] }
 
 [dev-dependencies]
