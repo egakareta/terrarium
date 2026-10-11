@@ -312,10 +312,14 @@ impl InstanceId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, terrarium_macros::InstanceProperties)]
 pub(crate) struct InstanceData {
+    /// The display name changed.
+    #[instance_property(Name)]
     name: String,
     id: InstanceId,
+    /// The direct parent changed.
+    #[instance_property(Parent)]
     parent: Option<InstanceId>,
     children: Vec<Box<dyn Instance>>,
     sibling_index: usize,

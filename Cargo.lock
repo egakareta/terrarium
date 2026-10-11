@@ -4218,6 +4218,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slotmap",
+ "terrarium-macros",
  "thiserror 2.0.21",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -4225,6 +4226,15 @@ dependencies = [
  "web-time",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "terrarium-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

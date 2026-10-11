@@ -7,13 +7,21 @@ use crate::{
 ///
 /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
 /// [`Part`] builds on it with a primitive shape and material.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, terrarium_macros::InstanceProperties)]
 pub struct BasePart {
     pub(crate) instance: InstanceData,
     pub(crate) pv_instance: PVInstance,
+    /// The part's tint changed.
+    #[instance_property(Color)]
     color: Color3,
+    /// The part's transparency changed.
+    #[instance_property(Transparency)]
     transparency: f32,
+    /// The part's anchored state changed.
+    #[instance_property(Anchored)]
     anchored: bool,
+    /// The part's collision setting changed.
+    #[instance_property(CanCollide)]
     can_collide: bool,
 }
 
@@ -304,10 +312,14 @@ impl<T: HasMaterials + ?Sized> HasMaterials for &mut T {
 }
 
 /// A visible scene object rendered with one of the built-in primitive shapes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, terrarium_macros::InstanceProperties)]
 pub struct Part {
     basepart: BasePart,
+    /// The primitive shape changed.
+    #[instance_property(Shape)]
     shape: PartShape,
+    /// A material was assigned through the part's material setters.
+    #[instance_property(Material)]
     pub(crate) material_slots: MeshMaterialSlots,
 }
 

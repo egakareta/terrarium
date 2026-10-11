@@ -3,6 +3,10 @@ name = "terrarium"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["terrarium-macros"]
+resolver = "3"
+
 [[example]]
 name = "bevy"
 required-features = ["bevy"]
@@ -32,6 +36,7 @@ name = "gpu"
 required-features = ["meshpart"]
 
 [dependencies]
+terrarium-macros = { path = "terrarium-macros" }
 base64 = { version = "0.23", optional = true }
 basisu = { version = "0.1", default-features = false, features = ["std"], optional = true }
 bevy_app = { version = "0.20", features = ["web"], optional = true }

@@ -6,8 +6,10 @@ use crate::{
 };
 
 /// An object that has a physical location in the world.
-#[derive(Debug)]
+#[derive(Debug, terrarium_macros::InstanceProperties)]
 pub struct PVInstance {
+    /// The world transform, including position, orientation, or scale, changed.
+    #[instance_property(Transform)]
     pivot: Mat4,
     pub(crate) signals: Option<InstanceSignals>,
 }

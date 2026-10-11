@@ -11,45 +11,27 @@ use crate::{
 
 /// An instance property supported by change notifications.
 ///
+/// Identifiers are generated from fields annotated with `#[instance_property(...)]`.
 /// Built-in setters emit coalesced invalidations: read the latest value when
 /// handling one. Direct edits to public material-slot storage are not observed.
 /// Custom metadata uses the separate attribute signals.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum InstanceProperty {
-    /// The display name changed.
-    Name,
-    /// The direct parent changed.
-    Parent,
-    /// The world transform, including position, orientation, or scale, changed.
-    Transform,
-    /// The part's tint changed.
-    Color,
-    /// The part's transparency changed.
-    Transparency,
-    /// The part's anchored state changed.
-    Anchored,
-    /// The part's collision setting changed.
-    CanCollide,
-    /// The primitive shape changed.
-    Shape,
-    /// A material was assigned through a part's material setters.
-    Material,
-}
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct InstanceProperty(&'static str);
 
 impl InstanceProperty {
+    #[doc(hidden)]
+    pub(crate) const fn from_static_name(name: &'static str) -> Self {
+        Self(name)
+    }
+
     fn key(self) -> &'static str {
-        match self {
-            Self::Name => "name",
-            Self::Parent => "parent",
-            Self::Transform => "transform",
-            Self::Color => "color",
-            Self::Transparency => "transparency",
-            Self::Anchored => "anchored",
-            Self::CanCollide => "can_collide",
-            Self::Shape => "shape",
-            Self::Material => "material",
-        }
+        self.0
+    }
+}
+
+impl std::fmt::Debug for InstanceProperty {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
     }
 }
 
