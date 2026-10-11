@@ -9,7 +9,6 @@ use slotmap::Key;
 
 use crate::{Workspace, egui_wgpu};
 
-mod scene;
 #[cfg(feature = "meshpart")]
 mod viewport;
 
@@ -69,7 +68,7 @@ impl RenderAdapter {
         workspace: &Workspace,
         size: [u32; 2],
     ) -> Result<(), RendererError> {
-        let scene = scene::build_render_scene(workspace);
+        let scene = workspace.render_scene();
         self.backend.prepare(&scene, size)
     }
 

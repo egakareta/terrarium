@@ -4,7 +4,7 @@ fn main() {
     Terrarium::new()
         .run(|engine| {
             let helmet_mesh = engine.add_mesh(include_bytes!(
-                "../crates/terrarium/fixtures/DamagedHelmet.glb"
+                "../crates/trscene/fixtures/DamagedHelmet.glb"
             ))?;
 
             engine.add_child(

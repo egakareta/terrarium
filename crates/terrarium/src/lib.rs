@@ -48,29 +48,26 @@ pub mod cookbook {
 
 // re-exports
 pub use eframe::{self, egui, egui_wgpu, wgpu};
-#[cfg(feature = "sound")]
-pub use euphorium;
 pub use glam;
+#[cfg(feature = "sound")]
+pub use trscene::euphorium;
 #[cfg(feature = "physics")]
-pub use rapier3d;
+pub use trscene::rapier3d;
 pub use winit;
 
 // actual stuff
 #[cfg(feature = "bevy")]
 pub mod bevy;
 mod engine;
-mod instance;
-mod interpolation;
 mod render_adapter;
-mod scene;
 
 pub use engine::*;
-pub use instance::*;
-pub use interpolation::*;
 pub use render_adapter::*;
-pub use scene::*;
 #[cfg(feature = "clipboard")]
 pub use trclipboard::*;
 #[cfg(feature = "persistence")]
 pub use trpersistence::*;
 pub use trrender::*;
+#[cfg(any(feature = "physics", feature = "sound"))]
+pub use trscene::scene::*;
+pub use trscene::{instance::*, interpolation::*};

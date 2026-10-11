@@ -82,7 +82,7 @@ impl RenderAdapter {
         let size = viewport.size;
         let viewport_id = viewport.workspace.id().data().as_ffi();
         self.ensure_viewport_target(viewport_id, size, render_state);
-        let scene = scene::build_render_scene(&viewport.workspace);
+        let scene = viewport.workspace.render_scene();
         let target = self
             .viewport_targets
             .get(&viewport_id)

@@ -1,3 +1,5 @@
+//! Optional workspace physics and audio integrations.
+
 #[cfg(feature = "sound")]
 pub(crate) mod audio;
 #[cfg(feature = "physics")]

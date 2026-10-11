@@ -3,9 +3,8 @@ use std::{collections::VecDeque, time::Duration};
 use euphorium::{
     EmitterState, PlaybackState, SoundSource, Soundscape, SoundscapeError, SpatialSound,
 };
-use glam::Vec3;
 
-use crate::{Instance, InstanceData, InstanceId, scene::audio::velocity};
+use crate::{Instance, InstanceData, InstanceId, glam::Vec3, scene::audio::velocity};
 
 #[derive(Clone, Debug, PartialEq)]
 struct SoundSettings {

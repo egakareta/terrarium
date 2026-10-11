@@ -4208,20 +4208,15 @@ dependencies = [
  "console_error_panic_hook",
  "eframe",
  "env_logger",
- "euphorium",
  "getrandom 0.4.3",
  "glam 0.34.1",
- "gltf",
  "log",
  "pollster",
- "rapier3d",
- "serde",
- "serde_json",
  "slotmap",
- "thiserror 2.0.21",
  "trclipboard",
  "trpersistence",
  "trrender",
+ "trscene",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -4404,6 +4399,24 @@ dependencies = [
  "glam 0.34.1",
  "image",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "trscene"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "egui",
+ "euphorium",
+ "gltf",
+ "log",
+ "rapier3d",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "thiserror 2.0.21",
+ "trrendert",
+ "winit",
 ]
 
 [[package]]

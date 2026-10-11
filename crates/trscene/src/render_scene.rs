@@ -4,7 +4,7 @@ use crate::{
     BasePart, Camera, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart,
     HasPointLight, HasSpotLight, HasSurfaceLight, Instance, InstanceId, Outline, Part, PointLight,
     RenderCamera, RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode,
-    RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace,
+    RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace, glam,
 };
 #[cfg(feature = "meshpart")]
 use crate::{HasMeshPart, MeshPart};
@@ -169,19 +169,22 @@ fn render_outline(workspace: &Workspace, outline: &Outline) -> Option<RenderOutl
     })
 }
 
-pub(super) fn build_render_scene(workspace: &Workspace) -> RenderScene<'_> {
-    RenderScene {
-        id: render_id(workspace.id()),
-        structure_revision: workspace.lookup.generation(),
-        camera: render_camera(&workspace.current_camera),
-        lighting: &workspace.lighting,
-        nodes: workspace
-            .children()
-            .iter()
-            .map(|child| render_node(workspace, child.as_ref(), glam::Mat4::IDENTITY))
-            .collect(),
-        outlines: render_outlines(workspace),
-        textures: workspace.render_textures().collect(),
+impl Workspace {
+    /// Builds a borrowed render snapshot from the current workspace state.
+    pub fn render_scene(&self) -> RenderScene<'_> {
+        RenderScene {
+            id: render_id(self.id()),
+            structure_revision: self.lookup.generation(),
+            camera: render_camera(&self.current_camera),
+            lighting: &self.lighting,
+            nodes: self
+                .children()
+                .iter()
+                .map(|child| render_node(self, child.as_ref(), glam::Mat4::IDENTITY))
+                .collect(),
+            outlines: render_outlines(self),
+            textures: self.render_textures().collect(),
+        }
     }
 }
 

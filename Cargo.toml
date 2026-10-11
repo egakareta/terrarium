@@ -16,9 +16,16 @@ members = [
   "crates/trclipboard/",
   "crates/trpersistence/",
   "crates/trrender/",
+  "crates/trscene/",
   "crates/trrendert/",
 ]
-default-members = [".", "crates/terrarium/", "crates/trrender/", "crates/trrendert/"]
+default-members = [
+  ".",
+  "crates/terrarium/",
+  "crates/trrender/",
+  "crates/trscene/",
+  "crates/trrendert/",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -33,6 +40,7 @@ terrarium = { path = "crates/terrarium/" }
 trclipboard = { path = "crates/trclipboard/" }
 trpersistence = { path = "crates/trpersistence/" }
 trrender = { path = "crates/trrender/" }
+trscene = { path = "crates/trscene/" }
 trrendert = { path = "crates/trrendert/" }
 
 [[example]]

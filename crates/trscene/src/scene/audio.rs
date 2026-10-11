@@ -4,14 +4,13 @@ use euphorium::{
     HrtfProfile, ListenerState, Output, Soundscape, SoundscapeError, SpatialAudioSettings,
     SpatialRenderer,
 };
-use glam::Vec3;
 use thiserror::Error;
 
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
     BasePart, Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Part, Sound,
-    Workspace,
+    Workspace, glam::Vec3,
 };
 
 /// A failure discovered while updating the workspace's audio scene.
@@ -288,8 +287,8 @@ mod tests {
         let mut workspace = Workspace::new();
         let outer = workspace.add_child_ref(Part::new().with_position(Vec3::splat(100.0)));
         let inner = outer.add_child_ref(BasePart::new().with_pose(
-            glam::Mat4::from_rotation_translation(
-                glam::Quat::from_rotation_y(FRAC_PI_2),
+            crate::glam::Mat4::from_rotation_translation(
+                crate::glam::Quat::from_rotation_y(FRAC_PI_2),
                 Vec3::new(3.0, 2.0, 1.0),
             ),
         ));

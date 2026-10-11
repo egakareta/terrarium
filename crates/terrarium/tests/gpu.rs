@@ -17,7 +17,8 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
-            let mesh = engine.add_mesh(include_bytes!("../fixtures/DamagedHelmet.glb"))?;
+            let mesh =
+                engine.add_mesh(include_bytes!("../../trscene/fixtures/DamagedHelmet.glb"))?;
             engine.add_child(MeshPart::new(mesh).with_position(Vec3::new(0.0, 0.75, 0.0)));
             Ok::<(), AppCreationError>(())
         })?

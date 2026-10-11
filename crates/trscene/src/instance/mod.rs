@@ -1,3 +1,5 @@
+//! Scene instance types and workspace management.
+
 use std::{
     any::Any,
     cell::{Cell, RefCell},

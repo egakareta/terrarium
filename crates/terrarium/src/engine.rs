@@ -126,7 +126,7 @@ fn default_headless_render_state(
 // thread and let the Send + Sync callback carry only an index into this thread-local registry.
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    static RENDERERS: RefCell<Vec<Option<Weak<RefCell<Renderer>>>>>
+    static RENDERERS: RefCell<Vec<Option<Weak<RefCell<RenderAdapter>>>>>
         = const { RefCell::new(Vec::new()) };
 }
 

@@ -29,18 +29,13 @@ eframe = { version = "0.36", default-features = false, features = [
   "wayland",
 ] }
 env_logger = "0.11"
-euphorium = { version = "0.6", default-features = false, optional = true }
 glam = { version = "0.34", default-features = false, features = ["std"] }
-gltf = { version = "1", optional = true }
 log = "0.4"
-rapier3d = { version = "0.36", optional = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 slotmap = "1"
-thiserror = "2"
 trclipboard = { workspace = true, optional = true }
 trpersistence = { workspace = true, optional = true }
 trrender = { workspace = true }
+trscene = { workspace = true }
 wgpu = { version = "30", default-features = false, features = ["std"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
 
@@ -83,27 +78,26 @@ default = [
 bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 clipboard = ["dep:trclipboard"]
 default-fonts = []
-default-materials = ["trrender/default-materials"]
-default-skybox = ["trrender/default-skybox"]
-meshpart = ["dep:gltf"]
 persistence = ["dep:trpersistence"]
-physics = ["dep:rapier3d"]
-sound = ["dep:euphorium"]
 
 # you usually want this since this also comes with emojis
 eframe-default-fonts = ["eframe/default_fonts"]
 
-# audio
-# <forward euphorium exclude="parking_lot_core">
-asio = ["euphorium?/asio"]
-cli = ["euphorium?/cli"]
-flac = ["euphorium?/flac"]
-jack = ["euphorium?/jack"]
-mp3 = ["euphorium?/mp3"]
-mp4 = ["euphorium?/mp4"]
-nightly = ["euphorium?/nightly"]
-vorbis = ["euphorium?/vorbis"]
-wav = ["euphorium?/wav"]
+# <forward trscene>
+asio = ["trscene/asio"]
+cli = ["trscene/cli"]
+default-materials = ["trscene/default-materials"]
+default-skybox = ["trscene/default-skybox"]
+flac = ["trscene/flac"]
+jack = ["trscene/jack"]
+meshpart = ["trscene/meshpart"]
+mp3 = ["trscene/mp3"]
+mp4 = ["trscene/mp4"]
+nightly = ["trscene/nightly"]
+physics = ["trscene/physics"]
+sound = ["trscene/sound"]
+vorbis = ["trscene/vorbis"]
+wav = ["trscene/wav"]
 # </forward>
 
 # 3d graphics

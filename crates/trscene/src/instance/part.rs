@@ -318,10 +318,8 @@ impl HasMaterials for Part {
 
 #[cfg(test)]
 mod tests {
-    use glam::{EulerRot, Quat, Vec3};
-
     use super::*;
-    use crate::glam::Mat4;
+    use crate::glam::{EulerRot, Mat4, Quat, Vec3};
 
     #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {

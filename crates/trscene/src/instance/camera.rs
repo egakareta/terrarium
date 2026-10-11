@@ -1,5 +1,5 @@
 use crate::{
-    HasPVInstance, InstanceData, InstanceId, PVInstance,
+    HasPVInstance, InstanceData, InstanceId, PVInstance, glam,
     glam::{Mat4, Quat, Vec3},
     winit::{
         event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
