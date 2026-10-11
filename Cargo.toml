@@ -36,12 +36,12 @@ repository = "https://github.com/egakareta/terrarium"
 license = "MIT"
 
 [workspace.dependencies]
-terrarium = { path = "crates/terrarium/" }
-trclipboard = { path = "crates/trclipboard/" }
-trpersistence = { path = "crates/trpersistence/" }
-trrender = { path = "crates/trrender/" }
-trscene = { path = "crates/trscene/" }
-trrendert = { path = "crates/trrendert/" }
+terrarium = { version = "0.1", path = "crates/terrarium/" }
+trclipboard = { version = "0.1", path = "crates/trclipboard/" }
+trpersistence = { version = "0.1", path = "crates/trpersistence/" }
+trrender = { version = "0.1", path = "crates/trrender/" }
+trscene = { version = "0.1", path = "crates/trscene/" }
+trrendert = { version = "0.1", path = "crates/trrendert/" }
 
 [[example]]
 name = "bevy"
