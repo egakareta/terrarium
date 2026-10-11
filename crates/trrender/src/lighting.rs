@@ -1,4 +1,6 @@
-use crate::{Color3, Skybox, glam::Vec3};
+use glam::Vec3;
+
+use crate::{Color3, Skybox};
 
 /// The high-level lighting model used by a [`Lighting`] configuration.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -262,16 +264,32 @@ impl Lighting {
         base_sun_direction(wrap_clock_time(hours))
     }
 
-    /// Returns the sun direction for the current clock and latitude.
-    pub(crate) fn render_sun_direction(&self) -> Vec3 {
-        self.sun_direction()
-    }
-
     /// Returns the fraction of direct sunlight visible above the horizon.
     pub(crate) fn daylight_factor(&self) -> f32 {
         let height = self.sun_direction().y;
         let normalized = ((height + 0.12) / 0.42).clamp(0.0, 1.0);
         normalized * normalized * (3.0 - 2.0 * normalized)
+    }
+
+    pub(crate) fn render_direct_scale(&self) -> f32 {
+        let style_scale = match self.lighting_style {
+            LightingStyle::Realistic => 1.0,
+            LightingStyle::Soft => 0.72,
+        };
+        let brightness = if self.brightness.is_finite() {
+            self.brightness.max(0.0)
+        } else {
+            0.0
+        };
+        brightness * 1.5 * self.daylight_factor() * style_scale
+    }
+
+    pub(crate) fn render_exposure(&self) -> f32 {
+        if self.exposure_compensation.is_finite() {
+            self.exposure_compensation.clamp(-16.0, 16.0).exp2()
+        } else {
+            1.0
+        }
     }
 
     /// Returns whether the configured renderer should sample directional

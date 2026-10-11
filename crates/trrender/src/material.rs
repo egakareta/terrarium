@@ -6,15 +6,13 @@ use thiserror::Error;
 use super::BuiltinMaterial;
 use crate::{Color3, Face};
 
-/// Depth-stencil format used by the built-in renderer.
-pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
 /// Number of directional material slots available to a mesh.
 pub const MATERIAL_SLOT_COUNT: usize = Face::ALL.len();
 
-/// A handle to a texture stored in a [`crate::Workspace`].
+/// A handle to a texture stored in a renderer host's asset collection.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TextureHandle(
-    /// Index into the CPU texture storage owned by a [`crate::Workspace`].
+    /// Index into the CPU texture storage owned by the renderer host.
     pub usize,
 );
 
@@ -31,14 +29,12 @@ pub struct TextureSet {
     pub emissive: Option<TextureHandle>,
 }
 
-/// PBR factors and optional texture maps used by a [`crate::Part`].
+/// PBR factors and optional texture maps used by a renderable surface.
 ///
 /// The metallic-roughness map follows the glTF convention: metallic is read
 /// from the blue channel and roughness from the green channel. Scalar factors
 /// are resolved per face, so each directional [`Face`] renders its own
 /// base color, metallic, roughness, and emissive values.
-///
-/// Note that [`crate::HasBasePart::color`] still multiplies every face.
 ///
 /// Texture sampling for each slot uses that slot's [`Material::filter`] and
 /// [`Material::projection`].
@@ -61,7 +57,8 @@ impl Default for Material {
     }
 }
 
-pub(crate) const DEFAULT_MATERIAL: Material = Material {
+/// The default material used when a surface has no material override.
+pub const DEFAULT_MATERIAL: Material = Material {
     base_color: [1.0, 1.0, 1.0, 1.0],
     metallic: 0.0,
     roughness: 0.5,
@@ -101,11 +98,14 @@ impl Material {
     }
 
     #[cfg(feature = "default-materials")]
-    pub(crate) fn builtin_material(&self) -> Option<BuiltinMaterial> {
+    /// Returns the built-in material source, if this material uses one.
+    #[cfg(feature = "default-materials")]
+    pub fn builtin_material(&self) -> Option<BuiltinMaterial> {
         self.builtin
     }
 
-    pub(crate) fn has_texture_maps(&self) -> bool {
+    /// Returns whether this material references any texture maps.
+    pub fn has_texture_maps(&self) -> bool {
         #[cfg(feature = "default-materials")]
         if self.builtin.is_some() {
             return true;

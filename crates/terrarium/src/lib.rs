@@ -61,18 +61,16 @@ pub mod bevy;
 mod engine;
 mod instance;
 mod interpolation;
-#[cfg(feature = "persistence")]
-mod persistence;
-mod primitive;
-mod renderer;
+mod render_adapter;
 mod scene;
 
 pub use engine::*;
 pub use instance::*;
 pub use interpolation::*;
-#[cfg(feature = "persistence")]
-pub use persistence::*;
-pub use primitive::*;
-pub use renderer::*;
+pub use render_adapter::*;
 pub use scene::*;
-pub use trclipboard::{Clipboard, ClipboardError};
+#[cfg(feature = "clipboard")]
+pub use trclipboard::*;
+#[cfg(feature = "persistence")]
+pub use trpersistence::*;
+pub use trrender::*;

@@ -1,46 +1,38 @@
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::Mutex;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 #[cfg(target_arch = "wasm32")]
 use std::{cell::RefCell, rc::Rc};
 
 use bytemuck::{Pod, Zeroable};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use thiserror::Error;
-use web_time::Instant;
 
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
-#[cfg(feature = "meshpart")]
-use crate::egui;
-use crate::{
-    BasePart, Camera, Color3, Face, Instance, InstanceId, Mesh, OutlineMode, Part, PartShape,
-    PointLight, Skybox, SkyboxError, SpotLight, SurfaceLight, Vertex, Workspace,
-    glam::{Mat4, Vec3, Vec4},
-    wgpu::util::DeviceExt,
-};
 #[cfg(feature = "default-materials")]
-mod builtin_material;
+use crate::BuiltinMaterial;
+use crate::{
+    Color3, DEFAULT_MATERIAL, Face, Image, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
+    OutlineMode, PartShape, RenderCamera, RenderGeometry, RenderLight, RenderLightKind,
+    RenderScene, Skybox, SkyboxError, Texture, TextureColorSpace, TextureError, TextureFilter,
+    TextureHandle, TextureProjection, Vertex,
+};
+
+/// Depth-stencil format used by the built-in renderer.
+pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+use glam::{Mat4, Vec3, Vec4};
+use web_time::Instant;
+use wgpu::util::DeviceExt;
 mod frame;
 mod helpers;
 mod init;
 mod lighting;
-mod material;
 mod mesh;
 mod scene;
 mod skybox;
-mod texture;
-#[cfg(feature = "meshpart")]
-mod viewport;
-#[cfg(feature = "default-materials")]
-pub use builtin_material::*;
-use helpers::*;
-use lighting::*;
-pub use material::*;
-#[cfg(feature = "meshpart")]
-pub use viewport::*;
 #[cfg(test)]
 mod tests;
+mod texture;
+use helpers::*;
+use lighting::*;
 
 const MAX_SHADOW_MAP_SIZE: u32 = 3072;
 const MIN_SHADOW_MAP_SIZE: u32 = 256;
@@ -60,11 +52,6 @@ const LOCAL_SHADOW_MAP_SIZE: u32 = 1024;
 const LOCAL_SHADOW_VISIBILITY_OFFSET: usize = SHADOW_CASCADE_COUNT + 1;
 const LOCAL_LIGHT_DERIVED_RANGE: f32 = 24.0;
 const LOCAL_LIGHT_MAX_RANGE: f32 = 100.0;
-// Keep native backend code loaded until thread-local driver state is gone.
-#[cfg(not(target_arch = "wasm32"))]
-static WGPU_INSTANCE_KEEPALIVE: OnceLock<wgpu::Instance> = OnceLock::new();
-const VISIBILITY_MASK_COUNT: usize = 1 << (SHADOW_CASCADE_COUNT + 1);
-const CULL_GROUP_SIZE: usize = 64;
 const SHADOW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth16Unorm;
 const SHADOW_DISTANCE: f32 = 80.0;
 const SHADOW_CASTER_MARGIN: f32 = 20.0;
@@ -92,7 +79,7 @@ impl RendererShaders {
             blit: create("outline composite shader", include_str!("blit.wgsl")),
             outline: create("outline geometry shader", include_str!("outline.wgsl")),
             skybox: create("skybox shader", include_str!("skybox.wgsl")),
-            copy: create("eframe scene composite shader", include_str!("copy.wgsl")),
+            copy: create("scene composite shader", include_str!("copy.wgsl")),
         }
     }
 }
@@ -294,15 +281,6 @@ struct OutlineRenderBatch {
     instance_start: usize,
 }
 
-struct PartCandidate<'a> {
-    part: &'a Part,
-    pivot: Mat4,
-    center: Vec3,
-    radius: f32,
-    visibility_mask: u16,
-    transparent: bool,
-}
-
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct LocalLightRaw {
@@ -326,19 +304,18 @@ struct LocalLightCandidate {
     raw: LocalLightRaw,
     shadow_view_projections: [Mat4; 6],
     shadow_layer_count: usize,
-    shadow_excluded_caster: InstanceId,
+    shadow_excluded_caster: u64,
     score: f32,
 }
 
 #[derive(Clone, Copy)]
 struct LightParent {
-    id: InstanceId,
     transform: Mat4,
 }
 
 struct PreparedLocalShadows {
     planes: [[Vec4; 6]; MAX_LOCAL_SHADOW_LAYERS],
-    excluded_casters: [Option<InstanceId>; MAX_LOCAL_SHADOW_LAYERS],
+    excluded_casters: [Option<u64>; MAX_LOCAL_SHADOW_LAYERS],
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -459,9 +436,8 @@ struct GpuMesh {
     index_count: u32,
 }
 
-#[cfg(feature = "meshpart")]
 #[derive(Clone, Copy)]
-struct CachedMeshPart {
+struct CachedCustomMesh {
     revision: u64,
     handle: GpuMeshHandle,
 }
@@ -513,7 +489,7 @@ const SKYBOX_INDICES: [u16; 36] = [
     0, 4, 5, 0, 5, 1, // bottom (-Y)
 ];
 
-struct EframeSceneTarget {
+struct OutputTarget {
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
     format: wgpu::TextureFormat,
@@ -532,17 +508,7 @@ struct WebPixelReadbackState {
     in_flight_generation: Option<u64>,
 }
 
-#[cfg(feature = "meshpart")]
-struct ViewportTarget {
-    _color_texture: wgpu::Texture,
-    color_view: wgpu::TextureView,
-    _depth_texture: wgpu::Texture,
-    depth_view: wgpu::TextureView,
-    size: [u32; 2],
-    texture_id: Option<egui::TextureId>,
-}
-
-/// The eframe WGPU state and built-in PBR mesh pipeline.
+/// A WGPU renderer for borrowed [`RenderScene`] snapshots.
 pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -569,11 +535,9 @@ pub struct Renderer {
     silhouette_mask_pipeline: wgpu::RenderPipeline,
     stencil_mask_pipeline: wgpu::RenderPipeline,
     stencil_outline_pipeline: wgpu::RenderPipeline,
-    eframe_scene: EframeSceneTarget,
+    output: OutputTarget,
     #[cfg(target_arch = "wasm32")]
     web_pixel_readback: Rc<RefCell<WebPixelReadbackState>>,
-    #[cfg(feature = "meshpart")]
-    viewport_targets: HashMap<InstanceId, ViewportTarget>,
     skybox_pipeline: wgpu::RenderPipeline,
     skybox_bind_group_layout: wgpu::BindGroupLayout,
     skybox_uniform_buffer: wgpu::Buffer,
@@ -583,7 +547,7 @@ pub struct Renderer {
     skybox_texture: Option<wgpu::Texture>,
     skybox_view: Option<wgpu::TextureView>,
     skybox_bind_group: Option<wgpu::BindGroup>,
-    skybox_revision: Option<(InstanceId, u64)>,
+    skybox_revision: Option<(u64, u64)>,
     camera_buffer: wgpu::Buffer,
     local_lights_buffer: wgpu::Buffer,
     outline_uniform_buffer: wgpu::Buffer,
@@ -613,7 +577,7 @@ pub struct Renderer {
     /// base-material words instead of the full material-set key.
     material_factor_last_uniform: Option<([u32; 10], u32)>,
     textures: Vec<GpuTexture>,
-    workspace_texture_handles: HashMap<(InstanceId, TextureHandle), (GpuTextureHandle, u64)>,
+    workspace_texture_handles: HashMap<(u64, TextureHandle), (GpuTextureHandle, u64)>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,
     #[cfg(feature = "default-materials")]
     builtin_material_textures: HashMap<BuiltinMaterial, MaterialTextures>,
@@ -625,10 +589,8 @@ pub struct Renderer {
     outline_instance_buffers: [wgpu::Buffer; 3],
     meshes: Vec<GpuMesh>,
     primitive_meshes: [GpuMeshHandle; PartShape::COUNT],
-    #[cfg(feature = "meshpart")]
-    meshpart_meshes: HashMap<InstanceId, CachedMeshPart>,
-    #[cfg(feature = "meshpart")]
-    free_meshpart_meshes: Vec<GpuMeshHandle>,
+    custom_meshes: HashMap<u64, CachedCustomMesh>,
+    free_custom_meshes: Vec<GpuMeshHandle>,
     clear_color: wgpu::Color,
     shadow_pass_enabled: bool,
     local_shadow_layer_count: usize,
@@ -646,6 +608,7 @@ pub struct Renderer {
             MaterialTextures,
             [TextureFilter; MATERIAL_SLOT_COUNT],
             u16,
+            bool,
         ),
         usize,
     >,

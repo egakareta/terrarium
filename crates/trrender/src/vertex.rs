@@ -1,6 +1,7 @@
 use bytemuck::{Pod, Zeroable};
+use glam::Vec3;
 
-use crate::{Face, glam::Vec3};
+use crate::Face;
 
 /// A vertex consumed by the built-in PBR pipeline.
 ///
@@ -61,7 +62,8 @@ impl Vertex {
         }
     }
 
-    pub(crate) fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
+    /// Returns the WGPU vertex-buffer layout used by the built-in mesh pipeline.
+    pub fn layout<'a>() -> wgpu::VertexBufferLayout<'a> {
         const ATTRIBUTES: &[wgpu::VertexAttribute] = &wgpu::vertex_attr_array![
         0 => Float32x3,
         1 => Float32x3,

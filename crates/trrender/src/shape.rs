@@ -1,9 +1,11 @@
+use glam::Vec3;
+
 use crate::{
-    Face, Vertex, glam::Vec3, push_quad_with_material_slot, push_quad_with_uv_and_material_slot,
+    Face, Vertex, push_quad_with_material_slot, push_quad_with_uv_and_material_slot,
     push_triangle_with_uv_and_material_slot, triangle_normal,
 };
 
-/// The primitive geometry available to a [`crate::Part`].
+/// Primitive geometry available to a renderable object.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum PartShape {
     #[default]
@@ -20,7 +22,8 @@ pub enum PartShape {
 }
 
 impl PartShape {
-    pub(crate) const ALL: [Self; 5] = [
+    /// Every primitive shape in renderer order.
+    pub const ALL: [Self; 5] = [
         Self::Block,
         Self::Ball,
         Self::Cylinder,
@@ -28,9 +31,11 @@ impl PartShape {
         Self::CornerWedge,
     ];
 
-    pub(crate) const COUNT: usize = Self::ALL.len();
+    /// Number of built-in primitive shapes.
+    pub const COUNT: usize = Self::ALL.len();
 
-    pub(crate) const fn index(self) -> usize {
+    /// Returns this shape's zero-based index in [`Self::ALL`].
+    pub const fn index(self) -> usize {
         match self {
             Self::Block => 0,
             Self::Ball => 1,
@@ -42,7 +47,8 @@ impl PartShape {
 
     /// Conservative bounding-sphere radius of the unit mesh centered at the
     /// origin, used for exact frustum culling.
-    pub(crate) const fn bounding_radius(self) -> f32 {
+    /// Returns a conservative bounding-sphere radius for the unit mesh.
+    pub const fn bounding_radius(self) -> f32 {
         match self {
             // Unit cube corners at (±0.5, ±0.5, ±0.5): sqrt(3)/2.
             Self::Block | Self::Wedge | Self::CornerWedge => 0.866_025_4,
@@ -53,7 +59,8 @@ impl PartShape {
         }
     }
 
-    pub(crate) fn mesh(self, color: [f32; 4]) -> Mesh {
+    /// Generates this primitive as a unit mesh with the supplied vertex tint.
+    pub fn mesh(self, color: [f32; 4]) -> Mesh {
         match self {
             Self::Block => Mesh::block(1.0, color),
             Self::Ball => Mesh::ball(0.5, 12, 18, color),
@@ -64,7 +71,7 @@ impl PartShape {
     }
 }
 
-/// CPU-side mesh data ready to be uploaded to a [`crate::Renderer`].
+/// CPU-side mesh data ready to upload to a WGPU renderer.
 ///
 /// Indices are `u16`, so a custom mesh must address fewer than `u16::MAX + 1`
 /// vertices. The renderer validates that the mesh is non-empty and that every
@@ -88,8 +95,7 @@ impl Mesh {
     ///
     /// This is how the built-in primitives support [`Face::Top`] and
     /// friends on every shape: run it on a custom mesh after setting normals,
-    /// then assign per-face materials through
-    /// [`crate::HasMaterials::with_material_slot`]. Vertices with a zero normal use
+    /// then assign per-face material overrides. Vertices with a zero normal use
     /// [`Face::Top`].
     pub fn assign_directional_slots(&mut self) {
         for vertex in &mut self.vertices {
@@ -302,7 +308,7 @@ impl Mesh {
     /// meaning the wedge "points" or slopes toward `+X`.
     ///
     /// The geometry occupies a unit cube centered at the origin and is meant
-    /// to be scaled through [`crate::HasBasePart::size`].
+    /// to be scaled by the containing renderable object.
     ///
     /// Each face is tagged with the directional [`Face`] matching its
     /// outward normal, so per-face materials work just like on a block.
@@ -398,7 +404,7 @@ impl Mesh {
     /// The apex direction from the center is `(-X, +Y, -Z)`.
     ///
     /// The geometry occupies a unit cube centered at the origin and is meant
-    /// to be scaled through [`crate::HasBasePart::size`].
+    /// to be scaled by the containing renderable object.
     ///
     /// Each face is tagged with the directional [`Face`] matching its
     /// outward normal, so per-face materials work just like on a block.

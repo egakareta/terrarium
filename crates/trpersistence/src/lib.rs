@@ -1,3 +1,6 @@
+#![deny(missing_docs)]
+//! Local persistent key-value storage backed by RenFS.
+
 use std::borrow::Cow;
 
 use base64::Engine as _;
@@ -40,12 +43,12 @@ pub enum DataStoreError {
 /// and may contain any UTF-8 text up to 180 bytes.
 ///
 /// ```no_run
-/// use terrarium::LocalDataStore;
+/// use trpersistence::LocalDataStore;
 ///
 /// static PLAYER_DATA: LocalDataStore =
 ///     LocalDataStore::new("my-game", "players");
 ///
-/// # fn example() -> Result<(), terrarium::DataStoreError> {
+/// # fn example() -> Result<(), trpersistence::DataStoreError> {
 /// #[derive(serde::Serialize, serde::Deserialize)]
 /// struct Profile {
 ///     coins: u32,

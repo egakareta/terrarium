@@ -1,22 +1,21 @@
 use super::*;
 
 impl Renderer {
-    /// Creates a renderer that draws into eframe's WGPU render pass.
+    /// Creates a renderer for the supplied WGPU device, queue, and output format.
     pub fn new(
-        render_state: &crate::egui_wgpu::RenderState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
         size: [u32; 2],
     ) -> Result<Self, RendererError> {
-        let format = render_state.target_format;
-        #[cfg(not(target_arch = "wasm32"))]
-        let _ = WGPU_INSTANCE_KEEPALIVE.set(render_state.instance.clone());
         let width = size[0].max(1);
         let height = size[1].max(1);
-        let device = render_state.device.clone();
-        let queue = render_state.queue.clone();
+        let device = device.clone();
+        let queue = queue.clone();
         let shaders = renderer_shaders(&device);
         let pipeline_cache = renderer_pipeline_cache(&device);
         let (depth_texture, depth_view) = create_depth_texture(&device, width, height);
-        let scene_texture = create_eframe_scene_texture(&device, format, width, height);
+        let scene_texture = create_output_texture(&device, format, width, height);
         let scene_view = scene_texture.create_view(&wgpu::TextureViewDescriptor::default());
         let (outline_mask_texture, outline_mask_view) =
             create_outline_mask_texture(&device, width, height);
@@ -857,12 +856,12 @@ impl Renderer {
             multiview_mask: None,
             cache: pipeline_cache.as_ref(),
         });
-        let eframe_scene = EframeSceneTarget::new(&device, format, width, height);
+        let output = OutputTarget::new(&device, format, width, height);
         let outline_bind_group = create_outline_bind_group(
             &device,
             &outline_bind_group_layout,
             &scene_view,
-            &eframe_scene.sampler,
+            &output.sampler,
             &outline_mask_view,
             &outline_uniform_buffer,
         );
@@ -901,11 +900,9 @@ impl Renderer {
             silhouette_mask_pipeline,
             stencil_mask_pipeline,
             stencil_outline_pipeline,
-            eframe_scene,
+            output,
             #[cfg(target_arch = "wasm32")]
             web_pixel_readback: Rc::new(RefCell::new(WebPixelReadbackState::default())),
-            #[cfg(feature = "meshpart")]
-            viewport_targets: HashMap::default(),
             skybox_pipeline,
             skybox_bind_group_layout,
             skybox_uniform_buffer,
@@ -954,10 +951,8 @@ impl Renderer {
             outline_instance_buffers,
             meshes: Vec::new(),
             primitive_meshes: [GpuMeshHandle(usize::MAX); PartShape::COUNT],
-            #[cfg(feature = "meshpart")]
-            meshpart_meshes: HashMap::default(),
-            #[cfg(feature = "meshpart")]
-            free_meshpart_meshes: Vec::new(),
+            custom_meshes: HashMap::default(),
+            free_custom_meshes: Vec::new(),
             clear_color: wgpu::Color {
                 r: 0.018,
                 g: 0.028,

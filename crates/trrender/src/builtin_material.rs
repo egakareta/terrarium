@@ -3,7 +3,7 @@ use super::material::{Texture, TextureColorSpace, TextureError};
 macro_rules! material_map {
     ($name:ident, $map:literal) => {
         include_bytes!(concat!(
-            "../../assets/material/",
+            "../bin/material/",
             stringify!($name),
             "_",
             $map,
@@ -55,8 +55,6 @@ macro_rules! define_builtin_materials {
             /// Every built-in material in its stable declaration order.
             pub const ALL: [Self; [$(Self::$variant),+].len()] = [$(Self::$variant),+];
 
-            pub(crate) const COUNT: usize = Self::ALL.len();
-
             /// Returns the lowercase asset name for this material.
             pub const fn name(self) -> &'static str {
                 match self {
@@ -82,7 +80,8 @@ macro_rules! define_builtin_materials {
                 }
             }
 
-            pub(crate) fn decode(self) -> Result<DecodedBuiltinMaterial, TextureError> {
+            /// Decodes this material's embedded texture maps.
+            pub fn decode(self) -> Result<DecodedBuiltinMaterial, TextureError> {
                 let assets = self.assets();
                 let base_color = decode_builtin_material(assets.base_color, TextureColorSpace::Srgb)?;
                 let normal = assets
@@ -174,10 +173,14 @@ fn decode_builtin_material(
     )
 }
 
-pub(crate) struct DecodedBuiltinMaterial {
-    pub(crate) base_color: Texture,
-    pub(crate) normal: Option<Texture>,
-    pub(crate) metallic_roughness: Option<Texture>,
+/// Decoded texture maps for a built-in material.
+pub struct DecodedBuiltinMaterial {
+    /// Base-color texture.
+    pub base_color: Texture,
+    /// Normal texture, when supplied by this material.
+    pub normal: Option<Texture>,
+    /// Metallic-roughness texture, when supplied by this material.
+    pub metallic_roughness: Option<Texture>,
 }
 
 pub(crate) struct BuiltinMaterialAssets {

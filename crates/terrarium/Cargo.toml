@@ -7,14 +7,23 @@ documentation.workspace = true
 repository.workspace = true
 license.workspace = true
 
+[[test]]
+name = "bevy"
+required-features = ["bevy"]
+
+[[test]]
+name = "clipboard"
+required-features = ["clipboard"]
+
+[[test]]
+name = "gpu"
+required-features = ["meshpart"]
+
 [dependencies]
-base64 = { version = "0.23", optional = true }
-basisu = { version = "0.1", default-features = false, features = ["std"], optional = true }
 bevy_app = { version = "0.20", features = ["web"], optional = true }
 bevy_ecs = { version = "0.20", optional = true }
 bevy_tasks = { version = "0.20", optional = true }
 bevy_time = { version = "0.20", optional = true }
-bytemuck = { version = "1", features = ["derive"] }
 eframe = { version = "0.36", default-features = false, features = [
   "wgpu_no_default_features",
   "wayland",
@@ -23,17 +32,15 @@ env_logger = "0.11"
 euphorium = { version = "0.6", default-features = false, optional = true }
 glam = { version = "0.34", default-features = false, features = ["std"] }
 gltf = { version = "1", optional = true }
-image = { version = "0.25", default-features = false, features = ["webp"] }
 log = "0.4"
 rapier3d = { version = "0.36", optional = true }
-renfs = { version = "0.2", optional = true }
-rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slotmap = "1"
 thiserror = "2"
-trclipboard = { workspace = true }
-web-time = "1"
+trclipboard = { workspace = true, optional = true }
+trpersistence = { workspace = true, optional = true }
+trrender = { workspace = true }
 wgpu = { version = "30", default-features = false, features = ["std"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
 
@@ -55,6 +62,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 [features]
 default = [
   "asio",
+  "clipboard",
   "default-fonts",
   "default-materials",
   "default-skybox",
@@ -73,11 +81,12 @@ default = [
   "webgpu",
 ]
 bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
+clipboard = ["dep:trclipboard"]
 default-fonts = []
-default-materials = ["dep:basisu"]
-default-skybox = []
+default-materials = ["trrender/default-materials"]
+default-skybox = ["trrender/default-skybox"]
 meshpart = ["dep:gltf"]
-persistence = ["dep:base64", "dep:renfs"]
+persistence = ["dep:trpersistence"]
 physics = ["dep:rapier3d"]
 sound = ["dep:euphorium"]
 

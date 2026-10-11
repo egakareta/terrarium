@@ -1,27 +1,41 @@
 use super::*;
-use crate::{
-    HasCamera, HasLight, HasPVInstance, HasPointLight, HasSpotLight, HasSurfaceLight, PVInstance,
-};
 
 impl Renderer {
     pub(super) fn prepare_local_lights(
         &mut self,
-        workspace: &Workspace,
+        scene: &RenderScene<'_>,
         camera_planes: &[Vec4; 6],
     ) -> PreparedLocalShadows {
-        let camera = &workspace.current_camera;
+        let camera = &scene.camera;
         let mut candidates = std::mem::take(&mut self.local_light_scratch);
         candidates.clear();
 
-        for instance in workspace.instances() {
-            let candidate = if let Some(light) = instance.downcast_ref::<PointLight>() {
-                point_light_candidate(workspace, light, camera, camera_planes)
-            } else if let Some(light) = instance.downcast_ref::<SpotLight>() {
-                spot_light_candidate(workspace, light, camera, camera_planes)
-            } else if let Some(light) = instance.downcast_ref::<SurfaceLight>() {
-                surface_light_candidate(workspace, light, camera, camera_planes)
-            } else {
-                None
+        for (node, parent_transform) in scene.nodes() {
+            let Some(light) = &node.light else {
+                continue;
+            };
+            let candidate = match light.kind {
+                RenderLightKind::Point { range } => {
+                    point_light_candidate(light, parent_transform, range, camera, camera_planes)
+                }
+                RenderLightKind::Spot { face, angle } => directional_light_candidate(
+                    light,
+                    parent_transform,
+                    face,
+                    angle,
+                    false,
+                    camera,
+                    camera_planes,
+                ),
+                RenderLightKind::Surface { face, angle } => directional_light_candidate(
+                    light,
+                    parent_transform,
+                    face,
+                    angle,
+                    true,
+                    camera,
+                    camera_planes,
+                ),
             };
             if let Some(candidate) = candidate {
                 candidates.push(candidate);
@@ -87,36 +101,9 @@ impl Renderer {
     }
 }
 
-pub(super) fn light_parent(workspace: &Workspace, light: &dyn Instance) -> Option<LightParent> {
-    let mut parent_id = light.parent();
-    while let Some(id) = parent_id {
-        let parent = workspace.instance(id)?;
-        if let Some(part) = parent.downcast_ref::<Part>() {
-            return Some(LightParent {
-                id,
-                transform: part.pivot(),
-            });
-        }
-        #[cfg(feature = "meshpart")]
-        if let Some(part) = parent.downcast_ref::<MeshPart>() {
-            return Some(LightParent {
-                id,
-                transform: part.pivot(),
-            });
-        }
-        if let Some(part) = parent.downcast_ref::<BasePart>() {
-            return Some(LightParent {
-                id,
-                transform: part.pivot(),
-            });
-        }
-        parent_id = parent.parent();
-    }
-    None
-}
-
-pub(super) fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, Vec4, Vec4) {
-    let pose = PVInstance::pose_from_transform(parent.transform);
+fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, Vec4, Vec4) {
+    let (_, rotation, translation) = parent.transform.to_scale_rotation_translation();
+    let pose = Mat4::from_rotation_translation(rotation, translation);
     let size = parent.transform.to_scale_rotation_translation().0.abs();
     let (normal, normal_extent, axis_u, half_width, axis_v, half_height) = match face {
         Face::Top => (
@@ -169,7 +156,7 @@ pub(super) fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, 
         ),
     };
     let direction = pose.transform_vector3(normal).normalize_or_zero();
-    let position = pose.w_axis.truncate() + direction * normal_extent;
+    let position = translation + direction * normal_extent;
     let axis_u = pose
         .transform_vector3(axis_u)
         .normalize_or_zero()
@@ -181,14 +168,14 @@ pub(super) fn light_face_frame(parent: LightParent, face: Face) -> (Vec3, Vec3, 
     (position, direction, axis_u, axis_v)
 }
 
-pub(super) fn local_light_color(color: Color3, brightness: f32) -> Option<([f32; 4], f32)> {
+fn local_light_color(color: Color3, brightness: f32) -> Option<([f32; 4], f32)> {
     let brightness = finite_nonnegative(brightness);
     let color = lighting_color(color);
     let color_strength = color[0].max(color[1]).max(color[2]);
     (brightness > 0.0 && color_strength > 0.0).then_some((color, brightness))
 }
 
-pub(super) fn local_light_score(
+fn local_light_score(
     position: Vec3,
     range: f32,
     source_radius: f32,
@@ -207,24 +194,24 @@ pub(super) fn local_light_score(
     color[0].max(color[1]).max(color[2]) * brightness * attenuation
 }
 
-pub(super) fn directional_light_relevance(
-    camera: &Camera,
+fn directional_light_relevance(
+    camera: &RenderCamera,
     position: Vec3,
     direction: Vec3,
     angle: f32,
     range: f32,
 ) -> f32 {
-    let view = camera.pose().inverse();
+    let view = camera.pose.inverse();
     let view_position = view.transform_point3(position);
     let view_direction = view.transform_vector3(direction);
     let source_depth = -view_position.z;
-    let tan_half_fovy = (camera.fovy() * 0.5).tan();
+    let tan_half_fovy = (camera.fovy * 0.5).tan();
     let outer_cosine = (angle * 0.5).to_radians().cos();
     let inner_cosine = outer_cosine + (1.0 - outer_cosine) * 0.15;
     let mut relevance: f32 = 0.0;
 
     let mut evaluate_probe = |probe: Vec3| {
-        let probe = camera.pose().transform_point3(probe);
+        let probe = camera.pose.transform_point3(probe);
         let Some(to_probe) = (probe - position).try_normalize() else {
             return;
         };
@@ -236,15 +223,15 @@ pub(super) fn directional_light_relevance(
     };
 
     for depth in [
-        camera.znear(),
-        camera.zfar(),
+        camera.znear,
+        camera.zfar,
         source_depth,
         source_depth + range * 0.5,
         source_depth + range,
     ] {
-        let depth = depth.clamp(camera.znear(), camera.zfar());
+        let depth = depth.clamp(camera.znear, camera.zfar);
         let half_height = depth * tan_half_fovy;
-        let half_width = half_height * camera.aspect();
+        let half_width = half_height * camera.aspect;
         let closest_x = view_position.x.clamp(-half_width, half_width);
         let closest_y = view_position.y.clamp(-half_height, half_height);
         for [x, y] in [
@@ -295,23 +282,23 @@ pub(super) fn directional_light_relevance(
     relevance
 }
 
-pub(super) fn point_light_candidate(
-    workspace: &Workspace,
-    light: &PointLight,
-    camera: &Camera,
+fn point_light_candidate(
+    light: &RenderLight,
+    parent_transform: Mat4,
+    range: f32,
+    camera: &RenderCamera,
     camera_planes: &[Vec4; 6],
 ) -> Option<LocalLightCandidate> {
-    let parent = light_parent(workspace, light)?;
-    let (color, brightness) = local_light_color(light.color(), light.brightness())?;
-    let range = finite_nonnegative(light.range()).min(10_000.0);
+    let (color, brightness) = local_light_color(light.color, light.brightness)?;
+    let range = finite_nonnegative(range).min(10_000.0);
     if range <= 0.0 {
         return None;
     }
-    let position = parent.transform.w_axis.truncate();
+    let position = parent_transform.w_axis.truncate();
     if !sphere_visible(camera_planes, position, range) {
         return None;
     }
-    let shadow_view_projections = if light.shadows() {
+    let shadow_view_projections = if light.shadows {
         point_shadow_view_projections(position, 0.03, range)
     } else {
         [Mat4::IDENTITY; 6]
@@ -326,72 +313,30 @@ pub(super) fn point_light_candidate(
             params: [0.0, -1.0, 0.0, 0.0],
         },
         shadow_view_projections,
-        shadow_layer_count: if light.shadows() { 6 } else { 0 },
-        shadow_excluded_caster: parent.id,
+        shadow_layer_count: if light.shadows { 6 } else { 0 },
+        shadow_excluded_caster: light.parent_id,
         score: local_light_score(position, range, 0.0, color, brightness, camera.position()),
     })
 }
 
-pub(super) fn spot_light_candidate(
-    workspace: &Workspace,
-    light: &SpotLight,
-    camera: &Camera,
-    camera_planes: &[Vec4; 6],
-) -> Option<LocalLightCandidate> {
-    directional_light_candidate(
-        workspace,
-        light,
-        light.face(),
-        light.angle(),
-        light.color(),
-        light.brightness(),
-        light.shadows(),
-        false,
-        camera,
-        camera_planes,
-    )
-}
-
-pub(super) fn surface_light_candidate(
-    workspace: &Workspace,
-    light: &SurfaceLight,
-    camera: &Camera,
-    camera_planes: &[Vec4; 6],
-) -> Option<LocalLightCandidate> {
-    directional_light_candidate(
-        workspace,
-        light,
-        light.face(),
-        light.angle(),
-        light.color(),
-        light.brightness(),
-        light.shadows(),
-        true,
-        camera,
-        camera_planes,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn directional_light_candidate(
-    workspace: &Workspace,
-    light: &dyn Instance,
+fn directional_light_candidate(
+    light: &RenderLight,
+    parent_transform: Mat4,
     face: Face,
     angle: f32,
-    color: Color3,
-    brightness: f32,
-    shadows: bool,
     surface: bool,
-    camera: &Camera,
+    camera: &RenderCamera,
     camera_planes: &[Vec4; 6],
 ) -> Option<LocalLightCandidate> {
-    let parent = light_parent(workspace, light)?;
-    let (color, brightness) = local_light_color(color, brightness)?;
+    let (color, brightness) = local_light_color(light.color, light.brightness)?;
     let angle = finite_or(angle, 0.0).clamp(0.0, 180.0);
     if angle <= 0.0 {
         return None;
     }
     let range = (brightness.sqrt() * LOCAL_LIGHT_DERIVED_RANGE).clamp(0.03, LOCAL_LIGHT_MAX_RANGE);
+    let parent = LightParent {
+        transform: parent_transform,
+    };
     let (face_position, direction, axis_u, axis_v) = light_face_frame(parent, face);
     let position = face_position + direction * 0.01;
     let source_radius = if surface {
@@ -402,7 +347,7 @@ pub(super) fn directional_light_candidate(
     if direction == Vec3::ZERO || !sphere_visible(camera_planes, position, range + source_radius) {
         return None;
     }
-    let shadow_view_projections = if shadows {
+    let shadow_view_projections = if light.shadows {
         let mut matrices = [Mat4::IDENTITY; 6];
         matrices[0] = cone_shadow_view_projection(position, direction, angle, range);
         matrices
@@ -419,8 +364,8 @@ pub(super) fn directional_light_candidate(
             params: [(angle * 0.5).to_radians().cos(), -1.0, 0.0, 0.0],
         },
         shadow_view_projections,
-        shadow_layer_count: usize::from(shadows),
-        shadow_excluded_caster: parent.id,
+        shadow_layer_count: usize::from(light.shadows),
+        shadow_excluded_caster: light.parent_id,
         score: local_light_score(
             position,
             range,
@@ -443,8 +388,8 @@ pub(super) fn cone_shadow_view_projection(
     } else {
         Vec3::Y
     };
-    let view = crate::glam::camera::rh::view::look_at_mat4(position, position + direction, up);
-    let projection = crate::glam::camera::rh::proj::directx::perspective(
+    let view = glam::camera::rh::view::look_at_mat4(position, position + direction, up);
+    let projection = glam::camera::rh::proj::directx::perspective(
         angle.clamp(1.0, 179.0).to_radians(),
         1.0,
         0.03,
@@ -462,19 +407,19 @@ pub(super) fn point_shadow_view_projections(position: Vec3, near: f32, far: f32)
         (Vec3::Z, Vec3::NEG_Y),
         (Vec3::NEG_Z, Vec3::NEG_Y),
     ];
-    let projection = crate::glam::camera::rh::proj::directx::perspective(
+    let projection = glam::camera::rh::proj::directx::perspective(
         std::f32::consts::FRAC_PI_2,
         1.0,
         near,
         far.max(near + 0.001),
     );
     directions.map(|(direction, up)| {
-        projection * crate::glam::camera::rh::view::look_at_mat4(position, position + direction, up)
+        projection * glam::camera::rh::view::look_at_mat4(position, position + direction, up)
     })
 }
 
 pub(super) fn light_view_projections(
-    camera: &Camera,
+    camera: &RenderCamera,
     light_direction: Vec3,
     shadow_map_size: u32,
 ) -> (
@@ -494,8 +439,8 @@ pub(super) fn light_view_projections(
     let light_forward = -light_direction;
     let light_right = light_forward.cross(up).normalize();
     let light_up = light_right.cross(light_forward).normalize();
-    let near = camera.znear().max(0.001);
-    let far = camera.zfar().min(SHADOW_DISTANCE).max(near + 0.001);
+    let near = camera.znear.max(0.001);
+    let far = camera.zfar.min(SHADOW_DISTANCE).max(near + 0.001);
     let mut splits = [far; SHADOW_CASCADE_COUNT];
     let mut matrices = [Mat4::IDENTITY; SHADOW_CASCADE_COUNT];
     let mut texel_sizes = [0.0; SHADOW_CASCADE_COUNT];
@@ -512,21 +457,16 @@ pub(super) fn light_view_projections(
             .iter()
             .map(|corner| corner.distance(center))
             .fold(0.0, f32::max);
-        // A fixed-size bounding sphere prevents projection scale from changing as
-        // the camera rotates. Leave a little room for snapping at the map edge.
         let extent = ((radius + 1.0 / 16.0) * 16.0).ceil() / 16.0;
         let texel_size = 2.0 * extent / shadow_map_size as f32;
         texel_sizes[cascade] = texel_size;
-
-        // Quantizing the light-space center keeps stationary shadows from
-        // shimmering as the camera moves by sub-texel amounts.
         let center_x = center.dot(light_right);
         let center_y = center.dot(light_up);
         let snapped_center = center
             + light_right * ((center_x / texel_size).round() * texel_size - center_x)
             + light_up * ((center_y / texel_size).round() * texel_size - center_y);
         let light_position = snapped_center + light_direction * (extent + SHADOW_CASTER_MARGIN);
-        let view = crate::glam::camera::rh::view::look_at_mat4(light_position, snapped_center, up);
+        let view = glam::camera::rh::view::look_at_mat4(light_position, snapped_center, up);
         let (mut min_depth, mut max_depth) = (f32::MAX, f32::MIN);
         for corner in corners {
             let depth = -view.transform_point3(corner).z;
@@ -535,7 +475,7 @@ pub(super) fn light_view_projections(
         }
         let shadow_near = (min_depth - SHADOW_CASTER_MARGIN).max(0.001);
         let shadow_far = (max_depth + SHADOW_RECEIVER_MARGIN).max(shadow_near + 0.001);
-        let projection = crate::glam::camera::rh::proj::directx::orthographic(
+        let projection = glam::camera::rh::proj::directx::orthographic(
             -extent,
             extent,
             -extent,
@@ -589,12 +529,16 @@ pub(super) fn pack_shadow_values(values: [f32; SHADOW_CASCADE_COUNT]) -> [[f32; 
     packed
 }
 
-pub(super) fn camera_frustum_slice_corners(camera: &Camera, near: f32, far: f32) -> [Vec3; 8] {
-    let tan_half_fovy = (camera.fovy() * 0.5).tan();
+pub(super) fn camera_frustum_slice_corners(
+    camera: &RenderCamera,
+    near: f32,
+    far: f32,
+) -> [Vec3; 8] {
+    let tan_half_fovy = (camera.fovy * 0.5).tan();
     let near_height = near * tan_half_fovy;
-    let near_width = near_height * camera.aspect();
+    let near_width = near_height * camera.aspect;
     let far_height = far * tan_half_fovy;
-    let far_width = far_height * camera.aspect();
+    let far_width = far_height * camera.aspect;
     let corners = [
         Vec3::new(-near_width, -near_height, -near),
         Vec3::new(near_width, -near_height, -near),
@@ -605,5 +549,5 @@ pub(super) fn camera_frustum_slice_corners(camera: &Camera, near: f32, far: f32)
         Vec3::new(-far_width, far_height, -far),
         Vec3::new(far_width, far_height, -far),
     ];
-    corners.map(|corner| camera.pose().transform_point3(corner))
+    corners.map(|corner| camera.pose.transform_point3(corner))
 }

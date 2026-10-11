@@ -1,4 +1,4 @@
-/// An RGB color used by a [`Part`].
+/// An RGB color used by renderable objects.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Color3 {
     /// Red channel, normally in the inclusive range `0.0..=1.0`.

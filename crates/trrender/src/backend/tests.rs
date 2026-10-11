@@ -1,5 +1,30 @@
 use super::*;
-use crate::HasCamera;
+use crate::{MeshMaterialSlots, RenderCamera, glam::Quat};
+
+fn camera(position: Vec3, target: Vec3, aspect: f32) -> RenderCamera {
+    let direction = (target - position).normalize_or_zero();
+    let yaw = direction.x.atan2(-direction.z);
+    let pitch = direction.y.asin();
+    let pose = Mat4::from_rotation_translation(
+        Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
+        position,
+    );
+    let fovy = 60.0_f32.to_radians();
+    let znear = 0.1;
+    let zfar = 200.0;
+    let projection = glam::camera::rh::proj::directx::perspective(fovy, aspect, znear, zfar);
+    RenderCamera {
+        pivot: pose,
+        pose,
+        view_projection: projection * pose.inverse(),
+        projection,
+        forward: pose.transform_vector3(Vec3::NEG_Z).normalize_or_zero(),
+        fovy,
+        aspect,
+        znear,
+        zfar,
+    }
+}
 
 #[test]
 fn surface_packing_preserves_normal_xy_and_material_channels() {
@@ -39,16 +64,16 @@ fn skybox_shader_validates() {
 }
 
 #[test]
-fn eframe_composite_shader_validates() {
+fn scene_composite_shader_validates() {
     let module = wgpu::naga::front::wgsl::parse_str(include_str!("blit.wgsl"))
-        .expect("eframe composite shader should parse");
+        .expect("scene composite shader should parse");
     let mut validator = wgpu::naga::valid::Validator::new(
         wgpu::naga::valid::ValidationFlags::all(),
         wgpu::naga::valid::Capabilities::empty(),
     );
     validator
         .validate(&module)
-        .expect("eframe composite shader should validate");
+        .expect("scene composite shader should validate");
 }
 
 #[test]
@@ -68,17 +93,15 @@ fn outline_shaders_validate() {
 
 #[test]
 fn material_set_keys_resolve_unset_slots_to_the_default_material() {
-    use crate::{Face, HasMaterials as _, Instance as _, Part};
-
-    let part = Part::new().with_name("part");
     let top = Material::default()
         .with_base_color([0.1, 0.4, 0.2, 1.0])
         .with_metallic(0.1)
         .with_roughness(0.9)
         .with_emissive([0.0, 0.0, 0.0]);
-    let part = part.with_material_slot(Face::Top, top);
+    let mut materials = MeshMaterialSlots::default();
+    materials.set(Face::Top, top);
 
-    let vec4s = MaterialSetKey::from_materials(&part.material_slots).vec4s();
+    let vec4s = MaterialSetKey::from_materials(&materials).vec4s();
     // The Top override carries its own factors.
     assert_eq!(vec4s[0], [0.1, 0.4, 0.2, 1.0]);
     assert_eq!(vec4s[1], [0.0, 0.0, 0.0, 0.9]);
@@ -91,32 +114,29 @@ fn material_set_keys_resolve_unset_slots_to_the_default_material() {
 
 #[test]
 fn material_set_keys_distinguish_per_face_factors() {
-    use crate::{Face, HasMaterials as _, Instance as _, Part};
-
-    let copper = Part::new()
-        .with_name("copper")
-        .with_material(Material::default().with_metallic(0.82));
-    let copper_top_metal = Part::new()
-        .with_name("copper-top-metal")
-        .with_material(Material::default().with_metallic(0.82))
-        .with_material_slot(Face::Top, Material::default().with_metallic(0.1));
-    let copper_clone = Part::new()
-        .with_name("copper-clone")
-        .with_material(Material::default().with_metallic(0.82));
+    let copper_material = Material::default().with_metallic(0.82);
+    let mut copper = MeshMaterialSlots::default();
+    let mut copper_clone = MeshMaterialSlots::default();
+    let mut copper_top_metal = MeshMaterialSlots::default();
+    for face in Face::ALL {
+        copper.set(face, copper_material);
+        copper_clone.set(face, copper_material);
+        copper_top_metal.set(face, copper_material);
+    }
+    copper_top_metal.set(Face::Top, Material::default().with_metallic(0.1));
 
     assert_eq!(
-        MaterialSetKey::from_materials(&copper.material_slots),
-        MaterialSetKey::from_materials(&copper_clone.material_slots)
+        MaterialSetKey::from_materials(&copper),
+        MaterialSetKey::from_materials(&copper_clone)
     );
     assert_ne!(
-        MaterialSetKey::from_materials(&copper.material_slots),
-        MaterialSetKey::from_materials(&copper_top_metal.material_slots)
+        MaterialSetKey::from_materials(&copper),
+        MaterialSetKey::from_materials(&copper_top_metal)
     );
 }
 
 #[test]
 fn compact_normal_scales_match_inverse_transpose_for_trs() {
-    use crate::glam::{Quat, Vec3};
     let rotation = Quat::from_euler(crate::glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
     let pivot = Mat4::from_rotation_translation(rotation, Vec3::new(1.0, -2.0, 3.0));
     let size = Vec3::new(0.82, 1.1, 0.6);
@@ -141,47 +161,41 @@ fn compact_normal_scales_match_inverse_transpose_for_trs() {
 
 #[test]
 fn frustum_culling_keeps_visible_and_rejects_outside() {
-    use crate::{Camera, HasPVInstance as _};
-    let camera = Camera::new(Vec3::new(0.0, 2.0, 6.0), Vec3::ZERO, 16.0 / 9.0);
-    let planes = frustum_planes(camera.view_projection_matrix());
+    let camera = camera(Vec3::new(0.0, 2.0, 6.0), Vec3::ZERO, 16.0 / 9.0);
+    let planes = frustum_planes(camera.view_projection);
     assert!(sphere_visible(&planes, Vec3::ZERO, 0.5));
     // Far behind the camera must be culled.
     assert!(!sphere_visible(&planes, Vec3::new(0.0, 2.0, 20.0), 0.5));
     // Far beyond far plane must be culled.
     assert!(!sphere_visible(
         &planes,
-        camera.pivot().w_axis.truncate() + camera.forward() * 500.0,
+        camera.position() + camera.forward * 500.0,
         0.5
     ));
 }
 
 #[test]
 fn frustum_culling_keeps_negatively_scaled_parts_near_the_frustum_edge() {
-    use crate::{Camera, HasPVInstance as _, HasPart as _, Part, PartShape};
-
-    let camera = Camera::new(Vec3::ZERO, Vec3::NEG_Z, 1.0);
+    let camera = camera(Vec3::ZERO, Vec3::NEG_Z, 1.0);
     let depth = 4.0;
-    let horizontal_edge = depth * (camera.fovy() * 0.5).tan() * camera.aspect();
-    let part = Part::new()
-        .with_shape(PartShape::Block)
-        .with_size(Vec3::new(-4.0, 1.0, 1.0))
-        .with_position(Vec3::new(horizontal_edge + 2.0, 0.0, -depth));
-    let planes = frustum_planes(camera.view_projection_matrix());
-    let radius = scaled_bounding_radius(part.shape().bounding_radius(), part.pivot());
+    let horizontal_edge = depth * (camera.fovy * 0.5).tan() * camera.aspect;
+    let pivot = Mat4::from_scale_rotation_translation(
+        Vec3::new(-4.0, 1.0, 1.0),
+        Quat::IDENTITY,
+        Vec3::new(horizontal_edge + 2.0, 0.0, -depth),
+    );
+    let planes = frustum_planes(camera.view_projection);
+    let radius = scaled_bounding_radius(PartShape::Block.bounding_radius(), pivot);
 
-    assert!(sphere_visible(
-        &planes,
-        part.pivot().w_axis.truncate(),
-        radius
-    ));
+    assert!(sphere_visible(&planes, pivot.w_axis.truncate(), radius));
 }
 
 #[test]
 fn shadow_cascades_cover_their_camera_frustum_slices() {
-    let camera = Camera::new(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
+    let camera = camera(Vec3::new(3.0, 4.0, 8.0), Vec3::ZERO, 16.0 / 9.0);
     let (matrices, splits, texel_sizes) =
         light_view_projections(&camera, Vec3::new(-0.45, 0.85, 0.35), MAX_SHADOW_MAP_SIZE);
-    let mut near = camera.znear();
+    let mut near = camera.znear;
 
     for cascade in 0..SHADOW_CASCADE_COUNT {
         assert!(splits[cascade] > near);

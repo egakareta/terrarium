@@ -10,8 +10,14 @@ publish = false
 
 [workspace]
 resolver = "3"
-members = [".", "crates/terrarium", "crates/trclipboard"]
-default-members = ["."]
+members = [
+  ".",
+  "crates/terrarium/",
+  "crates/trclipboard/",
+  "crates/trpersistence/",
+  "crates/trrender/",
+]
+default-members = [".", "crates/terrarium/", "crates/trrender/"]
 
 [workspace.package]
 version = "0.1.0"
@@ -23,7 +29,9 @@ license = "MIT"
 
 [workspace.dependencies]
 terrarium = { path = "crates/terrarium/" }
-trclipboard = { path = "crates/trclipboard" }
+trclipboard = { path = "crates/trclipboard/" }
+trpersistence = { path = "crates/trpersistence/" }
+trrender = { path = "crates/trrender/" }
 
 [[example]]
 name = "bevy"
@@ -45,13 +53,37 @@ required-features = ["physics"]
 name = "sound"
 required-features = ["sound"]
 
-[[test]]
-name = "bevy"
-required-features = ["bevy"]
-
-[[test]]
-name = "gpu"
-required-features = ["meshpart"]
-
 [dependencies]
 terrarium = { workspace = true }
+
+[features]
+# auto-managed by cargo-forward-flags
+# <forward terrarium>
+asio = ["terrarium/asio"]
+bevy = ["terrarium/bevy"]
+cli = ["terrarium/cli"]
+clipboard = ["terrarium/clipboard"]
+compat = ["terrarium/compat"]
+default-fonts = ["terrarium/default-fonts"]
+default-materials = ["terrarium/default-materials"]
+default-skybox = ["terrarium/default-skybox"]
+dx12 = ["terrarium/dx12"]
+eframe-default-fonts = ["terrarium/eframe-default-fonts"]
+flac = ["terrarium/flac"]
+gles = ["terrarium/gles"]
+jack = ["terrarium/jack"]
+meshpart = ["terrarium/meshpart"]
+metal = ["terrarium/metal"]
+mp3 = ["terrarium/mp3"]
+mp4 = ["terrarium/mp4"]
+nightly = ["terrarium/nightly"]
+persistence = ["terrarium/persistence"]
+physics = ["terrarium/physics"]
+sound = ["terrarium/sound"]
+vorbis = ["terrarium/vorbis"]
+vulkan = ["terrarium/vulkan"]
+wav = ["terrarium/wav"]
+webgl = ["terrarium/webgl"]
+webgpu = ["terrarium/webgpu"]
+x11 = ["terrarium/x11"]
+# </forward>

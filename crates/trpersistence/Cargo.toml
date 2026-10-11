@@ -1,0 +1,16 @@
+[package]
+name = "trpersistence"
+version.workspace = true
+edition.workspace = true
+description = "Local persistent key-value storage for Rust applications"
+documentation = "https://docs.rs/trpersistence"
+repository.workspace = true
+license.workspace = true
+keywords = ["persistence", "storage", "key-value"]
+
+[dependencies]
+base64 = "0.23"
+renfs = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"

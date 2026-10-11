@@ -1,6 +1,8 @@
+use std::sync::OnceLock;
+
 use super::*;
 
-impl EframeSceneTarget {
+impl OutputTarget {
     pub(super) fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -8,7 +10,7 @@ impl EframeSceneTarget {
         height: u32,
     ) -> Self {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("eframe scene texture layout"),
+            label: Some("scene output texture layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -29,7 +31,7 @@ impl EframeSceneTarget {
             ],
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("eframe scene sampler"),
+            label: Some("scene output sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -45,12 +47,12 @@ impl EframeSceneTarget {
         let shader = renderer_shaders(device).copy;
         let pipeline_cache = renderer_pipeline_cache(device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("eframe scene composite pipeline layout"),
+            label: Some("scene output composite pipeline layout"),
             bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("eframe scene composite pipeline"),
+            label: Some("scene output composite pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -74,10 +76,9 @@ impl EframeSceneTarget {
             multiview_mask: None,
             cache: pipeline_cache.as_ref(),
         });
-        let texture = create_eframe_scene_texture(device, format, width, height);
+        let texture = create_output_texture(device, format, width, height);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group =
-            create_eframe_scene_bind_group(device, &bind_group_layout, &view, &sampler);
+        let bind_group = create_output_bind_group(device, &bind_group_layout, &view, &sampler);
         Self {
             _texture: texture,
             view,
@@ -90,24 +91,24 @@ impl EframeSceneTarget {
     }
 
     pub(super) fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        let texture = create_eframe_scene_texture(device, self.format, width, height);
+        let texture = create_output_texture(device, self.format, width, height);
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group =
-            create_eframe_scene_bind_group(device, &self.bind_group_layout, &view, &self.sampler);
+            create_output_bind_group(device, &self.bind_group_layout, &view, &self.sampler);
         self._texture = texture;
         self.view = view;
         self.bind_group = bind_group;
     }
 }
 
-pub(super) fn create_eframe_scene_bind_group(
+pub(super) fn create_output_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("eframe scene texture bind group"),
+        label: Some("scene output texture bind group"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {
@@ -122,14 +123,14 @@ pub(super) fn create_eframe_scene_bind_group(
     })
 }
 
-pub(super) fn create_eframe_scene_texture(
+pub(super) fn create_output_texture(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     width: u32,
     height: u32,
 ) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("eframe scene color"),
+        label: Some("scene output color"),
         size: wgpu::Extent3d {
             width: width.max(1),
             height: height.max(1),
@@ -501,32 +502,6 @@ pub(super) fn frustum_planes(view_projection: Mat4) -> [Vec4; 6] {
         normalize(r2),      // near (0..1 depth)
         normalize(r3 - r2), // far
     ]
-}
-
-pub(super) enum FrustumRelation {
-    Outside,
-    Intersecting,
-    Inside,
-}
-
-pub(super) fn aabb_frustum_relation(planes: &[Vec4; 6], min: Vec3, max: Vec3) -> FrustumRelation {
-    let center = (min + max) * 0.5;
-    let extent = (max - min) * 0.5;
-    let center = center.extend(1.0);
-    let mut fully_inside = true;
-    for plane in planes {
-        let projected_extent = plane.truncate().abs().dot(extent);
-        let distance = plane.dot(center);
-        if distance < -projected_extent {
-            return FrustumRelation::Outside;
-        }
-        fully_inside &= distance >= projected_extent;
-    }
-    if fully_inside {
-        FrustumRelation::Inside
-    } else {
-        FrustumRelation::Intersecting
-    }
 }
 
 pub(super) fn sphere_visible(planes: &[Vec4; 6], center: Vec3, radius: f32) -> bool {

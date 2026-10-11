@@ -3,7 +3,7 @@ use super::*;
 impl Renderer {
     pub(super) fn material_textures(
         &mut self,
-        workspace: &Workspace,
+        scene: &RenderScene<'_>,
         material_slots: &MeshMaterialSlots,
     ) -> Result<MaterialTextures, RendererError> {
         let resolve = |renderer: &mut Self,
@@ -11,7 +11,7 @@ impl Renderer {
                        fallback: GpuTextureHandle|
          -> Result<GpuTextureHandle, RendererError> {
             handle.map_or(Ok(fallback), |handle| {
-                renderer.upload_workspace_texture(workspace, handle)
+                renderer.upload_workspace_texture(scene, handle)
             })
         };
 
@@ -209,14 +209,17 @@ impl Renderer {
 
     pub(super) fn upload_workspace_texture(
         &mut self,
-        workspace: &Workspace,
+        scene: &RenderScene<'_>,
         handle: TextureHandle,
     ) -> Result<GpuTextureHandle, RendererError> {
-        let workspace_handle = (workspace.id(), handle);
-        let texture = workspace
-            .get_texture(handle)
+        let workspace_handle = (scene.id, handle);
+        let source = scene
+            .textures
+            .iter()
+            .find(|source| source.handle == handle)
             .ok_or(RendererError::InvalidTextureHandle { index: handle.0 })?;
-        let version = workspace.texture_version(handle).unwrap_or(0);
+        let texture = source.texture;
+        let version = source.revision;
         if let Some(&(gpu_handle, cached_version)) =
             self.workspace_texture_handles.get(&workspace_handle)
         {
@@ -287,7 +290,7 @@ impl Renderer {
     /// The caller guarantees `gpu_handle` is exclusively owned by this
     /// texture (see [`texture_source_is_shared`](Self::texture_source_is_shared)).
     /// Textures validate on the way in, so edits made through
-    /// [`Workspace::get_texture_mut`] that break the RGBA8 invariant surface
+    /// scene-owner texture edits that break the RGBA8 invariant surface
     /// here as an error instead of panicking inside surface packing.
     pub(super) fn refresh_workspace_texture(
         &mut self,

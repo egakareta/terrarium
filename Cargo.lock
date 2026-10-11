@@ -4201,13 +4201,10 @@ name = "terrarium"
 version = "0.1.0"
 dependencies = [
  "approx",
- "base64 0.23.1",
- "basisu",
  "bevy_app",
  "bevy_ecs",
  "bevy_tasks",
  "bevy_time",
- "bytemuck",
  "console_error_panic_hook",
  "eframe",
  "env_logger",
@@ -4215,21 +4212,19 @@ dependencies = [
  "getrandom 0.4.3",
  "glam 0.34.1",
  "gltf",
- "image",
  "log",
  "pollster",
  "rapier3d",
- "renfs",
- "rustc-hash 2.1.3",
  "serde",
  "serde_json",
  "slotmap",
  "thiserror 2.0.21",
  "trclipboard",
+ "trpersistence",
+ "trrender",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "web-time",
  "wgpu",
  "winit",
 ]
@@ -4373,6 +4368,32 @@ dependencies = [
  "memchr",
  "nom 8.0.0",
  "petgraph",
+]
+
+[[package]]
+name = "trpersistence"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "renfs",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "trrender"
+version = "0.1.0"
+dependencies = [
+ "basisu",
+ "bytemuck",
+ "glam 0.34.1",
+ "image",
+ "rustc-hash 2.1.3",
+ "slotmap",
+ "thiserror 2.0.21",
+ "web-time",
+ "wgpu",
 ]
 
 [[package]]

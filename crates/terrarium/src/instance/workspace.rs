@@ -4,7 +4,8 @@ use std::rc::Rc;
 use crate::scene::audio::AudioRuntime;
 use crate::{
     BasePart, Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
-    InstanceId, InstanceLookup, Lighting, Part, Texture, TextureError, TextureHandle, TweenManager,
+    InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Texture, TextureError,
+    TextureHandle, TweenManager,
     glam::{Mat4, Vec3},
 };
 #[cfg(feature = "default-materials")]
@@ -85,6 +86,17 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub(crate) fn render_textures(&self) -> impl Iterator<Item = RenderTexture<'_>> {
+        self.textures
+            .iter()
+            .enumerate()
+            .map(|(index, texture)| RenderTexture {
+                handle: TextureHandle(index),
+                revision: self.texture_revisions[index],
+                texture,
+            })
+    }
+
     /// Creates an empty workspace with the default camera and controller.
     pub fn new() -> Self {
         let mut instance = Box::new(InstanceData::new("Workspace"));
@@ -104,7 +116,7 @@ impl Workspace {
             meshes: Vec::new(),
             textures: Vec::new(),
             #[cfg(feature = "default-materials")]
-            builtin_materials: vec![None; BuiltinMaterial::COUNT],
+            builtin_materials: vec![None; BuiltinMaterial::ALL.len()],
             texture_revisions: Vec::new(),
             texture_revision: 0,
             lighting: Lighting::default(),

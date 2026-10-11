@@ -2,10 +2,11 @@
 name = "trclipboard"
 version.workspace = true
 edition.workspace = true
-description.workspace = true
-documentation.workspace = true
+description = "Cross-platform (including web) clipboard access for Rust"
+documentation = "https://docs.rs/trclipboard"
 repository.workspace = true
 license.workspace = true
+keywords = ["clipboard", "terrarium"]
 
 [dependencies]
 thiserror = "2"

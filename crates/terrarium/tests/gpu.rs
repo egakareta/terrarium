@@ -17,7 +17,7 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
-            let mesh = engine.add_mesh(include_bytes!("../assets/DamagedHelmet.glb"))?;
+            let mesh = engine.add_mesh(include_bytes!("../fixtures/DamagedHelmet.glb"))?;
             engine.add_child(MeshPart::new(mesh).with_position(Vec3::new(0.0, 0.75, 0.0)));
             Ok::<(), AppCreationError>(())
         })?
@@ -57,7 +57,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
             engine.lighting.clear_skybox();
             engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
             let lantern = engine.add_texture(Texture::from_bytes(
-                include_bytes!("../assets/festival_lantern.png"),
+                include_bytes!("../fixtures/festival_lantern.png"),
                 TextureColorSpace::Srgb,
             )?)?;
 

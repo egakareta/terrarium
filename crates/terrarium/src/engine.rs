@@ -12,7 +12,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Renderer, RendererError, Workspace, WorkspacePreset, eframe, egui, egui_wgpu};
+use crate::{
+    RendererError, Workspace, WorkspacePreset, eframe, egui, egui_wgpu,
+    render_adapter::RenderAdapter,
+};
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
@@ -71,10 +74,10 @@ pub fn font_definitions() -> egui::FontDefinitions {
 pub type AppCreationError = Box<dyn std::error::Error + Send + Sync>;
 
 #[cfg(target_arch = "wasm32")]
-type RendererHandle = Rc<RefCell<Renderer>>;
+type RendererHandle = Rc<RefCell<RenderAdapter>>;
 
 #[cfg(not(target_arch = "wasm32"))]
-type RendererHandle = Arc<Mutex<Renderer>>;
+type RendererHandle = Arc<Mutex<RenderAdapter>>;
 
 type EngineSlot = Rc<RefCell<Option<Engine>>>;
 
@@ -147,7 +150,7 @@ fn unregister_renderer(id: usize) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn with_renderer<R>(id: usize, f: impl FnOnce(&mut Renderer) -> R) -> R {
+fn with_renderer<R>(id: usize, f: impl FnOnce(&mut RenderAdapter) -> R) -> R {
     let renderer = RENDERERS.with(|renderers| {
         renderers
             .borrow()
@@ -161,7 +164,7 @@ fn with_renderer<R>(id: usize, f: impl FnOnce(&mut Renderer) -> R) -> R {
 
 struct SceneCallback {
     #[cfg(not(target_arch = "wasm32"))]
-    renderer: Arc<Mutex<Renderer>>,
+    renderer: Arc<Mutex<RenderAdapter>>,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
 }
@@ -221,7 +224,7 @@ impl Engine {
             .wgpu_render_state
             .as_ref()
             .ok_or(RendererError::MissingEframeWgpuRenderState)?;
-        let renderer = Renderer::new(render_state, [size[0].max(1), size[1].max(1)])?;
+        let renderer = RenderAdapter::new(render_state, [size[0].max(1), size[1].max(1)])?;
         #[cfg(target_arch = "wasm32")]
         let renderer = Rc::new(RefCell::new(renderer));
         #[cfg(not(target_arch = "wasm32"))]
@@ -292,13 +295,13 @@ impl Engine {
 
     /// Returns locked access to the underlying renderer for advanced operations.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn renderer(&self) -> MutexGuard<'_, Renderer> {
+    pub fn renderer(&self) -> MutexGuard<'_, RenderAdapter> {
         self.renderer.lock().expect("engine renderer lock poisoned")
     }
 
     /// Returns mutable access to the underlying renderer for advanced operations.
     #[cfg(target_arch = "wasm32")]
-    pub fn renderer(&self) -> RefMut<'_, Renderer> {
+    pub fn renderer(&self) -> RefMut<'_, RenderAdapter> {
         self.renderer.borrow_mut()
     }
 

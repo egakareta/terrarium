@@ -65,7 +65,7 @@ impl Renderer {
             .map_err(RendererError::DevicePoll)
     }
 
-    /// Reads an RGBA8 pixel from the most recently prepared eframe scene.
+    /// Reads an RGBA8 pixel from the most recently rendered scene.
     ///
     /// Coordinates use a top-left origin.
     ///
@@ -86,7 +86,7 @@ impl Renderer {
         Ok(pixels[y as usize * self.width as usize + x as usize])
     }
 
-    /// Reads all RGBA8 pixels from the most recently prepared eframe scene.
+    /// Reads all RGBA8 pixels from the most recently rendered scene.
     ///
     /// Pixels are returned in row-major order with a top-left origin.
     ///
@@ -98,10 +98,10 @@ impl Renderer {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.read_texture_pixels(
-                &self.eframe_scene._texture,
+                &self.output._texture,
                 self.width,
                 self.height,
-                self.eframe_scene.format,
+                self.output.format,
             )
         }
 
@@ -218,7 +218,7 @@ impl Renderer {
                 label: Some("web render target pixel readback encoder"),
             });
         encoder.copy_texture_to_buffer(
-            self.eframe_scene._texture.as_image_copy(),
+            self.output._texture.as_image_copy(),
             wgpu::TexelCopyBufferInfo {
                 buffer: buffer.as_ref(),
                 layout: wgpu::TexelCopyBufferLayout {
@@ -239,7 +239,7 @@ impl Renderer {
         let readback = Rc::clone(&self.web_pixel_readback);
         let width = self.width;
         let height = self.height;
-        let format = self.eframe_scene.format;
+        let format = self.output.format;
         map_web_readback(&buffer, move |result| {
             let pixels = match result {
                 Ok(()) => match callback_buffer.slice(..).get_mapped_range() {
@@ -282,7 +282,7 @@ impl Renderer {
         Ok(())
     }
 
-    /// Resizes the eframe scene and depth buffer for a new non-zero size.
+    /// Resizes the renderer's owned output and depth buffers.
     ///
     /// Zero dimensions are ignored, which is useful while a window is
     /// minimized.
@@ -303,8 +303,7 @@ impl Renderer {
         let (depth_texture, depth_view) = create_depth_texture(&self.device, width, height);
         self.depth_texture = depth_texture;
         self.depth_view = depth_view;
-        self.scene_texture =
-            create_eframe_scene_texture(&self.device, self.eframe_scene.format, width, height);
+        self.scene_texture = create_output_texture(&self.device, self.output.format, width, height);
         self.scene_view = self
             .scene_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -316,11 +315,11 @@ impl Renderer {
             &self.device,
             &self.outline_bind_group_layout,
             &self.scene_view,
-            &self.eframe_scene.sampler,
+            &self.output.sampler,
             &self.outline_mask_view,
             &self.outline_uniform_buffer,
         );
-        self.eframe_scene.resize(&self.device, width, height);
+        self.output.resize(&self.device, width, height);
         let shadow_map_size = directional_shadow_map_size(width, height);
         if self.shadow_map_size != shadow_map_size {
             self.set_directional_shadow_map_size(shadow_map_size);
@@ -337,10 +336,10 @@ impl Renderer {
         self.refresh_environment_binding();
     }
 
-    /// Prepares a workspace for drawing in an eframe WGPU paint callback.
-    pub fn prepare_eframe_scene(
+    /// Prepares and submits a scene to the renderer-owned output target.
+    pub fn prepare(
         &mut self,
-        workspace: &Workspace,
+        scene: &RenderScene<'_>,
         size: [u32; 2],
     ) -> Result<(), RendererError> {
         let width = size[0].max(1);
@@ -348,17 +347,42 @@ impl Renderer {
         if self.width != width || self.height != height {
             self.resize(width, height);
         }
-        self.prepare_scene(workspace)?;
+        self.prepare_scene(scene)?;
         self.submit_scene();
         Ok(())
     }
 
-    /// Draws the prepared workspace into an eframe WGPU render pass.
-    pub fn paint_eframe_scene<'a>(&mut self, pass: &mut wgpu::RenderPass<'a>) {
-        pass.set_pipeline(&self.eframe_scene.pipeline);
-        pass.set_bind_group(0, &self.eframe_scene.bind_group, &[]);
+    /// Draws the previously prepared output texture into a WGPU render pass.
+    pub fn paint<'a>(&mut self, pass: &mut wgpu::RenderPass<'a>) {
+        pass.set_pipeline(&self.output.pipeline);
+        pass.set_bind_group(0, &self.output.bind_group, &[]);
         pass.draw(0..3, 0..1);
         self.record_frame();
+    }
+
+    /// Renders a scene directly into caller-owned color and depth targets.
+    pub fn render_to_view(
+        &mut self,
+        scene: &RenderScene<'_>,
+        color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        size: [u32; 2],
+        clear_color: wgpu::Color,
+    ) -> Result<(), RendererError> {
+        let shadow_map_size = directional_shadow_map_size(size[0].max(1), size[1].max(1));
+        if self.shadow_map_size < shadow_map_size {
+            self.set_directional_shadow_map_size(shadow_map_size);
+        }
+        self.prepare_scene(scene)?;
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("offscreen scene command encoder"),
+            });
+        self.encode_shadow_pass(&mut encoder);
+        self.encode_scene_pass(&mut encoder, color_view, depth_view, clear_color);
+        self.queue.submit(Some(encoder.finish()));
+        Ok(())
     }
 
     pub(super) fn encode_shadow_pass(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -556,7 +580,7 @@ impl Renderer {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("outline composite pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.eframe_scene.view,
+                view: &self.output.view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -578,11 +602,11 @@ impl Renderer {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("eframe scene command encoder"),
+                label: Some("scene output command encoder"),
             });
         // Skip outline passes when no outlines exist: the mask would stay
         // cleared and the composite would be a plain copy. Rendering the
-        // scene directly to the eframe target preserves pixels while saving
+        // scene directly to the output target preserves pixels while saving
         // two full-screen passes.
         let has_outlines = self.outline_batches.iter().any(|b| !b.is_empty());
         self.encode_shadow_pass(&mut encoder);
@@ -599,7 +623,7 @@ impl Renderer {
         } else {
             self.encode_scene_pass(
                 &mut encoder,
-                &self.eframe_scene.view,
+                &self.output.view,
                 &self.depth_view,
                 self.clear_color,
             );

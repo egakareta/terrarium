@@ -40,29 +40,26 @@ impl Renderer {
         })
     }
 
-    #[cfg(feature = "meshpart")]
-    pub(super) fn meshpart_mesh(
+    pub(super) fn custom_mesh(
         &mut self,
-        meshpart: &MeshPart,
+        object_id: u64,
+        mesh: &Mesh,
+        revision: u64,
     ) -> Result<Option<GpuMeshHandle>, RendererError> {
-        use crate::HasMeshPart;
-
-        if let Some(cached) = self.meshpart_meshes.get(&meshpart.id())
-            && cached.revision == meshpart.mesh_revision()
+        if let Some(cached) = self.custom_meshes.get(&object_id)
+            && cached.revision == revision
         {
             return Ok(Some(cached.handle));
         }
-        if (meshpart.mesh().vertices.is_empty() || meshpart.mesh().indices.is_empty())
-            && meshpart.mesh_handle().gltf().is_some()
-        {
+        if mesh.vertices.is_empty() || mesh.indices.is_empty() {
             return Ok(None);
         }
 
-        let gpu_mesh = self.create_gpu_mesh(meshpart.mesh())?;
-        let handle = if let Some(cached) = self.meshpart_meshes.get(&meshpart.id()).copied() {
+        let gpu_mesh = self.create_gpu_mesh(mesh)?;
+        let handle = if let Some(cached) = self.custom_meshes.get(&object_id).copied() {
             self.meshes[cached.handle.0] = gpu_mesh;
             cached.handle
-        } else if let Some(handle) = self.free_meshpart_meshes.pop() {
+        } else if let Some(handle) = self.free_custom_meshes.pop() {
             self.meshes[handle.0] = gpu_mesh;
             handle
         } else {
@@ -70,13 +67,8 @@ impl Renderer {
             self.meshes.push(gpu_mesh);
             handle
         };
-        self.meshpart_meshes.insert(
-            meshpart.id(),
-            CachedMeshPart {
-                revision: meshpart.mesh_revision(),
-                handle,
-            },
-        );
+        self.custom_meshes
+            .insert(object_id, CachedCustomMesh { revision, handle });
         Ok(Some(handle))
     }
     pub(super) fn ensure_instance_capacity(&mut self, instance_count: usize) {

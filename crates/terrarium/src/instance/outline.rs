@@ -1,26 +1,4 @@
-use crate::{Color3, InstanceData};
-
-/// The rendering technique used by an [`Outline`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum OutlineMode {
-    /// Uses a hard screen-space edge over the selected instance group.
-    #[default]
-    Toon,
-    /// Uses the selected instance group's rendered mask to trace its silhouette.
-    Silhouette,
-    /// Uses the GPU stencil buffer and an expanded back-face pass.
-    Stencil,
-}
-
-impl OutlineMode {
-    pub(crate) const fn index(self) -> usize {
-        match self {
-            Self::Toon => 0,
-            Self::Silhouette => 1,
-            Self::Stencil => 2,
-        }
-    }
-}
+use crate::{Color3, InstanceData, OutlineMode};
 
 /// A render-only instance that outlines its parent and the parent's siblings.
 ///

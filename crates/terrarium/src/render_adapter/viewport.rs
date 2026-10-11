@@ -1,4 +1,5 @@
 use super::*;
+use crate::Instance;
 
 /// An offscreen scene that can be rendered into an egui texture or a CPU-side [`Image`].
 ///
@@ -72,53 +73,36 @@ impl Viewport {
     }
 }
 
-impl Renderer {
+impl RenderAdapter {
     pub(super) fn render_viewport(
         &mut self,
         viewport: &Viewport,
         render_state: &crate::egui_wgpu::RenderState,
     ) -> Result<ViewportTexture, RendererError> {
         let size = viewport.size;
-        let viewport_id = viewport.workspace.id();
+        let viewport_id = viewport.workspace.id().data().as_ffi();
         self.ensure_viewport_target(viewport_id, size, render_state);
-        let shadow_map_size = directional_shadow_map_size(size[0], size[1]);
-        if self.shadow_map_size < shadow_map_size {
-            self.set_directional_shadow_map_size(shadow_map_size);
-        }
-
-        self.prepare_scene(&viewport.workspace)?;
-        {
-            let target = self
-                .viewport_targets
-                .get(&viewport_id)
-                .expect("viewport target is created before rendering");
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("viewport command encoder"),
-                });
-            self.encode_shadow_pass(&mut encoder);
-            self.encode_scene_pass(
-                &mut encoder,
-                &target.color_view,
-                &target.depth_view,
-                color(viewport.clear_color),
-            );
-            self.queue.submit(Some(encoder.finish()));
-        }
+        let scene = scene::build_render_scene(&viewport.workspace);
+        let target = self
+            .viewport_targets
+            .get(&viewport_id)
+            .expect("viewport target is created before rendering");
+        self.backend.render_to_view(
+            &scene,
+            &target.color_view,
+            &target.depth_view,
+            size,
+            color(viewport.clear_color),
+        )?;
 
         let (texture_id, register_texture) = {
-            let target = self
-                .viewport_targets
-                .get(&viewport_id)
-                .expect("viewport target is created before rendering");
             let mut egui_renderer = render_state.renderer.write();
             match target.texture_id {
                 Some(texture_id) => {
                     egui_renderer.update_egui_texture_from_wgpu_texture(
                         &render_state.device,
                         &target.color_view,
-                        wgpu::FilterMode::Linear,
+                        crate::wgpu::FilterMode::Linear,
                         texture_id,
                     );
                     (texture_id, false)
@@ -127,7 +111,7 @@ impl Renderer {
                     egui_renderer.register_native_texture(
                         &render_state.device,
                         &target.color_view,
-                        wgpu::FilterMode::Linear,
+                        crate::wgpu::FilterMode::Linear,
                     ),
                     true,
                 ),
@@ -148,15 +132,15 @@ impl Renderer {
 
     fn ensure_viewport_target(
         &mut self,
-        viewport_id: InstanceId,
+        viewport_id: u64,
         size: [u32; 2],
         render_state: &crate::egui_wgpu::RenderState,
     ) {
-        let needs_target = self
+        if self
             .viewport_targets
             .get(&viewport_id)
-            .is_none_or(|target| target.size != size);
-        if !needs_target {
+            .is_some_and(|target| target.size == size)
+        {
             return;
         }
 
@@ -166,10 +150,42 @@ impl Renderer {
             render_state.renderer.write().free_texture(&texture_id);
         }
 
-        let color_texture =
-            create_eframe_scene_texture(&self.device, self.eframe_scene.format, size[0], size[1]);
-        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let (depth_texture, depth_view) = create_depth_texture(&self.device, size[0], size[1]);
+        let color_texture = render_state
+            .device
+            .create_texture(&crate::wgpu::TextureDescriptor {
+                label: Some("viewport color target"),
+                size: crate::wgpu::Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: crate::wgpu::TextureDimension::D2,
+                format: render_state.target_format,
+                usage: crate::wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | crate::wgpu::TextureUsages::TEXTURE_BINDING
+                    | crate::wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+        let color_view = color_texture.create_view(&crate::wgpu::TextureViewDescriptor::default());
+        let depth_texture = render_state
+            .device
+            .create_texture(&crate::wgpu::TextureDescriptor {
+                label: Some("viewport depth target"),
+                size: crate::wgpu::Extent3d {
+                    width: size[0],
+                    height: size[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: crate::wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: crate::wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+        let depth_view = depth_texture.create_view(&crate::wgpu::TextureViewDescriptor::default());
         self.viewport_targets.insert(
             viewport_id,
             ViewportTarget {
@@ -188,8 +204,8 @@ fn normalized_size(size: [u32; 2]) -> [u32; 2] {
     [size[0].max(1), size[1].max(1)]
 }
 
-fn color(color: [f32; 4]) -> wgpu::Color {
-    wgpu::Color {
+fn color(color: [f32; 4]) -> crate::wgpu::Color {
+    crate::wgpu::Color {
         r: color[0] as f64,
         g: color[1] as f64,
         b: color[2] as f64,
@@ -200,13 +216,13 @@ fn color(color: [f32; 4]) -> wgpu::Color {
 /// A GPU-backed viewport texture registered with egui.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ViewportTexture {
-    id: egui::TextureId,
+    id: crate::egui::TextureId,
     size: [u32; 2],
 }
 
 impl ViewportTexture {
     /// Returns the egui texture identifier used to display this texture.
-    pub fn id(self) -> egui::TextureId {
+    pub fn id(self) -> crate::egui::TextureId {
         self.id
     }
 

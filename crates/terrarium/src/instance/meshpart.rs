@@ -920,9 +920,9 @@ mod tests {
         let assets: [(&str, &[u8]); 2] = [
             (
                 "DamagedHelmet",
-                include_bytes!("../../assets/DamagedHelmet.glb"),
+                include_bytes!("../../fixtures/DamagedHelmet.glb"),
             ),
-            ("Duck", include_bytes!("../../assets/Duck.glb")),
+            ("Duck", include_bytes!("../../fixtures/Duck.glb")),
         ];
 
         for (name, bytes) in assets {
@@ -991,7 +991,7 @@ mod tests {
 
     #[test]
     fn add_mesh_retains_the_lossless_gltf_source() {
-        let bytes = include_bytes!("../../assets/DamagedHelmet.glb");
+        let bytes = include_bytes!("../../fixtures/DamagedHelmet.glb");
         let mut workspace = Workspace::new();
         let handle = workspace.add_mesh(bytes).unwrap();
         let source = handle.gltf().expect("glTF source should be retained");
