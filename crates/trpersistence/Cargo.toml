@@ -6,7 +6,7 @@ description = "Local persistent key-value storage for Rust applications"
 documentation = "https://docs.rs/trpersistence"
 repository.workspace = true
 license.workspace = true
-keywords = ["persistence", "storage", "key-value"]
+keywords = ["key-value", "persistence", "storage"]
 
 [dependencies]
 base64 = "0.23"
