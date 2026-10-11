@@ -182,7 +182,6 @@ impl Devtools {
             .id(id)
             .open(&mut open)
             .default_pos([48.0, 48.0])
-            .default_size([1080.0, 680.0])
             .resizable(true)
             .show(context, |ui| {
                 ui.horizontal(|ui| {
