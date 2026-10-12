@@ -472,6 +472,68 @@ fn a_second_finger_on_an_egui_area_does_not_rotate_the_camera() {
 }
 
 #[test]
+fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
+    for subject in [None, Some((Camera::default().id(), Mat4::IDENTITY))] {
+        let context = Context::default();
+        let mut controller = CameraController::default();
+        let mut camera = Camera::default();
+        let initial = camera.pose();
+        for events in [
+            vec![],
+            vec![
+                Event::PointerMoved(pos2(100.0, 50.0)),
+                Event::PointerButton {
+                    pos: pos2(100.0, 50.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: Default::default(),
+                },
+                touch(0, 1, TouchPhase::Start, pos2(100.0, 50.0)),
+            ],
+            vec![
+                Event::PointerMoved(pos2(120.0, 70.0)),
+                touch(0, 1, TouchPhase::Move, pos2(120.0, 70.0)),
+            ],
+        ] {
+            let mut output = context.run_ui(raw_input(events), |ui| {
+                ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
+                controller.process_eframe_context(ui.ctx());
+            });
+            output.textures_delta.clear();
+        }
+        assert!(context.egui_wants_pointer_input());
+        controller.update_camera(&mut camera, None, 0.1);
+        assert!(camera.pose().abs_diff_eq(initial, 1e-5));
+
+        for events in [
+            vec![
+                touch(0, 2, TouchPhase::Start, pos2(88.0, 512.0)),
+                touch(0, 3, TouchPhase::Start, pos2(400.0, 250.0)),
+            ],
+            vec![
+                touch(0, 2, TouchPhase::Move, pos2(88.0, 452.0)),
+                touch(0, 3, TouchPhase::Move, pos2(420.0, 235.0)),
+            ],
+        ] {
+            let mut output = context.run_ui(raw_input(events), |ui| {
+                let (_, response) = ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
+                assert!(response.dragged());
+                assert!(ui.ctx().egui_wants_pointer_input());
+                controller.process_eframe_context(ui.ctx());
+            });
+            output.textures_delta.clear();
+        }
+        let mut expected_controller = CameraController::new(6.0, 0.0025);
+        expected_controller.forward = true;
+        expected_controller.process_mouse_motion((20.0, -15.0));
+        let mut expected = camera.clone();
+        controller.update_camera(&mut camera, subject, 0.1);
+        expected_controller.update_camera(&mut expected, subject, 0.1);
+        assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));
+    }
+}
+
+#[test]
 fn a_second_finger_on_a_background_widget_does_not_rotate_the_camera() {
     let context = Context::default();
     let mut controller = CameraController::default();

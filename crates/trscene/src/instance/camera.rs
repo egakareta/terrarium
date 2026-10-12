@@ -539,10 +539,9 @@ impl CameraController {
             context.interactive_rects_last_pass()
         };
         captured_touches.retain(|position| {
-            pointer_capture
-                || interactive_rects
-                    .iter()
-                    .any(|rect| rect.contains(*position))
+            interactive_rects
+                .iter()
+                .any(|rect| rect.contains(*position))
                 || context
                     .layer_id_at(*position)
                     .is_some_and(|layer| layer.order != crate::egui::Order::Background)
