@@ -177,6 +177,14 @@ impl Engine {
             .map_or(fallback_size, |size| [size.width, size.height]);
         #[cfg(target_arch = "wasm32")]
         let size = fallback_size;
+        #[cfg(target_arch = "wasm32")]
+        let mut workspace = workspace;
+        #[cfg(target_arch = "wasm32")]
+        if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
+            workspace
+                .camera_controller_mut()
+                .set_touchscreen_detected(true);
+        }
 
         let render_state = creation_context
             .wgpu_render_state
@@ -399,6 +407,10 @@ impl Engine {
                     .and_then(|document| document.get_element_by_id(&canvas_id))
                     .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
                     .unwrap_or_else(|| panic!("failed to find canvas `{canvas_id}`"));
+                canvas
+                    .style()
+                    .set_property("touch-action", "none")
+                    .expect("failed to disable browser touch gestures on the canvas");
 
                 let web_options = eframe::WebOptions {
                     renderer: eframe::Renderer::Wgpu,
@@ -426,18 +438,66 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     } else {
         0.0
     };
-    let egui_wants_pointer_input = context.egui_wants_pointer_input();
-    let egui_wants_keyboard_input = context.egui_wants_keyboard_input();
-    context.input(|input| {
-        workspace
-            .camera_controller_mut()
-            .process_eframe_input_with_capture(
-                input,
-                egui_wants_pointer_input,
-                egui_wants_keyboard_input,
-            )
-    });
+    workspace
+        .camera_controller_mut()
+        .process_eframe_context(context);
     delta
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_web_canvas_input(context: &egui::Context, raw_input: &mut egui::RawInput) {
+    use wasm_bindgen::JsCast;
+
+    let Some(canvas) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.query_selector("canvas").ok().flatten())
+        .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
+    else {
+        return;
+    };
+
+    let bounds = canvas.get_bounding_client_rect();
+    let mut width = bounds.width() as f32;
+    let mut height = bounds.height() as f32;
+    if let Some(style) =
+        web_sys::window().and_then(|window| window.get_computed_style(&canvas).ok().flatten())
+    {
+        let padding = |property| {
+            style
+                .get_property_value(property)
+                .ok()
+                .and_then(|value| value.trim_end_matches("px").parse::<f32>().ok())
+                .unwrap_or_default()
+        };
+        width -= padding("padding-left") + padding("padding-right");
+        height -= padding("padding-top") + padding("padding-bottom");
+    }
+
+    let zoom_factor = context.zoom_factor();
+    if !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || !zoom_factor.is_finite()
+        || zoom_factor <= 0.0
+    {
+        return;
+    }
+
+    let pixels_per_point = (canvas.width() as f32 / width + canvas.height() as f32 / height) * 0.5;
+    if !pixels_per_point.is_finite() || pixels_per_point <= 0.0 {
+        return;
+    }
+
+    raw_input.screen_rect = Some(egui::Rect::from_min_size(
+        egui::Pos2::ZERO,
+        egui::vec2(width / zoom_factor, height / zoom_factor),
+    ));
+    raw_input
+        .viewports
+        .entry(egui::ViewportId::ROOT)
+        .or_default()
+        .native_pixels_per_point = Some(pixels_per_point);
 }
 
 fn configure_egui_style(context: &egui::Context) {
@@ -641,6 +701,8 @@ impl<A: App> eframe::App for AppAdapter<A> {
     }
 
     fn raw_input_hook(&mut self, context: &egui::Context, raw_input: &mut egui::RawInput) {
+        #[cfg(target_arch = "wasm32")]
+        normalize_web_canvas_input(context, raw_input);
         with_engine(&self.engine, |engine| {
             self.app.raw_input_hook(engine, context, raw_input);
         });
