@@ -106,7 +106,6 @@ required-features = ["devtools"]
 
 [dependencies]
 trdevtools = { workspace = true, optional = true }
-trdylib = { workspace = true, optional = true }
 trinternal = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -114,12 +113,15 @@ approx = "0.5"
 bevy_ecs = "0.20"
 pollster = "1"
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+trdylib = { workspace = true, optional = true }
+
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
 devtools = ["dep:trdevtools", "trinternal/devtools"]
-dynamic_linking = ["dep:trdylib"]
+dynamic_linking = ["dep:trdylib", "dep:trinternal"]
 
 # auto-managed by cargo-forward-flags
 # <forward trinternal exclude="devtools">
