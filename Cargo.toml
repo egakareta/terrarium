@@ -120,6 +120,8 @@ trdylib = { workspace = true, optional = true }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
+default = ["static_linking"]
+static_linking = ["dep:trinternal"]
 dynamic_linking = ["dep:trdylib", "dep:trinternal"]
 
 # auto-managed by cargo-forward-flags
