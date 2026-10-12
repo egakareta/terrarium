@@ -120,11 +120,10 @@ trdylib = { workspace = true, optional = true }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
-devtools = ["dep:trdevtools", "trinternal/devtools"]
 dynamic_linking = ["dep:trdylib", "dep:trinternal"]
 
 # auto-managed by cargo-forward-flags
-# <forward trinternal exclude="devtools">
+# <forward trinternal>
 asio = ["trinternal?/asio"]
 bevy = ["trinternal?/bevy"]
 cli = ["trinternal?/cli"]
@@ -133,6 +132,7 @@ compat = ["trinternal?/compat"]
 default-fonts = ["trinternal?/default-fonts"]
 default-materials = ["trinternal?/default-materials"]
 default-skybox = ["trinternal?/default-skybox"]
+devtools = ["trinternal?/devtools"]
 dx12 = ["trinternal?/dx12"]
 eframe-default-fonts = ["trinternal?/eframe-default-fonts"]
 flac = ["trinternal?/flac"]
