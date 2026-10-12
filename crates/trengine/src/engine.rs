@@ -177,6 +177,14 @@ impl Engine {
             .map_or(fallback_size, |size| [size.width, size.height]);
         #[cfg(target_arch = "wasm32")]
         let size = fallback_size;
+        #[cfg(target_arch = "wasm32")]
+        let mut workspace = workspace;
+        #[cfg(target_arch = "wasm32")]
+        if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
+            workspace
+                .camera_controller_mut()
+                .set_touchscreen_detected(true);
+        }
 
         let render_state = creation_context
             .wgpu_render_state
@@ -399,6 +407,10 @@ impl Engine {
                     .and_then(|document| document.get_element_by_id(&canvas_id))
                     .and_then(|element| element.dyn_into::<web_sys::HtmlCanvasElement>().ok())
                     .unwrap_or_else(|| panic!("failed to find canvas `{canvas_id}`"));
+                canvas
+                    .style()
+                    .set_property("touch-action", "none")
+                    .expect("failed to disable browser touch gestures on the canvas");
 
                 let web_options = eframe::WebOptions {
                     renderer: eframe::Renderer::Wgpu,
@@ -426,17 +438,9 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     } else {
         0.0
     };
-    let egui_wants_pointer_input = context.egui_wants_pointer_input();
-    let egui_wants_keyboard_input = context.egui_wants_keyboard_input();
-    context.input(|input| {
-        workspace
-            .camera_controller_mut()
-            .process_eframe_input_with_capture(
-                input,
-                egui_wants_pointer_input,
-                egui_wants_keyboard_input,
-            )
-    });
+    workspace
+        .camera_controller_mut()
+        .process_eframe_context(context);
     delta
 }
 

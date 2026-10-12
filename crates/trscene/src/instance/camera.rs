@@ -7,6 +7,8 @@ use crate::{
     },
 };
 
+mod touch;
+
 /// A perspective camera with a world-space pivot.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
@@ -211,12 +213,12 @@ impl Default for CameraKeyBindings {
     }
 }
 
-/// Keyboard and mouse input for free-moving and subject-following [`Camera`]s.
+/// Keyboard, mouse, and touch input for free-moving and subject-following [`Camera`]s.
 #[derive(Clone, Debug)]
 pub struct CameraController {
     /// Movement and zoom speed in world units per second.
     pub speed: f32,
-    /// Mouse-look sensitivity in radians per raw mouse unit.
+    /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
     pub sensitivity: f32,
     /// Physical keys assigned to each movement action.
     pub key_bindings: CameraKeyBindings,
@@ -242,6 +244,10 @@ pub struct CameraController {
     pub mouse_enabled: bool,
     /// Whether keyboard movement input is processed.
     pub keyboard_enabled: bool,
+    /// Whether touchscreen movement and drag-to-look input are processed.
+    ///
+    /// Enabled by default; the joystick appears once a touchscreen is detected.
+    pub touch_enabled: bool,
     /// Distance from the subject's focus point in third-person mode.
     pub subject_distance: f32,
     /// Minimum camera distance from the subject's focus point.
@@ -250,7 +256,7 @@ pub struct CameraController {
     pub max_subject_distance: f32,
     /// Local-space offset from the subject pivot to the camera's focus point.
     pub subject_offset: Vec3,
-    /// Orbit speed in radians per second for keyboard controls.
+    /// Orbit speed in radians per second for keyboard and joystick controls.
     pub orbit_speed: f32,
     /// Minimum vertical orbit angle in radians.
     pub min_subject_pitch: f32,
@@ -261,6 +267,7 @@ pub struct CameraController {
     orbit_subject: Option<InstanceId>,
     orbit_yaw: f32,
     orbit_pitch: f32,
+    touch: touch::TouchControls,
 }
 
 impl Default for CameraController {
@@ -296,6 +303,7 @@ impl CameraController {
             mouse_drag_button: MouseButton::Left,
             mouse_enabled: true,
             keyboard_enabled: true,
+            touch_enabled: true,
             subject_distance: 5.0,
             min_subject_distance: 0.5,
             max_subject_distance: 100.0,
@@ -308,6 +316,7 @@ impl CameraController {
             orbit_subject: None,
             orbit_yaw: 0.0,
             orbit_pitch: 0.0,
+            touch: touch::TouchControls::default(),
         }
     }
 
@@ -337,19 +346,20 @@ impl CameraController {
         self
     }
 
-    /// Sets the keyboard orbit speed in radians per second.
+    /// Sets the keyboard and joystick orbit speed in radians per second.
     pub fn with_orbit_speed(mut self, speed: f32) -> Self {
         self.orbit_speed = speed;
         self
     }
 
-    /// Enables or disables all camera input (both keyboard and mouse).
+    /// Enables or disables all camera input (keyboard, mouse, and touch).
     ///
     /// When set to `false`, any currently held movement keys, accumulated
-    /// mouse deltas, and active mouse dragging states are cleared immediately.
+    /// look deltas, and active mouse or touch gestures are cleared immediately.
     pub fn set_enabled(&mut self, enabled: bool) {
         self.set_keyboard_enabled(enabled);
         self.set_mouse_enabled(enabled);
+        self.set_touch_enabled(enabled);
     }
 
     /// Enables or disables keyboard movement input.
@@ -374,9 +384,30 @@ impl CameraController {
         }
     }
 
-    /// Returns `true` if any camera input (keyboard or mouse) is enabled.
+    /// Enables or disables touchscreen movement and look input.
+    ///
+    /// Disabling touch also hides the joystick and clears active gestures.
+    pub fn set_touch_enabled(&mut self, enabled: bool) {
+        self.touch_enabled = enabled;
+        if !enabled {
+            self.touch.clear();
+        }
+    }
+
+    /// Records touchscreen capability before the first touch event, if known.
+    ///
+    /// Otherwise normalized input detects it automatically. Passing `false`
+    /// clears active touch gestures; normalized input may detect it again.
+    pub fn set_touchscreen_detected(&mut self, detected: bool) {
+        self.touch.detected = detected;
+        if !detected {
+            self.touch.clear();
+        }
+    }
+
+    /// Returns `true` if any camera input (keyboard, mouse, or touch) is enabled.
     pub fn is_enabled(&self) -> bool {
-        self.keyboard_enabled || self.mouse_enabled
+        self.keyboard_enabled || self.mouse_enabled || self.touch_enabled
     }
 
     /// Sets whether all camera input is enabled, returning `self` for chaining.
@@ -394,6 +425,12 @@ impl CameraController {
     /// Sets whether mouse-look input is enabled, returning `self` for chaining.
     pub fn with_mouse_enabled(mut self, enabled: bool) -> Self {
         self.set_mouse_enabled(enabled);
+        self
+    }
+
+    /// Sets whether touchscreen input is enabled, returning `self` for chaining.
+    pub fn with_touch_enabled(mut self, enabled: bool) -> Self {
+        self.set_touch_enabled(enabled);
         self
     }
 
@@ -466,9 +503,82 @@ impl CameraController {
         egui_wants_pointer_input: bool,
         egui_wants_keyboard_input: bool,
     ) {
+        self.process_eframe_input_inner(
+            input,
+            egui_wants_pointer_input,
+            egui_wants_keyboard_input,
+            |_| egui_wants_pointer_input,
+        );
+    }
+
+    /// Processes eframe input with UI capture and draws the touchscreen joystick.
+    ///
+    /// Call once per frame before [`Self::update_camera`]. Touch gestures are
+    /// assigned at touch-down, allowing simultaneous joystick movement and look.
+    /// Touches starting on UI areas are left to egui.
+    pub fn process_eframe_context(&mut self, context: &crate::egui::Context) {
+        let pointer_capture = context.egui_wants_pointer_input();
+        let keyboard_capture = context.egui_wants_keyboard_input();
+        let mut captured_touches = context.input(|input| {
+            input
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    crate::egui::Event::Touch {
+                        phase: crate::egui::TouchPhase::Start,
+                        pos,
+                        ..
+                    } => Some(*pos),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let interactive_rects = if captured_touches.is_empty() {
+            Vec::new()
+        } else {
+            context.interactive_rects_last_pass()
+        };
+        captured_touches.retain(|position| {
+            pointer_capture
+                || interactive_rects
+                    .iter()
+                    .any(|rect| rect.contains(*position))
+                || context
+                    .layer_id_at(*position)
+                    .is_some_and(|layer| layer.order != crate::egui::Order::Background)
+        });
+        context.input(|input| {
+            self.process_eframe_input_inner(input, pointer_capture, keyboard_capture, |position| {
+                captured_touches.contains(&position)
+            });
+        });
+        self.paint_touch_controls(context);
+    }
+
+    /// Draws the joystick for callers that process normalized input themselves.
+    pub fn paint_touch_controls(&self, context: &crate::egui::Context) {
+        if self.touch_enabled && self.touch.detected {
+            self.touch.paint(context);
+        }
+    }
+
+    fn process_eframe_input_inner(
+        &mut self,
+        input: &crate::egui::InputState,
+        egui_wants_pointer_input: bool,
+        egui_wants_keyboard_input: bool,
+        touch_captured: impl Fn(crate::egui::Pos2) -> bool,
+    ) {
+        self.touch.observe_input(input);
         if !input.focused {
             self.clear_keys();
             return;
+        }
+
+        if self.touch_enabled {
+            self.touch.process(input, touch_captured);
+        } else {
+            self.touch.clear();
         }
 
         if !self.keyboard_enabled || egui_wants_keyboard_input {
@@ -489,7 +599,14 @@ impl CameraController {
             self.sprint = key_down(&self.key_bindings.sprint);
         }
 
-        if !self.mouse_enabled || egui_wants_pointer_input {
+        // Integrations emit pointer events alongside touch events. Processing
+        // both would rotate twice or rotate when dragging the joystick.
+        let touch_pointer = input.any_touches()
+            || input
+                .events
+                .iter()
+                .any(|event| matches!(event, crate::egui::Event::Touch { .. }));
+        if !self.mouse_enabled || egui_wants_pointer_input || touch_pointer {
             self.mouse_delta = (0.0, 0.0);
             self.stop_mouse_drag();
         } else if let Some(button) = eframe_button(self.mouse_drag_button)
@@ -543,16 +660,28 @@ impl CameraController {
         self.mouse_delta.1 += delta.1;
     }
 
-    fn update_free_camera(&mut self, camera: &mut Camera, delta_seconds: f32) {
-        self.orbit_subject = None;
-        if !self.mouse_enabled {
-            self.mouse_delta = (0.0, 0.0);
-        }
-        if !self.keyboard_enabled {
-            self.clear_keyboard_input();
-        }
+    fn movement_axes(&self) -> Vec3 {
+        let axis =
+            |positive: bool, negative: bool| (i8::from(positive) - i8::from(negative)) as f32;
+        Vec3::new(
+            (axis(self.right, self.left) + self.touch.movement.x).clamp(-1.0, 1.0),
+            axis(self.up, self.down),
+            (axis(self.forward, self.backward) - self.touch.movement.y).clamp(-1.0, 1.0),
+        )
+    }
 
-        let delta_seconds = delta_seconds.min(0.1);
+    fn speed_multiplier(&self) -> f32 {
+        if self.sprint { 2.5 } else { 1.0 }
+    }
+
+    fn update_free_camera(
+        &mut self,
+        camera: &mut Camera,
+        delta_seconds: f32,
+        axes: Vec3,
+        look: crate::egui::Vec2,
+    ) {
+        self.orbit_subject = None;
 
         // Rebuild a roll-free orientation from yaw/pitch every frame.
         // Incremental matrix multiplies (`pivot * rotation`) accumulate
@@ -572,45 +701,26 @@ impl CameraController {
         };
         let current_pitch = forward0.y.clamp(-1.0, 1.0).asin();
 
-        let yaw_delta = -self.mouse_delta.0 * self.sensitivity;
+        let yaw_delta = -look.x * self.sensitivity;
         let new_yaw = yaw + yaw_delta;
-        let new_pitch = (current_pitch - self.mouse_delta.1 * self.sensitivity)
+        let new_pitch = (current_pitch - look.y * self.sensitivity)
             .clamp(-89.0_f32.to_radians(), 89.0_f32.to_radians());
         let new_rotation = Quat::from_rotation_y(new_yaw) * Quat::from_rotation_x(new_pitch);
 
         let forward = new_rotation * Vec3::NEG_Z;
         let right = Quat::from_rotation_y(new_yaw) * Vec3::X;
-        let mut movement = Vec3::ZERO;
-        if self.forward {
-            movement += forward;
-        }
-        if self.backward {
-            movement -= forward;
-        }
-        if self.right {
-            movement += right;
-        }
-        if self.left {
-            movement -= right;
-        }
-        if self.up {
-            movement += Vec3::Y;
-        }
-        if self.down {
-            movement -= Vec3::Y;
-        }
+        let movement = forward * axes.z + right * axes.x + Vec3::Y * axes.y;
 
         let mut new_position = position;
         if movement.length_squared() > 0.0 {
-            let speed = self.speed * if self.sprint { 2.5 } else { 1.0 };
-            new_position += movement.normalize() * speed * delta_seconds;
+            let speed = self.speed * self.speed_multiplier();
+            new_position += movement.normalize() * axes.length().min(1.0) * speed * delta_seconds;
         }
 
         camera.with_pose(Mat4::from_rotation_translation(new_rotation, new_position));
-        self.mouse_delta = (0.0, 0.0);
     }
 
-    /// Moves and rotates `camera` using accumulated input, then clears the mouse delta.
+    /// Moves and rotates `camera` using accumulated input, then clears look deltas.
     ///
     /// Without a subject, movement is frame-rate independent. The delta is
     /// capped at 100 ms, sprinting multiplies movement speed by `2.5`, and
@@ -624,28 +734,38 @@ impl CameraController {
     /// With a subject, the camera follows it in third person: mouse movement
     /// and left/right keys orbit, forward/backward keys zoom, and up/down keys
     /// adjust orbit elevation. Passing `None` keeps the camera free-moving.
+    /// The joystick uses the same forward/backward and left/right actions,
+    /// with speed proportional to its displacement. Screen drags apply look input.
     pub fn update_camera(
         &mut self,
         camera: &mut Camera,
         subject: Option<(InstanceId, Mat4)>,
         delta_seconds: f32,
     ) {
-        let Some((subject_id, subject_pose)) = subject else {
-            self.update_free_camera(camera, delta_seconds);
-            return;
-        };
-
         if !self.mouse_enabled {
             self.mouse_delta = (0.0, 0.0);
         }
         if !self.keyboard_enabled {
             self.clear_keyboard_input();
         }
+        if !self.touch_enabled {
+            self.touch.clear();
+        }
+
+        let axes = self.movement_axes();
+        let look =
+            crate::egui::vec2(self.mouse_delta.0, self.mouse_delta.1) + self.touch.look_delta;
+        self.mouse_delta = (0.0, 0.0);
+        self.touch.look_delta = crate::egui::Vec2::ZERO;
 
         let delta_seconds = if delta_seconds.is_finite() {
             delta_seconds.clamp(0.0, 0.1)
         } else {
             0.0
+        };
+        let Some((subject_id, subject_pose)) = subject else {
+            self.update_free_camera(camera, delta_seconds, axes, look);
+            return;
         };
         let offset = if self.subject_offset.is_finite() {
             self.subject_offset
@@ -666,31 +786,17 @@ impl CameraController {
             self.orbit_subject = Some(subject_id);
         }
 
-        self.orbit_yaw -= self.mouse_delta.0 * self.sensitivity;
+        self.orbit_yaw -= look.x * self.sensitivity;
         let (min_pitch, max_pitch) = self.subject_pitch_limits();
         self.orbit_pitch =
-            (self.orbit_pitch + self.mouse_delta.1 * self.sensitivity).clamp(min_pitch, max_pitch);
+            (self.orbit_pitch + look.y * self.sensitivity).clamp(min_pitch, max_pitch);
 
-        let speed_multiplier = if self.sprint { 2.5 } else { 1.0 };
+        let speed_multiplier = self.speed_multiplier();
         let movement = self.speed * speed_multiplier * delta_seconds;
-        if self.forward {
-            self.subject_distance -= movement;
-        }
-        if self.backward {
-            self.subject_distance += movement;
-        }
-        if self.left {
-            self.orbit_yaw += self.orbit_speed * speed_multiplier * delta_seconds;
-        }
-        if self.right {
-            self.orbit_yaw -= self.orbit_speed * speed_multiplier * delta_seconds;
-        }
-        if self.up {
-            self.orbit_pitch += self.orbit_speed * speed_multiplier * delta_seconds;
-        }
-        if self.down {
-            self.orbit_pitch -= self.orbit_speed * speed_multiplier * delta_seconds;
-        }
+        self.subject_distance -= axes.z * movement;
+        let orbit_step = self.orbit_speed * speed_multiplier * delta_seconds;
+        self.orbit_yaw -= axes.x * orbit_step;
+        self.orbit_pitch += axes.y * orbit_step;
         self.orbit_pitch = self.orbit_pitch.clamp(min_pitch, max_pitch);
 
         let min_distance = if self.min_subject_distance.is_finite() {
@@ -719,7 +825,6 @@ impl CameraController {
             );
         let pose = glam::camera::rh::view::look_at_mat4(camera_position, focus, Vec3::Y).inverse();
         camera.with_pose(pose);
-        self.mouse_delta = (0.0, 0.0);
     }
 
     fn subject_pitch_limits(&self) -> (f32, f32) {
@@ -741,6 +846,7 @@ impl CameraController {
         self.clear_keyboard_input();
         self.mouse_delta = (0.0, 0.0);
         self.stop_mouse_drag();
+        self.touch.clear();
     }
 
     fn clear_keyboard_input(&mut self) {
