@@ -19,6 +19,8 @@ concurrency:
 jobs:
   build:
     if: >-
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.event.action != 'closed' &&
       (github.ref == 'refs/heads/master' ||
       (github.event_name == 'pull_request' &&
@@ -50,6 +52,8 @@ jobs:
   deploy:
     if: >-
       ${{ !cancelled() &&
+      github.actor != 'dependabot[bot]' &&
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
       (needs.build.result == 'success' || github.event.action == 'closed') &&
       (github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository) }}
