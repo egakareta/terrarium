@@ -2,6 +2,7 @@ use terrarium::{AppCreationError, HasPVInstance as _, Instance, MeshPart, Terrar
 
 fn main() {
     Terrarium::new()
+        .with_ui("gltf")
         .run(|engine| {
             let helmet_mesh = engine.add_mesh(include_bytes!(
                 "../crates/trscene/fixtures/DamagedHelmet.glb"

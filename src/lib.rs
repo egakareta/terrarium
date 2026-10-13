@@ -7,7 +7,7 @@
 /// foundations:
 ///
 /// - [wgpu](https://github.com/gfx-rs/wgpu) for 3D graphics.
-/// - [eframe](https://github.com/emilk/egui) for 2D graphics.
+/// - [Tauri](https://tauri.app) and [React](https://react.dev) for windows and UI.
 ///
 /// ## Motivation
 ///

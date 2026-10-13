@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Terrarium",
+  "version": "0.1.0",
+  "identifier": "org.terrarium.engine",
+  "build": { "frontendDist": "frontend" },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' blob: https://cdn.jsdelivr.net; connect-src 'self' ipc: http://ipc.localhost https://api.fontsource.org https://cdn.jsdelivr.net"
+    }
+  },
+  "bundle": { "active": false }
+}

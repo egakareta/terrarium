@@ -1,13 +1,8 @@
 #[cfg(feature = "meshpart")]
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Mutex, OnceLock};
 
-#[cfg(feature = "meshpart")]
-use slotmap::Key;
-
-use crate::{egui_wgpu, trscene::Workspace};
+use crate::{RenderState, trscene::Workspace};
 
 #[cfg(feature = "meshpart")]
 mod viewport;
@@ -16,78 +11,202 @@ pub use trrender::{DEPTH_FORMAT, RendererError};
 #[cfg(feature = "meshpart")]
 pub use viewport::{Viewport, ViewportTexture};
 
-#[cfg(not(target_arch = "wasm32"))]
-static WGPU_INSTANCE_KEEPALIVE: OnceLock<Mutex<Option<crate::wgpu::Instance>>> = OnceLock::new();
-
-#[cfg(feature = "meshpart")]
-struct ViewportTarget {
-    _color_texture: crate::wgpu::Texture,
-    color_view: crate::wgpu::TextureView,
-    _depth_texture: crate::wgpu::Texture,
-    depth_view: crate::wgpu::TextureView,
-    size: [u32; 2],
-    texture_id: Option<crate::egui::TextureId>,
-}
-
-/// Terrarium's eframe adapter around the standalone WGPU renderer.
+/// Terrarium's host-independent adapter around the standalone WGPU renderer.
 pub struct RenderAdapter {
     backend: trrender::Renderer,
+    state: RenderState,
+    #[cfg(not(target_arch = "wasm32"))]
+    viewport_background: wgpu::RenderPipeline,
     #[cfg(feature = "meshpart")]
-    viewport_targets: HashMap<u64, ViewportTarget>,
+    viewport_targets: HashMap<u64, trrender::Renderer>,
 }
 
 impl RenderAdapter {
-    /// Creates an eframe-backed renderer from the active WGPU render state.
-    pub fn new(
-        render_state: &egui_wgpu::RenderState,
-        size: [u32; 2],
-    ) -> Result<Self, RendererError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let keepalive = WGPU_INSTANCE_KEEPALIVE.get_or_init(|| Mutex::new(None));
-            *keepalive
-                .lock()
-                .expect("renderer WGPU instance lock poisoned") =
-                Some(render_state.instance.clone());
-        }
+    /// Creates a renderer from shared GPU resources.
+    pub fn new(state: &RenderState, size: [u32; 2]) -> Result<Self, RendererError> {
         Ok(Self {
             backend: trrender::Renderer::new(
-                &render_state.device,
-                &render_state.queue,
-                render_state.target_format,
+                &state.device,
+                &state.queue,
+                state.target_format,
                 size,
             )?,
+            state: state.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            viewport_background: viewport_background(state),
             #[cfg(feature = "meshpart")]
-            viewport_targets: HashMap::default(),
+            viewport_targets: HashMap::new(),
         })
     }
 
     /// Builds a borrowed render snapshot from a workspace and submits it.
-    pub fn prepare_eframe_scene(
+    pub fn prepare_scene(
         &mut self,
         workspace: &Workspace,
         size: [u32; 2],
     ) -> Result<(), RendererError> {
-        let scene = workspace.render_scene();
-        self.backend.prepare(&scene, size)
+        self.backend.prepare(&workspace.render_scene(), size)
     }
 
-    /// Draws the prepared output texture into eframe's WGPU paint pass.
-    pub fn paint_eframe_scene<'a>(&mut self, pass: &mut crate::wgpu::RenderPass<'a>) {
-        self.backend.paint(pass);
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn paint_native(
+        &mut self,
+        target: &wgpu::TextureView,
+        regions: &[crate::native_surface::Rect],
+        viewport: Option<u64>,
+    ) {
+        let mut encoder =
+            self.state
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Terrarium native compositor"),
+                });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            let regions: Vec<_> = regions
+                .iter()
+                .map(|rect| [rect.x, rect.y, rect.width, rect.height])
+                .collect();
+            if viewport.is_some() {
+                pass.set_pipeline(&self.viewport_background);
+                for &[x, y, width, height] in &regions {
+                    pass.set_scissor_rect(x, y, width, height);
+                    pass.draw(0..3, 0..1);
+                }
+            }
+            let renderer = match viewport {
+                #[cfg(feature = "meshpart")]
+                Some(id) => self.viewport_targets.get_mut(&id),
+                #[cfg(not(feature = "meshpart"))]
+                Some(_) => None,
+                None => Some(&mut self.backend),
+            };
+            if let Some(renderer) = renderer {
+                renderer.paint_regions(&mut pass, &regions);
+            }
+        }
+        self.state.queue.submit(Some(encoder.finish()));
+    }
+
+    #[cfg(all(feature = "meshpart", target_arch = "wasm32"))]
+    pub(crate) fn paint_viewport(
+        &mut self,
+        target: &wgpu::TextureView,
+        id: u64,
+    ) -> Result<(), RendererError> {
+        let renderer = self
+            .viewport_targets
+            .get_mut(&id)
+            .ok_or_else(|| RendererError::PixelReadback("viewport has been released".into()))?;
+        let mut encoder =
+            self.state
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("WebGPU viewport compositor"),
+                });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            renderer.paint(&mut pass);
+        }
+        self.state.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// Composites the prepared scene into the host's output attachment.
+    pub fn paint_scene(&mut self, target: &wgpu::TextureView) {
+        let mut encoder =
+            self.state
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Terrarium host compositor"),
+                });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Terrarium host output"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            self.backend.paint(&mut pass);
+        }
+        self.state.queue.submit(Some(encoder.finish()));
     }
 }
 
 impl Deref for RenderAdapter {
     type Target = trrender::Renderer;
-
     fn deref(&self) -> &Self::Target {
         &self.backend
     }
 }
-
 impl DerefMut for RenderAdapter {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.backend
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn viewport_background(state: &RenderState) -> wgpu::RenderPipeline {
+    let shader = state
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("native viewport background"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("viewport_background.wgsl").into()),
+        });
+    state
+        .device
+        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("native viewport background"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vertex"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fragment"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: state.target_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        })
 }

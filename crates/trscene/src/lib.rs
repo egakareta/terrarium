@@ -1,13 +1,15 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-pub use egui;
 #[cfg(feature = "sound")]
 pub use euphorium;
 #[cfg(feature = "physics")]
 pub use rapier3d;
 pub use trrendert::{glam, *};
 pub use winit;
+
+pub mod input;
+pub use input::*;
 
 pub mod instance;
 pub mod interpolation;

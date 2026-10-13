@@ -2,43 +2,79 @@
 name = "trengine"
 version.workspace = true
 edition.workspace = true
-description = "eframe and wgpu application runtime for Terrarium."
+description = "Tauri, React, and wgpu application runtime for Terrarium."
 documentation = "https://docs.rs/trengine"
 repository.workspace = true
 license.workspace = true
+include = [
+  "src/**",
+  "build.rs",
+  "tauri.conf.json",
+  "frontend/**",
+  "icons/**",
+  "README.md",
+  "Cargo.toml",
+]
 
 [dependencies]
 bevy_app = { version = "0.20", features = ["web"], optional = true }
 bevy_ecs = { version = "0.20", optional = true }
 bevy_tasks = { version = "0.20", optional = true }
 bevy_time = { version = "0.20", optional = true }
-eframe = { version = "0.36", default-features = false, features = [
-  "wgpu_no_default_features",
-  "wayland",
-] }
 env_logger = "0.11"
 log = "0.4"
 slotmap = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 trdevtools = { workspace = true, optional = true }
-tregui = { workspace = true, features = ["phosphor"], optional = true }
 trfont = { workspace = true }
 trrender = { workspace = true }
 trscene = { workspace = true }
 wgpu = { version = "30", default-features = false, features = ["std"] }
-winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = "1"
+tauri = { version = "2.12", default-features = false, features = [
+  "wry",
+  "compression",
+  "custom-protocol",
+  "x11",
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.build-dependencies]
+tauri-build = { version = "2.6", features = [] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = "2.21"
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSWindow", "NSEvent"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSThread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
 web-sys = { version = "0.3", features = [
   "CssStyleDeclaration",
   "Document",
   "DomRect",
   "Element",
+  "Event",
+  "EventTarget",
   "HtmlCanvasElement",
   "Navigator",
   "Window",
@@ -49,10 +85,9 @@ bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 default-fonts = ["trfont/default-fonts"]
 default-materials = ["trrender/default-materials", "trscene/default-materials"]
 default-skybox = ["trrender/default-skybox", "trscene/default-skybox"]
-devtools = ["dep:trdevtools", "phosphor", "trscene/devtools"]
-eframe-default-fonts = ["eframe/default_fonts"]
-phosphor = ["dep:tregui"]
-x11 = ["eframe/x11", "winit/x11"]
+devtools = ["dep:trdevtools", "trscene/devtools"]
+phosphor = []
+x11 = []
 
 # <forward trscene exclude="default-materials,default-skybox,devtools">
 asio = ["trscene/asio"]

@@ -1,7 +1,7 @@
 use terrarium::{
     App, Color3, Engine, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart,
     HasPointLight, Instance, InstanceId, Material, Part, PartShape, PointLight, RendererError,
-    Terrarium, eframe, egui,
+    Terrarium,
     glam::{Mat4, Vec3},
 };
 
@@ -33,26 +33,22 @@ impl PhysicsApp {
 }
 
 impl App for PhysicsApp {
-    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::left("physics_controls")
-            .resizable(false)
-            .default_size(220.0)
-            .show(ui, |ui| {
-                let gravity = engine.physics().gravity();
-                ui.label(format!("Dynamic bodies: {}", self.dynamic_parts.len()));
-                ui.label(format!(
-                    "Gravity: ({:.1}, {:.1}, {:.1})",
-                    gravity.x, gravity.y, gravity.z
-                ));
-                ui.label(format!("FPS: {:.0}", engine.renderer().fps()));
-                ui.separator();
-                if ui.button("Reset stack").clicked() {
-                    self.reset(engine);
-                }
-                if ui.button("Kick stack").clicked() {
-                    self.kick(engine);
-                }
-            });
+    fn state(&self, engine: &Engine) -> terrarium::serde_json::Value {
+        let gravity = engine.physics().gravity();
+        terrarium::serde_json::json!({ "bodies": self.dynamic_parts.len(), "gravity": [gravity.x, gravity.y, gravity.z] })
+    }
+    fn command(
+        &mut self,
+        engine: &mut Engine,
+        command: &str,
+        _payload: terrarium::serde_json::Value,
+    ) -> Result<terrarium::serde_json::Value, terrarium::AppCreationError> {
+        match command {
+            "reset" => self.reset(engine),
+            "kick" => self.kick(engine),
+            _ => return Err("unknown command".into()),
+        }
+        Ok(terrarium::serde_json::Value::Null)
     }
 }
 
@@ -144,12 +140,13 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::new().with_ui("physics").run(initialize).unwrap();
 }
 
 #[test]
 fn physics_example_loads_headlessly() -> Result<(), terrarium::AppCreationError> {
     let engine = Terrarium::new()
+        .with_ui("physics")
         .with_size([64, 64])
         .with_headless(Some(2))
         .run(initialize)?

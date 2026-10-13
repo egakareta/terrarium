@@ -3,7 +3,6 @@
 
 extern crate self as trdevtools;
 
-mod font_market;
 mod window;
 
 pub use trscene::devtools::*;

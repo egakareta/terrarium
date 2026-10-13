@@ -39,15 +39,19 @@ jobs:
         id: pages
       - run: |
           mise run build:examples:web
-          touch examples/dist/.nojekyll
+          touch web/dist/.nojekyll
         env:
           PAGES_BASE_PATH: >-
             ${{ steps.pages.outputs.base_path }}${{ github.event_name == 'pull_request' &&
             format('/pr-preview/pr-{0}', github.event.number) || '' }}
+      - run: |
+          cd web
+          npx playwright install --with-deps chromium
+          npm run test:browser
       - uses: actions/upload-artifact@v4
         with:
           name: pages
-          path: examples/dist
+          path: web/dist
           include-hidden-files: true
   deploy:
     if: >-
@@ -71,18 +75,18 @@ jobs:
         if: github.event.action != 'closed'
         with:
           name: pages
-          path: examples/dist
+          path: web/dist
       - uses: JamesIves/github-pages-deploy-action@v4
         if: github.event_name != 'pull_request'
         with:
-          folder: examples/dist
+          folder: web/dist
           branch: gh-pages
           clean-exclude: pr-preview/
           force: false
       - uses: rossjrw/pr-preview-action@v1
         if: github.event_name == 'pull_request'
         with:
-          source-dir: examples/dist
+          source-dir: web/dist
           preview-branch: gh-pages
           umbrella-dir: pr-preview
           qr-code: false

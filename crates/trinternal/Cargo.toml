@@ -28,6 +28,7 @@ default = [
   "persistence",
   "physics",
   "sound",
+  "vulkan",
   "vorbis",
   "wav",
   "webgpu",
@@ -49,7 +50,6 @@ default-materials = ["trengine/default-materials"]
 default-skybox = ["trengine/default-skybox"]
 devtools = ["trengine/devtools"]
 dx12 = ["trengine/dx12"]
-eframe-default-fonts = ["trengine/eframe-default-fonts"]
 flac = ["trengine/flac"]
 gles = ["trengine/gles"]
 jack = ["trengine/jack"]

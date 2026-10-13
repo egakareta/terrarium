@@ -1,7 +1,4 @@
-use terrarium::{
-    App, AppCreationError, Engine, Terrarium, eframe, egui,
-    egui::{FontId, RichText},
-};
+use terrarium::{App, AppCreationError, Engine, Terrarium};
 
 struct CloseAfterFrames {
     completed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -9,27 +6,23 @@ struct CloseAfterFrames {
 }
 
 impl App for CloseAfterFrames {
-    fn ui(&mut self, _engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.label(RichText::new("i love headless tests").font(FontId::proportional(40.0)));
-    }
-
     fn after_update(
         &mut self,
         _engine: &mut Engine,
-        context: &egui::Context,
-        _frame: &mut eframe::Frame,
+        _input: &terrarium::FrameInput,
+        frame: &mut terrarium::Frame,
     ) {
         use std::sync::atomic::Ordering;
-
         let completed = self.completed.fetch_add(1, Ordering::Relaxed) + 1;
         if completed == self.limit {
-            context.send_viewport_cmd(egui::ViewportCommand::Close);
+            frame.close();
         }
     }
 }
 
 fn main() {
     Terrarium::new()
+        .with_ui("headless")
         .run(|_engine| -> Result<CloseAfterFrames, AppCreationError> {
             Ok(CloseAfterFrames {
                 completed: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -53,6 +46,7 @@ mod tests {
         let completed = Arc::new(AtomicUsize::new(0));
         let app_completed = Arc::clone(&completed);
         Terrarium::new()
+            .with_ui("headless")
             .with_size([32, 32])
             .with_env_logger(false)
             .with_headless(None)

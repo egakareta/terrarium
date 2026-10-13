@@ -12,7 +12,7 @@ use bevy_ecs::prelude::*;
 pub use bevy_time as time;
 use bevy_time::{Time, TimePlugin, TimeUpdateStrategy};
 
-use crate::{AppCreationError, egui, trscene::Workspace};
+use crate::{AppCreationError, trscene::Workspace};
 
 /// Integrates an imperative [`Workspace`] into a Bevy app.
 ///
@@ -30,7 +30,7 @@ impl Plugin for TerrariumPlugin {
             app.add_plugins(TimePlugin);
         }
         app.world_mut().init_non_send::<Workspace>();
-        app.world_mut().init_non_send::<EguiContext>();
+        app.world_mut().init_non_send::<FrameContext>();
         app.add_systems(PostUpdate, advance_workspace.in_set(TerrariumSet::Advance));
     }
 }
@@ -45,14 +45,17 @@ pub enum TerrariumSet {
     Advance,
 }
 
-/// Access to the host's shared egui context from a Bevy system.
+/// Shared frame controls available to Bevy systems.
 #[derive(Default, Clone)]
-pub struct EguiContext(egui::Context);
-
-impl EguiContext {
-    /// Returns the shared egui context.
-    pub fn get(&self) -> &egui::Context {
-        &self.0
+pub struct FrameContext(std::rc::Rc<std::cell::Cell<bool>>);
+impl FrameContext {
+    /// Requests shutdown after the current frame.
+    pub fn close(&self) {
+        self.0.set(true);
+    }
+    /// Returns whether a Bevy system requested shutdown.
+    pub fn is_close_requested(&self) -> bool {
+        self.0.get()
     }
 }
 
@@ -63,7 +66,6 @@ fn advance_workspace(time: Res<Time>, mut workspace: NonSendMut<Workspace>) {
 pub(crate) fn attach_app(
     mut app: BevyApp,
     workspace: &mut Workspace,
-    context: &egui::Context,
 ) -> Result<BevyApp, AppCreationError> {
     let supplied_workspace = app.world().contains_non_send::<Workspace>();
     if !app.is_plugin_added::<TerrariumPlugin>() {
@@ -83,8 +85,6 @@ pub(crate) fn attach_app(
     if supplied_workspace {
         std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
     }
-    app.world_mut()
-        .insert_non_send(EguiContext(context.clone()));
     Ok(app)
 }
 
@@ -92,12 +92,7 @@ pub(crate) fn finalize_app(app: &mut BevyApp, workspace: &mut Workspace) -> bool
     with_workspace(app, workspace, finish_plugins)
 }
 
-pub(crate) fn update_app(
-    app: &mut BevyApp,
-    workspace: &mut Workspace,
-    context: &egui::Context,
-    delta: f32,
-) -> Option<f32> {
+pub(crate) fn update_app(app: &mut BevyApp, workspace: &mut Workspace, delta: f32) -> Option<f32> {
     with_workspace(app, workspace, |app| {
         if !finish_plugins(app) {
             return None;
@@ -106,9 +101,6 @@ pub(crate) fn update_app(
             delta,
         )));
         app.update();
-        if app.should_exit().is_some() {
-            context.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
         Some(app.world().resource::<Time>().delta_secs())
     })
 }

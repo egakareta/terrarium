@@ -1,35 +1,29 @@
-use terrarium::{TextureFilter, egui::*, glam::*, *};
+use terrarium::{TextureFilter, glam::*, *};
 
 struct SceneApp;
 
 impl App for SceneApp {
-    fn after_update(&mut self, engine: &mut Engine, context: &Context, _frame: &mut eframe::Frame) {
-        let delta_seconds = context.input(|input| input.stable_dt.min(0.1));
-        engine.lighting.advance_clock_time(delta_seconds, 0.25);
+    fn after_update(&mut self, engine: &mut Engine, input: &FrameInput, _frame: &mut Frame) {
+        engine.lighting.advance_clock_time(input.delta_secs(), 0.25);
     }
-
-    fn ui(&mut self, engine: &mut Engine, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        let fps = engine.renderer().fps();
-        let mut clock_time = engine.lighting.clock_time();
-        Panel::top("options").resizable(false).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(format!("FPS: {fps:.0}"));
-                ui.separator();
-                ui.scope(|ui| {
-                    ui.style_mut().override_font_id = Some(egui::FontId::monospace(14.0));
-
-                    ui.label(
-                        RichText::new(engine.lighting.time_of_day()).font(FontId::monospace(14.0)),
-                    );
-                    if ui
-                        .add(Slider::new(&mut clock_time, 0.0..=24.0).suffix("h"))
-                        .changed()
-                    {
-                        engine.lighting.with_clock_time(clock_time);
-                    }
-                });
-            });
-        });
+    fn state(&self, engine: &Engine) -> serde_json::Value {
+        serde_json::json!({ "clock": engine.lighting.clock_time(), "time": engine.lighting.time_of_day() })
+    }
+    fn command(
+        &mut self,
+        engine: &mut Engine,
+        command: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, AppCreationError> {
+        if command != "clock" {
+            return Err("unknown command".into());
+        }
+        let clock = payload
+            .as_f64()
+            .filter(|v| v.is_finite() && (0.0..=24.0).contains(v))
+            .ok_or("invalid clock time")?;
+        engine.lighting.with_clock_time(clock as f32);
+        Ok(serde_json::Value::Null)
     }
 }
 
@@ -269,12 +263,13 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::new().with_ui("app").run(initialize).unwrap();
 }
 
 #[test]
 fn app_loads() -> Result<(), terrarium::AppCreationError> {
     Terrarium::new()
+        .with_ui("app")
         .with_size([32, 32])
         .with_headless(Some(1))
         .run(initialize)?;

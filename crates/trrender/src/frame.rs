@@ -37,6 +37,11 @@ impl Renderer {
         self
     }
 
+    /// Returns the physical scene output dimensions.
+    pub fn size(&self) -> [u32; 2] {
+        [self.width, self.height]
+    }
+
     /// Returns the average number of successfully rendered frames per second over the last
     /// measurement interval.
     pub fn fps(&self) -> f32 {
@@ -357,6 +362,25 @@ impl Renderer {
         pass.set_pipeline(&self.output.pipeline);
         pass.set_bind_group(0, &self.output.bind_group, &[]);
         pass.draw(0..3, 0..1);
+        self.record_frame();
+    }
+
+    /// Draws the prepared output into visible regions of a native drawable.
+    /// Regions are physical pixel rectangles `[x, y, width, height]`.
+    pub fn paint_regions(&mut self, pass: &mut wgpu::RenderPass<'_>, regions: &[[u32; 4]]) {
+        pass.set_pipeline(&self.output.pipeline);
+        pass.set_bind_group(0, &self.output.bind_group, &[]);
+        for &[x, y, width, height] in regions {
+            if width > 0 && height > 0 {
+                pass.set_scissor_rect(x, y, width, height);
+                pass.draw(0..3, 0..1);
+            }
+        }
+        self.record_frame();
+    }
+
+    /// Records a completed frame displayed by an offscreen host.
+    pub fn finish_frame(&mut self) {
         self.record_frame();
     }
 

@@ -1,3 +1,3 @@
 # trdevtools
 
-Interactive workspace inspection and field-reflection tools for Terrarium.
+Workspace selection and validated reflection edits for the React inspector.

@@ -2,7 +2,7 @@ use trscene::Instance;
 
 use super::*;
 
-/// An offscreen scene that can be rendered into an egui texture or a CPU-side [`trrender::Image`].
+/// An offscreen scene that can be rendered into a React viewport or a CPU-side [`trrender::Image`].
 ///
 /// A viewport owns a workspace, so callers can add materials, lights, or more
 /// instances through [`Self::workspace_mut`] after creating it from a mesh.
@@ -78,126 +78,55 @@ impl RenderAdapter {
     pub(super) fn render_viewport(
         &mut self,
         viewport: &Viewport,
-        render_state: &crate::egui_wgpu::RenderState,
     ) -> Result<ViewportTexture, RendererError> {
-        let size = viewport.size;
-        let viewport_id = viewport.workspace.id().data().as_ffi();
-        self.ensure_viewport_target(viewport_id, size, render_state);
-        let scene = viewport.workspace.render_scene();
-        let target = self
-            .viewport_targets
-            .get(&viewport_id)
-            .expect("viewport target is created before rendering");
-        self.backend.render_to_view(
-            &scene,
-            &target.color_view,
-            &target.depth_view,
-            size,
-            color(viewport.clear_color),
-        )?;
-
-        let (texture_id, register_texture) = {
-            let mut egui_renderer = render_state.renderer.write();
-            match target.texture_id {
-                Some(texture_id) => {
-                    egui_renderer.update_egui_texture_from_wgpu_texture(
-                        &render_state.device,
-                        &target.color_view,
-                        crate::wgpu::FilterMode::Linear,
-                        texture_id,
-                    );
-                    (texture_id, false)
-                }
-                None => (
-                    egui_renderer.register_native_texture(
-                        &render_state.device,
-                        &target.color_view,
-                        crate::wgpu::FilterMode::Linear,
-                    ),
-                    true,
-                ),
-            }
-        };
-        if register_texture {
-            self.viewport_targets
-                .get_mut(&viewport_id)
-                .expect("viewport target is created before rendering")
-                .texture_id = Some(texture_id);
+        use slotmap::Key;
+        let id = viewport.workspace.id().data().as_ffi();
+        if !self.viewport_targets.contains_key(&id) {
+            self.viewport_targets.insert(
+                id,
+                trrender::Renderer::new(
+                    &self.state.device,
+                    &self.state.queue,
+                    self.state.target_format,
+                    viewport.size,
+                )?,
+            );
         }
-
+        let renderer = self
+            .viewport_targets
+            .get_mut(&id)
+            .expect("viewport renderer was inserted");
+        renderer.with_clear_color(color(viewport.clear_color));
+        renderer.prepare(&viewport.workspace.render_scene(), viewport.size)?;
         Ok(ViewportTexture {
-            id: texture_id,
-            size,
+            id,
+            size: viewport.size,
         })
     }
 
-    fn ensure_viewport_target(
-        &mut self,
-        viewport_id: u64,
-        size: [u32; 2],
-        render_state: &crate::egui_wgpu::RenderState,
-    ) {
-        if self
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn viewport_pixels(&self, id: u64) -> Result<Vec<u8>, RendererError> {
+        let renderer = self
             .viewport_targets
-            .get(&viewport_id)
-            .is_some_and(|target| target.size == size)
-        {
-            return;
-        }
+            .get(&id)
+            .ok_or_else(|| RendererError::PixelReadback("viewport has been released".into()))?;
+        Ok(renderer.read_pixels()?.into_iter().flatten().collect())
+    }
 
-        if let Some(target) = self.viewport_targets.remove(&viewport_id)
-            && let Some(texture_id) = target.texture_id
-        {
-            render_state.renderer.write().free_texture(&texture_id);
-        }
+    /// Releases an offscreen viewport's GPU resources.
+    pub fn release_viewport(&mut self, texture: ViewportTexture) {
+        self.viewport_targets.remove(&texture.id);
+    }
 
-        let color_texture = render_state
-            .device
-            .create_texture(&crate::wgpu::TextureDescriptor {
-                label: Some("viewport color target"),
-                size: crate::wgpu::Extent3d {
-                    width: size[0],
-                    height: size[1],
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: crate::wgpu::TextureDimension::D2,
-                format: render_state.target_format,
-                usage: crate::wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | crate::wgpu::TextureUsages::TEXTURE_BINDING
-                    | crate::wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-        let color_view = color_texture.create_view(&crate::wgpu::TextureViewDescriptor::default());
-        let depth_texture = render_state
-            .device
-            .create_texture(&crate::wgpu::TextureDescriptor {
-                label: Some("viewport depth target"),
-                size: crate::wgpu::Extent3d {
-                    width: size[0],
-                    height: size[1],
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: crate::wgpu::TextureDimension::D2,
-                format: DEPTH_FORMAT,
-                usage: crate::wgpu::TextureUsages::RENDER_ATTACHMENT,
-                view_formats: &[],
-            });
-        let depth_view = depth_texture.create_view(&crate::wgpu::TextureViewDescriptor::default());
-        self.viewport_targets.insert(
-            viewport_id,
-            ViewportTarget {
-                _color_texture: color_texture,
-                color_view,
-                _depth_texture: depth_texture,
-                depth_view,
-                size,
-                texture_id: None,
-            },
-        );
+    /// Reads a viewport's most recently rendered RGBA pixels.
+    pub fn read_viewport_pixels(
+        &self,
+        texture: ViewportTexture,
+    ) -> Result<Vec<[u8; 4]>, RendererError> {
+        self.viewport_targets
+            .get(&texture.id)
+            .ok_or_else(|| RendererError::PixelReadback("viewport has been released".into()))?
+            .read_pixels()
     }
 }
 
@@ -214,19 +143,18 @@ fn color(color: [f32; 4]) -> crate::wgpu::Color {
     }
 }
 
-/// A GPU-backed viewport texture registered with egui.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// An offscreen viewport handle understood by native and browser hosts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ViewportTexture {
-    id: crate::egui::TextureId,
+    id: u64,
     size: [u32; 2],
 }
 
 impl ViewportTexture {
-    /// Returns the egui texture identifier used to display this texture.
-    pub fn id(self) -> crate::egui::TextureId {
+    /// Returns a stable renderer-local viewport identifier.
+    pub fn id(self) -> u64 {
         self.id
     }
-
     /// Returns the texture dimensions in pixels.
     pub fn size(self) -> [u32; 2] {
         self.size
@@ -234,17 +162,11 @@ impl ViewportTexture {
 }
 
 impl crate::Engine {
-    /// Renders a viewport into a GPU texture registered with an egui renderer.
+    /// Renders an offscreen scene for use by a React viewport component.
     pub fn render_viewport(
         &mut self,
         viewport: &Viewport,
     ) -> Result<ViewportTexture, RendererError> {
-        let render_state = self
-            .creation_context()
-            .wgpu_render_state
-            .as_ref()
-            .ok_or(RendererError::MissingEframeWgpuRenderState)?
-            .clone();
-        self.renderer().render_viewport(viewport, &render_state)
+        self.renderer().render_viewport(viewport)
     }
 }

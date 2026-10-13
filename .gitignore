@@ -1,3 +1,10 @@
 target
 .codegraph
 dist
+node_modules
+*.tsbuildinfo
+crates/trengine/frontend
+
+crates/trengine/gen
+test-results
+playwright-report

@@ -1,17 +1,14 @@
-use std::{
-    env,
-    fmt::Display,
-    str::FromStr,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
-};
+#[cfg(not(target_arch = "wasm32"))]
+use std::env;
+use std::{fmt::Display, str::FromStr, time::Duration};
 
 use terrarium::{
     App, Camera, Color3, Engine, Face, HasBasePart, HasCamera, HasMaterials, HasPVInstance,
     HasPart, Instance, InstanceId, Material, Part, PartShape, RendererError, Terrarium, Texture,
-    TextureColorSpace, TextureFilter, Workspace, eframe, egui,
+    TextureColorSpace, TextureFilter, Workspace,
     glam::{EulerRot, Mat4, Quat, Vec3},
-    wgpu,
 };
+use web_time::{Instant, SystemTime, UNIX_EPOCH};
 
 const ANIMATED_PARTS_RATIO: usize = 4;
 const ANIMATION_POOL_CHANGE_INTERVAL: usize = 30;
@@ -68,6 +65,8 @@ struct Benchmark {
     frame_started: Option<Instant>,
     cpu_submission: Option<Duration>,
     finished: bool,
+    #[cfg(target_arch = "wasm32")]
+    gpu_done: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Benchmark {
@@ -102,19 +101,28 @@ impl Benchmark {
             frame_started: None,
             cpu_submission: None,
             finished: false,
+            #[cfg(target_arch = "wasm32")]
+            gpu_done: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         app.replace_upper_layer(engine);
         Ok(app)
     }
 
-    fn finish_previous_frame(&mut self, engine: &mut Engine, ctx: &egui::Context) {
+    fn finish_previous_frame(&mut self, engine: &mut Engine, frame: &mut terrarium::Frame) {
+        #[cfg(target_arch = "wasm32")]
+        if !self.gpu_done.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         let Some(started) = self.frame_started.take() else {
             return;
         };
+        #[cfg(target_arch = "wasm32")]
+        let _ = engine;
+        #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = engine.renderer().wait_for_gpu() {
             report_renderer_error(error);
             self.finished = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            frame.close();
             return;
         }
 
@@ -131,7 +139,7 @@ impl Benchmark {
             if self.samples.len() == self.config.measured_frames {
                 print_report(self.config, &self.samples, self.benchmark_materials.len());
                 self.finished = true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                frame.close();
             }
         }
     }
@@ -277,33 +285,58 @@ impl Benchmark {
 }
 
 impl App for Benchmark {
-    fn logic(&mut self, engine: &mut Engine, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(
+        &mut self,
+        engine: &mut Engine,
+        _input: &terrarium::FrameInput,
+        frame: &mut terrarium::Frame,
+    ) {
         if self.finished {
             return;
         }
-        self.finish_previous_frame(engine, ctx);
+        self.finish_previous_frame(engine, frame);
         if self.finished {
+            return;
+        }
+        if self.frame_started.is_some() {
             return;
         }
         self.logic_started = Some(Instant::now());
         self.animate_parts(engine);
-        ctx.request_repaint();
     }
 
-    fn render(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.finished {
-            return;
+    fn render(
+        &mut self,
+        engine: &mut Engine,
+        input: &terrarium::FrameInput,
+        frame: &mut terrarium::Frame,
+    ) -> Result<(), RendererError> {
+        if self.finished || self.frame_started.is_some() {
+            return Ok(());
         }
         let started = self.logic_started.take().unwrap_or_else(Instant::now);
-        if let Err(error) = engine.prepare(ui) {
+        if let Err(error) = engine.prepare(input) {
             report_renderer_error(error);
             self.finished = true;
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
+            frame.close();
+            return Ok(());
         }
         self.cpu_submission = Some(started.elapsed());
         self.frame_started = Some(started);
-        engine.paint(ui);
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.gpu_done
+                .store(false, std::sync::atomic::Ordering::Release);
+            let done = self.gpu_done.clone();
+            engine
+                .creation_context()
+                .wgpu_render_state
+                .queue
+                .on_submitted_work_done(move || {
+                    done.store(true, std::sync::atomic::Ordering::Release)
+                });
+        }
+        Ok(())
     }
 }
 
@@ -506,7 +539,26 @@ where
 
 fn parse_config() -> Result<Config, String> {
     let mut config = Config::default();
+    #[cfg(not(target_arch = "wasm32"))]
     let mut args = env::args().skip(1);
+    #[cfg(target_arch = "wasm32")]
+    let mut args = {
+        let query = web_sys::window()
+            .and_then(|window| window.location().search().ok())
+            .unwrap_or_default();
+        query
+            .trim_start_matches('?')
+            .split('&')
+            .filter_map(|pair| {
+                let (name, value) = pair.split_once('=')?;
+                ["parts", "warmup", "frames", "width", "height"]
+                    .contains(&name)
+                    .then(|| [format!("--{name}"), value.to_owned()])
+            })
+            .flatten()
+            .collect::<Vec<_>>()
+            .into_iter()
+    };
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--parts" => config.parts = parse_value(&mut args, "--parts")?,
@@ -538,11 +590,9 @@ fn main() {
     );
 
     Terrarium::new()
+        .with_ui("render_benchmark")
         .with_title("Render benchmark")
         .with_size([config.width, config.height])
-        .with_wgpu_options(|wgpu_options| {
-            wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
-        })
         .run(move |engine| Benchmark::new(engine, config))
         .unwrap();
 }

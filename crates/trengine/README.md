@@ -1,3 +1,3 @@
 # trengine
 
-`eframe` and `wgpu` application runtime for Terrarium, integrating `trscene` workspaces with `trrender`.
+Tauri and browser runtime for Terrarium, with React interop and a shared wgpu renderer.
