@@ -29,6 +29,26 @@ fn map_web_readback(
         });
 }
 
+#[cfg(target_arch = "wasm32")]
+fn map_completed_web_copy(
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    callback: impl FnOnce(Result<(), wgpu::BufferAsyncError>) + 'static,
+) {
+    let buffer = buffer.clone();
+    let key = WEB_READBACK_CALLBACKS.with(|callbacks| {
+        callbacks.borrow_mut().insert(Box::new(move |_| {
+            map_web_readback(&buffer, callback);
+        }))
+    });
+    queue.on_submitted_work_done(move || {
+        let callback = WEB_READBACK_CALLBACKS.with(|callbacks| callbacks.borrow_mut().remove(key));
+        if let Some(callback) = callback {
+            callback(Ok(()));
+        }
+    });
+}
+
 impl Renderer {
     /// Sets the color used to clear the color attachment before each frame.
     ///
@@ -245,7 +265,7 @@ impl Renderer {
         let width = self.width;
         let height = self.height;
         let format = self.output.format;
-        map_web_readback(&buffer, move |result| {
+        map_completed_web_copy(&self.queue, &buffer, move |result| {
             let pixels = match result {
                 Ok(()) => match callback_buffer.slice(..).get_mapped_range() {
                     Ok(mapped) => {

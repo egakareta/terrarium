@@ -1,6 +1,18 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { widgetNames } from "../src/examples/Widgets";
+
+test.afterEach(async ({ page }, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
+  console.log(
+    JSON.stringify({
+      example: testInfo.title,
+      alerts: await page.getByRole("alert").allTextContents(),
+      state: await page.evaluate(() => window.__TERRARIUM__?.state().app),
+    }),
+  );
+});
+
 const examples = [
   "app",
   "bevy",

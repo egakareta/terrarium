@@ -50,6 +50,11 @@ jobs:
           npx playwright install --with-deps chromium
           npm run test:browser
       - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-error-context
+          path: web/test-results/**/error-context.md
+      - uses: actions/upload-artifact@v4
         with:
           name: pages
           path: web/dist
