@@ -32,7 +32,7 @@ import {
 import { Tree, type TreeApi, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from "dockview-react";
 import { useResizeObserver } from "@mantine/hooks";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import { useEngine, type EngineContextValue } from "../context";
 import type { SceneNode, PropertyValue, InspectorState } from "../bridge";
 import { Window } from "./Window";
@@ -288,16 +288,39 @@ const PropertyRow = memo(
 function Properties() {
   const { tools, command } = useInspector();
   const container = useRef<HTMLDivElement>(null);
+  const [focusedRow, setFocusedRow] = useState<number | null>(null);
   const fields = tools.selected.length ? (tools.properties ?? []) : [];
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const rows = defaultRangeExtractor(range);
+      if (focusedRow !== null && focusedRow < range.count && !rows.includes(focusedRow)) {
+        rows.push(focusedRow);
+        rows.sort((left, right) => left - right);
+      }
+      return rows;
+    },
+    [focusedRow],
+  );
   const virtual = useVirtualizer({
     count: fields.length,
     getScrollElement: () => container.current,
     estimateSize: () => 50,
     getItemKey: (index) => fields[index].property.path,
     overscan: 3,
+    rangeExtractor,
   });
   return (
-    <div ref={container} className="inspector-panel">
+    <div
+      ref={container}
+      className="inspector-panel"
+      onFocusCapture={(event) => {
+        const row = (event.target as HTMLElement).closest<HTMLElement>("[data-index]");
+        setFocusedRow(row ? Number(row.dataset.index) : null);
+      }}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setFocusedRow(null);
+      }}
+    >
       {!tools.selected.length ? (
         <Text c="dimmed">Select an instance in Explorer.</Text>
       ) : (

@@ -148,6 +148,7 @@ test("inspector selection, ranges, property edits, and reopening stay consistent
   await expect(part).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
+  await page.getByRole("textbox", { name: "name", exact: true }).fill("Pending cube name");
   const properties = page
     .locator(".inspector-panel")
     .filter({ has: page.getByRole("textbox", { name: "name", exact: true }) });
@@ -164,6 +165,11 @@ test("inspector selection, ranges, property edits, and reopening stay consistent
     .evaluate((element) => {
       element.scrollTop = 0;
     });
+  await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue(
+    "Pending cube name",
+  );
+  await page.getByRole("textbox", { name: "name", exact: true }).fill("Part");
+  await page.getByRole("textbox", { name: "name", exact: true }).press("Enter");
   await root.click({ position: { x: 180, y: 14 }, modifiers: ["Control"] });
   await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
   await expect(root).toHaveAttribute("aria-selected", "true");
