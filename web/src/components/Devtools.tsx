@@ -46,20 +46,27 @@ function useInspector() {
 function sameSelection(left: string[], right: string[]) {
   return left.length === right.length && left.every((id) => right.includes(id));
 }
+function sceneChildren(node: SceneNode) {
+  return node.children.length ? node.children : null;
+}
 function SceneRow({ node, style }: NodeRendererProps<SceneNode>) {
   return (
     <div style={style} className={`tree-row ${node.isSelected ? "selected" : ""}`}>
-      <ActionIcon
-        size="xs"
-        variant="transparent"
-        aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${node.data.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          node.toggle();
-        }}
-      >
-        {node.isLeaf ? null : node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
-      </ActionIcon>
+      {node.isLeaf ? (
+        <span aria-hidden style={{ width: 18, height: 18, flexShrink: 0 }} />
+      ) : (
+        <ActionIcon
+          size="xs"
+          variant="transparent"
+          aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${node.data.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            node.toggle();
+          }}
+        >
+          {node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
+        </ActionIcon>
+      )}
       <CubeIcon />
       <span>{node.data.name}</span>
       <Text size="xs" c="dimmed">
@@ -104,6 +111,7 @@ function Explorer() {
       <Tree<SceneNode>
         ref={tree}
         data={data}
+        childrenAccessor={sceneChildren}
         width={Math.max(200, rect.width - 16)}
         height={Math.max(100, rect.height - 16)}
         rowHeight={28}

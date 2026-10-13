@@ -82,17 +82,21 @@ function TreeDemo({ name }: { name: string }) {
   const renderNode = useCallback(
     ({ node, style }: NodeRendererProps<DemoNode>) => (
       <div style={style} className={`tree-row ${node.isSelected ? "selected" : ""}`}>
-        <ActionIcon
-          size="xs"
-          variant="subtle"
-          aria-label={`Toggle ${node.data.name}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            node.toggle();
-          }}
-        >
-          {node.isLeaf ? null : node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
-        </ActionIcon>
+        {node.isLeaf ? (
+          <span aria-hidden style={{ width: 18, height: 18, flexShrink: 0 }} />
+        ) : (
+          <ActionIcon
+            size="xs"
+            variant="subtle"
+            aria-label={`Toggle ${node.data.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              node.toggle();
+            }}
+          >
+            {node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
+          </ActionIcon>
+        )}
         {name.endsWith("custom_nodes") ? node.isLeaf ? <CubeIcon /> : <FolderIcon /> : null}
         <span>{node.data.name}</span>
       </div>

@@ -144,7 +144,7 @@ test("inspector selection, ranges, property edits, and reopening stay consistent
   const rows = page.getByRole("treeitem");
   const root = rows.nth(0);
   const part = rows.nth(1);
-  await part.getByText("Part", { exact: true }).first().click();
+  await part.click({ position: { x: 32, y: 14 } });
   await expect(part).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
@@ -203,7 +203,7 @@ test("the tree demo toggles selection with Ctrl-click and selects ranges", async
   await page.goto("/?widget=ltreeview_selection");
   const camera = page.getByRole("treeitem").filter({ hasText: "Camera" });
   const light = page.getByRole("treeitem").filter({ hasText: "Light" });
-  await camera.click({ modifiers: ["Control"] });
+  await camera.click({ position: { x: 32, y: 15 }, modifiers: ["Control"] });
   await expect(page.getByText("Selected node IDs: [1]", { exact: true })).toBeVisible();
   await light.click({ modifiers: ["Shift"] });
   await expect(page.getByText("Selected node IDs: [1, 2]", { exact: true })).toBeVisible();
