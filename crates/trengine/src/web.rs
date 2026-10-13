@@ -47,6 +47,25 @@ impl WebBridge {
         )
     }
 
+    /// Resolves when previously submitted GPU work completes.
+    ///
+    /// Browser hosts await this between frames to bound the submission queue on slow GPUs.
+    pub fn wait_for_gpu(&self) -> js_sys::Promise {
+        let state = &self.runtime.engine().creation_context().wgpu_render_state;
+        if state.adapter.get_info().backend != wgpu::Backend::BrowserWebGpu {
+            return js_sys::Promise::resolve(&JsValue::UNDEFINED);
+        }
+        let (sender, receiver) = futures_channel::oneshot::channel();
+        state.queue.on_submitted_work_done(move || {
+            let _ = sender.send(());
+        });
+        let _ = state.device.poll(wgpu::PollType::Poll);
+        wasm_bindgen_futures::future_to_promise(async move {
+            receiver.await.map_err(js_error)?;
+            Ok(JsValue::UNDEFINED)
+        })
+    }
+
     /// Advances and presents one frame, returning UI state.
     pub fn frame(&mut self, input: JsValue) -> Result<JsValue, JsValue> {
         let input: FrameInput = serde_wasm_bindgen::from_value(input).map_err(js_error)?;

@@ -6261,6 +6261,7 @@ dependencies = [
  "bevy_time",
  "console_error_panic_hook",
  "env_logger",
+ "futures-channel",
  "js-sys",
  "log",
  "objc2 0.6.5",

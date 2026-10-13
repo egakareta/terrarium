@@ -64,6 +64,7 @@ objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSThread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1"
+futures-channel = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 serde-wasm-bindgen = "0.6"

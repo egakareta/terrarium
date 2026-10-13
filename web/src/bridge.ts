@@ -68,6 +68,7 @@ export interface Transport {
 }
 interface WasmBridge {
   backend(): string;
+  wait_for_gpu(): Promise<void>;
   frame(input: FrameInput): Snapshot;
   state(): Snapshot;
   command(command: string, payload: unknown): unknown;
@@ -116,7 +117,11 @@ export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
   let disposed = false;
   return {
     native: false,
-    frame: async (input) => bridge.frame(input),
+    frame: async (input) => {
+      const snapshot = bridge.frame(input);
+      await bridge.wait_for_gpu();
+      return snapshot;
+    },
     state: async () => bridge.state(),
     command: async (command, payload = null) => bridge.command(command, payload),
     viewport: async (id) => bridge.viewport(id),
