@@ -127,6 +127,15 @@ export class WebBridge {
      */
     mount_viewport(id: string, canvas: HTMLCanvasElement): number | undefined;
     /**
+     * Advances and presents a frame without serializing application or inspector state.
+     * Returns whether the application requested shutdown.
+     */
+    render(input: any): boolean;
+    /**
+     * Whether WebGPU selected a CPU fallback adapter.
+     */
+    software_adapter(): boolean;
+    /**
      * Returns current UI state without advancing the simulation.
      */
     state(): any;
@@ -141,7 +150,7 @@ export class WebBridge {
     /**
      * Resolves when previously submitted GPU work completes.
      *
-     * Browser hosts await this between frames to bound the submission queue on slow GPUs.
+     * CPU fallback hosts use this to bound submissions; hardware rendering does not wait.
      */
     wait_for_gpu(): Promise<any>;
 }
@@ -266,6 +275,8 @@ export interface InitOutput {
     readonly webbridge_command: (a: number, b: number, c: number, d: any) => [number, number, number];
     readonly webbridge_frame: (a: number, b: any) => [number, number, number];
     readonly webbridge_mount_viewport: (a: number, b: number, c: number, d: any) => [number, number, number];
+    readonly webbridge_render: (a: number, b: any) => [number, number, number];
+    readonly webbridge_software_adapter: (a: number) => number;
     readonly webbridge_state: (a: number) => [number, number, number];
     readonly webbridge_unmount_viewport: (a: number, b: number) => void;
     readonly webbridge_viewport: (a: number, b: number, c: number) => [number, number, number];
@@ -275,8 +286,8 @@ export interface InitOutput {
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___js_sys_e46af6bc04ed6125___Function_fn_wasm_bindgen_8582d61557fb93d3___JsValue_____wasm_bindgen_8582d61557fb93d3___sys__Undefined___js_sys_e46af6bc04ed6125___Function_fn_wasm_bindgen_8582d61557fb93d3___JsValue_____wasm_bindgen_8582d61557fb93d3___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___JsValue__core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true_: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__52: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__53: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__54: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__55: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke_______true_: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
