@@ -210,7 +210,7 @@ test("the tree demo toggles selection with Ctrl-click and selects ranges", async
   await camera.click({ modifiers: ["Control"] });
   await expect(page.getByText("Selected node IDs: [2]", { exact: true })).toBeVisible();
 });
-test("the inspector keeps rendering responsive with a selected instance under CPU load", async ({
+test("the inspector keeps rendering responsive when opened and selected under CPU load", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 640, height: 480 });
@@ -225,7 +225,7 @@ test("the inspector keeps rendering responsive with a selected instance under CP
     });
   });
   const browser = await page.context().newCDPSession(page);
-  await browser.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  await browser.send("Emulation.setCPUThrottlingRate", { rate: 8 });
   await page.goto("/simple/");
   await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
   await page.addStyleTag({
@@ -236,24 +236,21 @@ test("the inspector keeps rendering responsive with a selected instance under CP
     .toBeGreaterThan(30);
   await page.keyboard.press("F12");
   await page.getByText("Properties", { exact: true }).click();
+  const averageFps = async () => {
+    const samples = [];
+    for (let i = 0; i < 3; i++) {
+      await page.waitForTimeout(1100);
+      samples.push(await page.evaluate(() => window.__TERRARIUM__!.state().fps));
+    }
+    return samples.reduce((sum, fps) => sum + fps, 0) / samples.length;
+  };
+  await expect.poll(averageFps, { timeout: 20_000 }).toBeGreaterThan(30);
   await page.evaluate(() => {
     const bridge = window.__TERRARIUM__!;
     bridge.command("devtools.selection", [bridge.state().devtools!.tree!.children[0].id]);
   });
   await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
-  await expect
-    .poll(
-      async () => {
-        const samples = [];
-        for (let i = 0; i < 3; i++) {
-          await page.waitForTimeout(1100);
-          samples.push(await page.evaluate(() => window.__TERRARIUM__!.state().fps));
-        }
-        return samples.reduce((sum, fps) => sum + fps, 0) / samples.length;
-      },
-      { timeout: 20_000 },
-    )
-    .toBeGreaterThan(30);
+  await expect.poll(averageFps, { timeout: 20_000 }).toBeGreaterThan(30);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 test("hardware rendering stays responsive when GPU completion callbacks arrive late", async ({

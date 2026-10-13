@@ -56,16 +56,26 @@ function shareInspector(previous: Snapshot["devtools"], next: Snapshot["devtools
     : { ...next, tree, selected, properties };
 }
 
-export function TerrariumHost({
+interface HostProps {
+  components?: Record<string, () => React.ReactNode>;
+  canvasId?: string;
+  gallery?: boolean;
+}
+
+export function TerrariumHost(props: HostProps) {
+  return (
+    <MantineProvider theme={theme} defaultColorScheme="dark">
+      <HostContent {...props} />
+    </MantineProvider>
+  );
+}
+
+function HostContent({
   components = applications,
   canvasId = "app",
   gallery = new URLSearchParams(location.search).has("gallery") ||
     location.pathname.endsWith("/examples.html"),
-}: {
-  components?: Record<string, () => React.ReactNode>;
-  canvasId?: string;
-  gallery?: boolean;
-}) {
+}: HostProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [transport, setTransport] = useState<Transport>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
@@ -135,73 +145,71 @@ export function TerrariumHost({
   const joystick = snapshot?.touch_geometry;
   const Application = snapshot ? components[snapshot.ui] : undefined;
   return (
-    <MantineProvider theme={theme} defaultColorScheme="dark">
-      <div
-        className="terrarium-host"
-        style={
-          snapshot?.bundled_fonts === false
-            ? ({ "--terrarium-default-font": "system-ui" } as React.CSSProperties)
-            : undefined
-        }
-      >
-        {!widget && !gallery && (
-          <canvas ref={canvas} id={canvasId} className="scene-canvas" aria-label="3D scene" />
-        )}
-        {gallery && <Gallery />}
-        {widget && <WidgetGallery name={widget} />}
-        {snapshot && transport && (
-          <EngineContext.Provider value={{ snapshot, command, transport }}>
-            <div className="ui-layer">
-              {Application ? (
-                <Application />
-              ) : (
-                <Alert color="red">Unknown UI component: {snapshot.ui}</Alert>
-              )}
-              <Devtools />
-              {snapshot.touch_enabled && joystick && (
-                <div
-                  className="joystick"
-                  aria-hidden="true"
+    <div
+      className="terrarium-host"
+      style={
+        snapshot?.bundled_fonts === false
+          ? ({ "--terrarium-default-font": "system-ui" } as React.CSSProperties)
+          : undefined
+      }
+    >
+      {!widget && !gallery && (
+        <canvas ref={canvas} id={canvasId} className="scene-canvas" aria-label="3D scene" />
+      )}
+      {gallery && <Gallery />}
+      {widget && <WidgetGallery name={widget} />}
+      {snapshot && transport && (
+        <EngineContext.Provider value={{ snapshot, command, transport }}>
+          <div className="ui-layer">
+            {Application ? (
+              <Application />
+            ) : (
+              <Alert color="red">Unknown UI component: {snapshot.ui}</Alert>
+            )}
+            <Devtools />
+            {snapshot.touch_enabled && joystick && (
+              <div
+                className="joystick"
+                aria-hidden="true"
+                style={{
+                  left: joystick[0] - joystick[2],
+                  top: joystick[1] - joystick[2],
+                  bottom: "auto",
+                  width: joystick[2] * 2,
+                  height: joystick[2] * 2,
+                }}
+              >
+                <span
                   style={{
-                    left: joystick[0] - joystick[2],
-                    top: joystick[1] - joystick[2],
-                    bottom: "auto",
-                    width: joystick[2] * 2,
-                    height: joystick[2] * 2,
+                    transform: `translate(${snapshot.touch_movement[0] * joystick[2] * 0.65}px, ${snapshot.touch_movement[1] * joystick[2] * 0.65}px)`,
+                    width: joystick[2] * 0.6,
+                    height: joystick[2] * 0.6,
+                    left: joystick[2] * 0.7,
+                    top: joystick[2] * 0.7,
                   }}
-                >
-                  <span
-                    style={{
-                      transform: `translate(${snapshot.touch_movement[0] * joystick[2] * 0.65}px, ${snapshot.touch_movement[1] * joystick[2] * 0.65}px)`,
-                      width: joystick[2] * 0.6,
-                      height: joystick[2] * 0.6,
-                      left: joystick[2] * 0.7,
-                      top: joystick[2] * 0.7,
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          </EngineContext.Provider>
-        )}
-        {!snapshot && !error && !widget && !gallery && (
-          <div className="loading" role="status">
-            Starting renderer…
+                />
+              </div>
+            )}
           </div>
-        )}
-        {error && (
-          <Alert
-            role="alert"
-            color="red"
-            title="Terrarium"
-            className="error-message"
-            withCloseButton
-            onClose={() => setError(undefined)}
-          >
-            {error}
-          </Alert>
-        )}
-      </div>
-    </MantineProvider>
+        </EngineContext.Provider>
+      )}
+      {!snapshot && !error && !widget && !gallery && (
+        <div className="loading" role="status">
+          Starting renderer…
+        </div>
+      )}
+      {error && (
+        <Alert
+          role="alert"
+          color="red"
+          title="Terrarium"
+          className="error-message"
+          withCloseButton
+          onClose={() => setError(undefined)}
+        >
+          {error}
+        </Alert>
+      )}
+    </div>
   );
 }
