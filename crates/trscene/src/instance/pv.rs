@@ -54,14 +54,6 @@ pub trait HasPVInstance {
         self.pv_mut().pivot = pivot;
     }
 
-    /// Tries to replace the world-space pivot, returning whether it was accepted.
-    ///
-    /// Spatial types that require invertible pivots can reject invalid values.
-    fn try_set_pivot(&mut self, pivot: Mat4) -> bool {
-        self.set_pivot(pivot);
-        true
-    }
-
     /// The world-space transform of the instance's pivot.
     fn pivot(&self) -> Mat4 {
         self.pv().pivot
@@ -148,39 +140,6 @@ pub trait HasPVInstance {
         self
     }
 
-    /// Replaces the pivot position while preserving orientation and scale.
-    fn set_position(&mut self, position: Vec3) -> bool {
-        let pivot = self.pivot();
-        let (_, rotation, _) = pivot.to_scale_rotation_translation();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.try_set_pivot(
-            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size),
-        )
-    }
-
-    /// Replaces the pivot orientation while preserving position and scale.
-    fn set_orientation(&mut self, orientation: Vec3) -> bool {
-        let pivot = self.pivot();
-        let position = self.position();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.try_set_pivot(
-            Mat4::from_rotation_translation(
-                Quat::from_euler(
-                    EulerRot::XYZ,
-                    orientation.x.to_radians(),
-                    orientation.y.to_radians(),
-                    orientation.z.to_radians(),
-                ),
-                position,
-            ) * Mat4::from_scale(size),
-        )
-    }
-
-    /// Replaces the pivot scale while preserving position and orientation.
-    fn set_size(&mut self, size: Vec3) -> bool {
-        self.try_set_pivot(PVInstance::pose_from_transform(self.pivot()) * Mat4::from_scale(size))
-    }
-
     /// Replaces the per-axis scale while preserving the current position and orientation (rigid pose).
     fn with_size(mut self, size: Vec3) -> Self
     where
@@ -250,10 +209,6 @@ impl<T: HasPVInstance + ?Sized> HasPVInstance for &mut T {
     fn set_pivot(&mut self, pivot: Mat4) {
         (**self).set_pivot(pivot);
     }
-
-    fn try_set_pivot(&mut self, pivot: Mat4) -> bool {
-        (**self).try_set_pivot(pivot)
-    }
 }
 
 /// Updates a built-in spatial instance through the common pivot interface.
@@ -263,20 +218,20 @@ pub(crate) fn update_instance_transform(
     update: InstanceTransformUpdate,
 ) -> bool {
     if let Some(part) = instance.downcast_mut::<Part>() {
-        return apply_transform_update(part, update);
+        return apply_transform_update(part, update, false);
     }
     if let Some(part) = instance.downcast_mut::<BasePart>() {
-        return apply_transform_update(part, update);
+        return apply_transform_update(part, update, false);
     }
     if let Some(camera) = instance.downcast_mut::<Camera>() {
-        return apply_transform_update(camera, update);
+        return apply_transform_update(camera, update, false);
     }
     if let Some(rig) = instance.downcast_mut::<Rig>() {
-        return apply_transform_update(rig, update);
+        return apply_transform_update(rig, update, true);
     }
     #[cfg(feature = "meshpart")]
     if let Some(part) = instance.downcast_mut::<MeshPart>() {
-        return apply_transform_update(part, update);
+        return apply_transform_update(part, update, false);
     }
     false
 }
@@ -291,12 +246,47 @@ pub(crate) enum InstanceTransformUpdate {
 fn apply_transform_update(
     instance: &mut impl HasPVInstance,
     update: InstanceTransformUpdate,
+    reject_singular: bool,
 ) -> bool {
-    match update {
-        InstanceTransformUpdate::Position(value) => instance.set_position(value),
-        InstanceTransformUpdate::Orientation(value) => instance.set_orientation(value),
-        InstanceTransformUpdate::Size(value) => instance.set_size(value),
+    let pivot = instance.pivot();
+    let next_pivot = match update {
+        InstanceTransformUpdate::Position(position) => {
+            let (_, rotation, _) = pivot.to_scale_rotation_translation();
+            let size = pivot.to_scale_rotation_translation().0;
+            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size)
+        }
+        InstanceTransformUpdate::Orientation(orientation) => {
+            let position = pivot.w_axis.truncate();
+            let size = pivot.to_scale_rotation_translation().0;
+            Mat4::from_rotation_translation(
+                Quat::from_euler(
+                    EulerRot::XYZ,
+                    orientation.x.to_radians(),
+                    orientation.y.to_radians(),
+                    orientation.z.to_radians(),
+                ),
+                position,
+            ) * Mat4::from_scale(size)
+        }
+        InstanceTransformUpdate::Size(size) => {
+            PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size)
+        }
+    };
+    if reject_singular && !next_pivot.inverse().is_finite() {
+        return false;
     }
+    match update {
+        InstanceTransformUpdate::Position(value) => {
+            instance.with_position(value);
+        }
+        InstanceTransformUpdate::Orientation(value) => {
+            instance.with_orientation(value);
+        }
+        InstanceTransformUpdate::Size(value) => {
+            instance.with_size(value);
+        }
+    }
+    true
 }
 
 pub(crate) fn pivot_hierarchy_to<T: HasPVInstance + Instance + ?Sized>(
