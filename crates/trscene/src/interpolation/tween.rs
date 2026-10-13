@@ -1,8 +1,9 @@
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Color3, HasBasePart, HasPVInstance, InstanceId, Part, Rig, Workspace,
+    BasePart, Color3, HasBasePart, InstanceId, Part, Workspace,
     glam::{Vec2, Vec3, Vec4},
+    instance::{InstanceTransformUpdate, update_instance_transform},
 };
 
 /// Interpolates a value between two keyframes.
@@ -389,33 +390,24 @@ impl TweenTrack {
         match self {
             Self::Position { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(rig) = workspace.get_mut::<Rig>(*target) {
-                    rig.with_position(value);
-                    return;
+                if let Some(instance) = workspace.instance_mut(*target) {
+                    update_instance_transform(instance, InstanceTransformUpdate::Position(value));
                 }
-                with_base_part(workspace, *target, |part| {
-                    part.with_position(value);
-                });
             }
             Self::Orientation { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(rig) = workspace.get_mut::<Rig>(*target) {
-                    rig.with_orientation(value);
-                    return;
+                if let Some(instance) = workspace.instance_mut(*target) {
+                    update_instance_transform(
+                        instance,
+                        InstanceTransformUpdate::Orientation(value),
+                    );
                 }
-                with_base_part(workspace, *target, |part| {
-                    part.with_orientation(value);
-                });
             }
             Self::Size { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(rig) = workspace.get_mut::<Rig>(*target) {
-                    rig.with_size(value);
-                    return;
+                if let Some(instance) = workspace.instance_mut(*target) {
+                    update_instance_transform(instance, InstanceTransformUpdate::Size(value));
                 }
-                with_base_part(workspace, *target, |part| {
-                    part.with_size(value);
-                });
             }
             Self::Color { target, tween, .. } => {
                 let value = tween.update(delta_seconds);

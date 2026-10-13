@@ -178,6 +178,14 @@ impl HasPVInstance for Rig {
         self.pivot_to(pivot);
     }
 
+    fn try_set_pivot(&mut self, pivot: Mat4) -> bool {
+        if !pivot.inverse().is_finite() {
+            return false;
+        }
+        self.pivot_to(pivot);
+        true
+    }
+
     fn pivot_to(&mut self, pivot: Mat4) {
         assert!(
             pivot.inverse().is_finite(),
