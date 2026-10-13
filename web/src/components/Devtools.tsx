@@ -1,4 +1,13 @@
-import { useCallback, useRef, useState } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActionIcon,
   Button,
@@ -20,21 +29,81 @@ import {
   TrashIcon,
   ArrowCounterClockwiseIcon,
 } from "@phosphor-icons/react";
-import { Tree, type NodeRendererProps } from "react-arborist";
+import { Tree, type TreeApi, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { DockviewReact, type DockviewReadyEvent, type DockviewApi } from "dockview-react";
 import { useResizeObserver } from "@mantine/hooks";
-import { useEngine } from "../context";
-import type { SceneNode, PropertyValue } from "../bridge";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useEngine, type EngineContextValue } from "../context";
+import type { SceneNode, PropertyValue, InspectorState } from "../bridge";
 import { Window } from "./Window";
 import { FontMarket } from "./FontMarket";
 
+type Command = EngineContextValue["command"];
+const InspectorContext = createContext<{ tools: InspectorState; command: Command } | null>(null);
+function useInspector() {
+  return useContext(InspectorContext)!;
+}
+function sameSelection(left: string[], right: string[]) {
+  return left.length === right.length && left.every((id) => right.includes(id));
+}
+function SceneRow({ node, style }: NodeRendererProps<SceneNode>) {
+  return (
+    <div style={style} className={`tree-row ${node.isSelected ? "selected" : ""}`}>
+      <ActionIcon
+        size="xs"
+        variant="transparent"
+        aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${node.data.name}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          node.toggle();
+        }}
+      >
+        {node.isLeaf ? null : node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
+      </ActionIcon>
+      <CubeIcon />
+      <span>{node.data.name}</span>
+      <Text size="xs" c="dimmed">
+        {node.data.class}
+      </Text>
+    </div>
+  );
+}
+
 function Explorer() {
-  const { snapshot, command } = useEngine();
+  const { tools, command } = useInspector();
   const [ref, rect] = useResizeObserver();
+  const tree = useRef<TreeApi<SceneNode>>(null);
+  const syncing = useRef(true);
+  const selected = useRef(tools.selected);
+  const data = useMemo(() => (tools.tree ? [tools.tree] : []), [tools.tree]);
+  const select = useCallback(
+    (nodes: NodeApi<SceneNode>[]) => {
+      const ids = nodes.map((node) => node.id);
+      if (!syncing.current && !sameSelection(ids, selected.current)) {
+        selected.current = ids;
+        void command("devtools.selection", ids);
+      }
+    },
+    [command],
+  );
+  useEffect(() => {
+    syncing.current = true;
+    selected.current = tools.selected;
+    const api = tree.current;
+    if (api && !sameSelection([...api.selectedIds], tools.selected)) {
+      api.setSelection({
+        ids: tools.selected,
+        anchor: tools.selected.at(-1) ?? null,
+        mostRecent: tools.selected.at(-1) ?? null,
+      });
+    }
+    syncing.current = false;
+  }, [tools.selected, data]);
   return (
     <div ref={ref} className="inspector-panel">
       <Tree<SceneNode>
-        data={snapshot.devtools?.tree ? [snapshot.devtools.tree] : []}
+        ref={tree}
+        data={data}
         width={Math.max(200, rect.width - 16)}
         height={Math.max(100, rect.height - 16)}
         rowHeight={28}
@@ -42,37 +111,9 @@ function Explorer() {
         disableDrop
         disableEdit
         openByDefault
-        onSelect={(nodes) =>
-          void command(
-            "devtools.selection",
-            nodes.map((node) => node.id),
-          )
-        }
+        onSelect={select}
       >
-        {({ node, tree, style }: NodeRendererProps<SceneNode>) => (
-          <div
-            style={style}
-            className={`tree-row ${snapshot.devtools?.selected.includes(node.id) ? "selected" : ""}`}
-            onClick={(event) => node.handleClick(event)}
-          >
-            <ActionIcon
-              size="xs"
-              variant="transparent"
-              aria-label={`${node.isOpen ? "Collapse" : "Expand"} ${node.data.name}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                node.toggle();
-              }}
-            >
-              {node.isLeaf ? null : node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
-            </ActionIcon>
-            <CubeIcon />
-            <span>{node.data.name}</span>
-            <Text size="xs" c="dimmed">
-              {node.data.class}
-            </Text>
-          </div>
-        )}
+        {SceneRow}
       </Tree>
     </div>
   );
@@ -83,13 +124,14 @@ function PropertyEditor({
   value,
   mixed,
   disabled,
+  command,
 }: {
   path: string;
   value: PropertyValue;
   mixed: boolean;
   disabled: boolean;
+  command: Command;
 }) {
-  const { command } = useEngine();
   const edit = (value: PropertyValue) => void command("devtools.edit", { path, value });
   const label = path.split(".").at(-1)!;
   const placeholder = mixed ? "Mixed" : undefined;
@@ -169,6 +211,7 @@ function PropertyEditor({
       json={value.Json !== undefined}
       disabled={disabled}
       mixed={mixed}
+      command={command}
     />
   );
 }
@@ -178,14 +221,15 @@ function TextDraft({
   json,
   disabled,
   mixed,
+  command,
 }: {
   path: string;
   value: string;
   json: boolean;
   disabled: boolean;
   mixed: boolean;
+  command: Command;
 }) {
-  const { command } = useEngine();
   const [draft, setDraft] = useState<string>();
   const save = () => {
     if (draft !== undefined) {
@@ -213,26 +257,68 @@ function TextDraft({
     />
   );
 }
+const PropertyRow = memo(
+  function PropertyRow({
+    field,
+    command,
+  }: {
+    field: NonNullable<InspectorState["properties"]>[number];
+    command: Command;
+  }) {
+    const { property, mixed } = field;
+    return (
+      <div className="property-row">
+        <Text size="xs" title={property.path}>
+          {property.path}
+        </Text>
+        <PropertyEditor
+          path={property.path}
+          value={property.value}
+          mixed={mixed}
+          disabled={!property.editable}
+          command={command}
+        />
+      </div>
+    );
+  },
+  (previous, next) =>
+    previous.command === next.command &&
+    JSON.stringify(previous.field) === JSON.stringify(next.field),
+);
 function Properties() {
-  const { snapshot } = useEngine();
+  const { tools, command } = useInspector();
+  const container = useRef<HTMLDivElement>(null);
+  const fields = tools.selected.length ? (tools.properties ?? []) : [];
+  const virtual = useVirtualizer({
+    count: fields.length,
+    getScrollElement: () => container.current,
+    estimateSize: () => 50,
+    getItemKey: (index) => fields[index].property.path,
+    overscan: 3,
+  });
   return (
-    <div className="inspector-panel">
-      {!snapshot.devtools?.selected.length ? (
+    <div ref={container} className="inspector-panel">
+      {!tools.selected.length ? (
         <Text c="dimmed">Select an instance in Explorer.</Text>
       ) : (
-        snapshot.devtools.properties?.map(({ property, mixed }) => (
-          <div className="property-row" key={property.path}>
-            <Text size="xs" title={property.path}>
-              {property.path}
-            </Text>
-            <PropertyEditor
-              path={property.path}
-              value={property.value}
-              mixed={mixed}
-              disabled={!property.editable}
-            />
-          </div>
-        ))
+        <div style={{ height: virtual.getTotalSize(), width: "100%", position: "relative" }}>
+          {virtual.getVirtualItems().map((row) => (
+            <div
+              key={row.key}
+              ref={virtual.measureElement}
+              data-index={row.index}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: "100%",
+                transform: `translateY(${row.start}px)`,
+              }}
+            >
+              <PropertyRow field={fields[row.index]} command={command} />
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -252,24 +338,34 @@ function addPanels(api: DockviewApi) {
     component: "properties",
     title: "Properties",
     position: { referencePanel: "explorer", direction: "below" },
-    inactive: true,
   });
+  api.getPanel("explorer")?.api.setActive();
   api.getPanel("explorer")?.group.api.setSize({ height: api.height * 0.55 });
 }
 export function Devtools() {
   const { snapshot, command } = useEngine();
+  return <Inspector tools={snapshot.devtools} command={command} />;
+}
+const Inspector = memo(function Inspector({
+  tools,
+  command,
+}: {
+  tools: InspectorState | null;
+  command: Command;
+}) {
   const api = useRef<DockviewApi>(null);
+  const context = useMemo(() => (tools ? { tools, command } : null), [tools, command]);
   const ready = useCallback((event: DockviewReadyEvent) => {
     api.current = event.api;
     addPanels(event.api);
   }, []);
-  if (!snapshot.devtools) return null;
+  if (!tools) return null;
   const notice = (
     <Text className="development-notice">Development build: Press F12 to enable DevTools</Text>
   );
-  if (!snapshot.devtools.visible) return notice;
+  if (!tools.visible) return notice;
   return (
-    <>
+    <InspectorContext.Provider value={context}>
       <Window
         title="DevTools"
         width={340}
@@ -318,10 +414,10 @@ export function Devtools() {
           >
             Reset layout
           </Button>
-          <Text>{snapshot.devtools.selected.length} selected</Text>
+          <Text>{tools.selected.length} selected</Text>
           <Button
             leftSection={<TrashIcon />}
-            disabled={!snapshot.devtools.selected.length}
+            disabled={!tools.selected.length}
             onClick={() => void command("devtools.delete")}
           >
             Delete selection
@@ -334,6 +430,6 @@ export function Devtools() {
         />
       </Window>
       {notice}
-    </>
+    </InspectorContext.Provider>
   );
-}
+});

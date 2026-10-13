@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, MantineProvider, createTheme } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "dockview-react/dist/styles/dockview.css";
@@ -36,6 +36,26 @@ const theme = createTheme({
   },
 });
 
+function shareInspector(previous: Snapshot["devtools"], next: Snapshot["devtools"]) {
+  if (!previous || !next) return next;
+  const tree =
+    JSON.stringify(previous.tree) === JSON.stringify(next.tree) ? previous.tree : next.tree;
+  const selected =
+    JSON.stringify(previous.selected) === JSON.stringify(next.selected)
+      ? previous.selected
+      : next.selected;
+  const properties =
+    JSON.stringify(previous.properties) === JSON.stringify(next.properties)
+      ? previous.properties
+      : next.properties;
+  return previous.visible === next.visible &&
+    tree === previous.tree &&
+    selected === previous.selected &&
+    properties === previous.properties
+    ? previous
+    : { ...next, tree, selected, properties };
+}
+
 export function TerrariumHost({
   components = applications,
   canvasId = "app",
@@ -50,6 +70,12 @@ export function TerrariumHost({
   const [transport, setTransport] = useState<Transport>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState<string>();
+  const updateSnapshot = useCallback((next: Snapshot) => {
+    setSnapshot((previous) => ({
+      ...next,
+      devtools: shareInspector(previous?.devtools ?? null, next.devtools),
+    }));
+  }, []);
   const widget = new URLSearchParams(location.search).get("widget");
   useEffect(() => {
     if (widget || gallery) return;
@@ -65,7 +91,7 @@ export function TerrariumHost({
           return;
         }
         setTransport(connection);
-        setSnapshot(await connection.state());
+        updateSnapshot(await connection.state());
         let lastSnapshot = performance.now();
         const render = async (now: number) => {
           try {
@@ -75,7 +101,7 @@ export function TerrariumHost({
             if (close || events.pressed.length || now - lastSnapshot >= 1000 / 30) {
               const next = await connection.state();
               if (stopped) return;
-              setSnapshot(next);
+              updateSnapshot(next);
               lastSnapshot = now;
             }
             if (!close) animation = requestAnimationFrame(render);
@@ -94,15 +120,18 @@ export function TerrariumHost({
       input.dispose();
       bridge?.dispose();
     };
-  }, [widget, gallery]);
-  const command = async (name: string, payload?: unknown) => {
-    try {
-      await transport!.command(name, payload);
-      setSnapshot(await transport!.state());
-    } catch (error) {
-      setError(String(error));
-    }
-  };
+  }, [widget, gallery, updateSnapshot]);
+  const command = useCallback(
+    async (name: string, payload?: unknown) => {
+      try {
+        await transport!.command(name, payload);
+        updateSnapshot(await transport!.state());
+      } catch (error) {
+        setError(String(error));
+      }
+    },
+    [transport, updateSnapshot],
+  );
   const joystick = snapshot?.touch_geometry;
   const Application = snapshot ? components[snapshot.ui] : undefined;
   return (

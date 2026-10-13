@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActionIcon,
   Button,
@@ -48,64 +48,73 @@ interface DemoNode {
 }
 function TreeDemo({ name }: { name: string }) {
   const [selected, setSelected] = useState<string[]>([]);
-  const children: DemoNode[] = name.endsWith("custom_nodes")
-    ? [{ id: "1", name: "Custom leaf node" }]
-    : name.endsWith("selection")
-      ? ["Camera", "Light", "Ground", "Props"].map((name, i) => ({ id: String(i + 1), name }))
-      : [
-          {
-            id: "1",
-            name: "Scenes",
-            children: [
-              { id: "2", name: "Main scene" },
-              { id: "3", name: "Preview scene" },
+  const children = useMemo<DemoNode[]>(
+    () =>
+      name.endsWith("custom_nodes")
+        ? [{ id: "1", name: "Custom leaf node" }]
+        : name.endsWith("selection")
+          ? ["Camera", "Light", "Ground", "Props"].map((name, i) => ({ id: String(i + 1), name }))
+          : [
+              {
+                id: "1",
+                name: "Scenes",
+                children: [
+                  { id: "2", name: "Main scene" },
+                  { id: "3", name: "Preview scene" },
+                ],
+              },
+              {
+                id: "4",
+                name: "Assets",
+                children: [
+                  { id: "5", name: "Materials" },
+                  { id: "6", name: "Textures" },
+                ],
+              },
             ],
-          },
-          {
-            id: "4",
-            name: "Assets",
-            children: [
-              { id: "5", name: "Materials" },
-              { id: "6", name: "Textures" },
-            ],
-          },
-        ];
+    [name],
+  );
+  const data = useMemo(() => [{ id: "0", name: "Workspace", children }], [children]);
+  const select = useCallback(
+    (nodes: { id: string }[]) => setSelected(nodes.map((node) => node.id)),
+    [],
+  );
+  const renderNode = useCallback(
+    ({ node, style }: NodeRendererProps<DemoNode>) => (
+      <div style={style} className={`tree-row ${node.isSelected ? "selected" : ""}`}>
+        <ActionIcon
+          size="xs"
+          variant="subtle"
+          aria-label={`Toggle ${node.data.name}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            node.toggle();
+          }}
+        >
+          {node.isLeaf ? null : node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
+        </ActionIcon>
+        {name.endsWith("custom_nodes") ? node.isLeaf ? <CubeIcon /> : <FolderIcon /> : null}
+        <span>{node.data.name}</span>
+      </div>
+    ),
+    [name],
+  );
   return (
     <Stack>
       {name.endsWith("selection") && (
         <Text>Click to select; Shift-click for a range; Ctrl/Command-click to toggle.</Text>
       )}
       <Tree<DemoNode>
-        data={[{ id: "0", name: "Workspace", children }]}
+        data={data}
         width={440}
         height={220}
         rowHeight={30}
-        onSelect={(nodes) => setSelected(nodes.map((node) => node.id))}
+        onSelect={select}
         disableDrag
         disableDrop
         openByDefault
       >
-        {({ node, style }: NodeRendererProps<DemoNode>) => (
-          <div
-            style={style}
-            onClick={(event) => node.handleClick(event)}
-            className={`tree-row ${node.isSelected ? "selected" : ""}`}
-          >
-            <ActionIcon
-              size="xs"
-              variant="subtle"
-              aria-label={`Toggle ${node.data.name}`}
-              onClick={(event) => {
-                event.stopPropagation();
-                node.toggle();
-              }}
-            >
-              {node.isLeaf ? null : node.isOpen ? <CaretDownIcon /> : <CaretRightIcon />}
-            </ActionIcon>
-            {name.endsWith("custom_nodes") ? node.isLeaf ? <CubeIcon /> : <FolderIcon /> : null}
-            <span>{node.data.name}</span>
-          </div>
-        )}
+        {renderNode}
       </Tree>
       <Divider />
       <Text>Selected node IDs: [{selected.join(", ")}]</Text>

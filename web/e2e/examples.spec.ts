@@ -135,6 +135,121 @@ test("outline controls edit the running scene", async ({ page }) => {
     .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().app))
     .toMatchObject({ mode: "Toon", focus: false });
 });
+test("inspector selection, ranges, property edits, and reopening stay consistent", async ({
+  page,
+}) => {
+  await page.goto("/simple/");
+  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
+  await page.keyboard.press("F12");
+  const rows = page.getByRole("treeitem");
+  const root = rows.nth(0);
+  const part = rows.nth(1);
+  await part.getByText("Part", { exact: true }).first().click();
+  await expect(part).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
+  const properties = page
+    .locator(".inspector-panel")
+    .filter({ has: page.getByRole("textbox", { name: "name", exact: true }) });
+  const lastPath = await page.evaluate(
+    () => window.__TERRARIUM__!.state().devtools!.properties!.at(-1)!.property.path,
+  );
+  await properties.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect(page.getByText(lastPath, { exact: true })).toBeVisible();
+  await page
+    .locator(".inspector-panel")
+    .filter({ has: page.getByText(lastPath, { exact: true }) })
+    .evaluate((element) => {
+      element.scrollTop = 0;
+    });
+  await root.click({ position: { x: 180, y: 14 }, modifiers: ["Control"] });
+  await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
+  await expect(root).toHaveAttribute("aria-selected", "true");
+  await part.click({ position: { x: 180, y: 14 }, modifiers: ["Control"] });
+  await expect(part).toHaveAttribute("aria-selected", "false");
+  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await part.click({ position: { x: 180, y: 14 }, modifiers: ["Shift"] });
+  await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
+  await part.click({ position: { x: 250, y: 14 } });
+  const name = page.getByRole("textbox", { name: "name", exact: true });
+  await name.fill("Renamed cube");
+  await name.press("Enter");
+  await expect(part.getByText("Renamed cube", { exact: true })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().devtools?.tree?.children[0].name))
+    .toBe("Renamed cube");
+  await page.getByRole("button", { name: "Collapse Workspace", exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await page.getByRole("button", { name: "Expand Workspace", exact: true }).click();
+  await expect(part).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("button", { name: "Close DevTools", exact: true }).click();
+  await page.keyboard.press("F12");
+  await expect(part).toHaveAttribute("aria-selected", "true");
+  await expect(name).toHaveValue("Renamed cube");
+  await page.getByRole("button", { name: "Delete selection", exact: true }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByText("0 selected", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
+test("the tree demo toggles selection with Ctrl-click and selects ranges", async ({ page }) => {
+  await page.goto("/?widget=ltreeview_selection");
+  const camera = page.getByRole("treeitem").filter({ hasText: "Camera" });
+  const light = page.getByRole("treeitem").filter({ hasText: "Light" });
+  await camera.click({ modifiers: ["Control"] });
+  await expect(page.getByText("Selected node IDs: [1]", { exact: true })).toBeVisible();
+  await light.click({ modifiers: ["Shift"] });
+  await expect(page.getByText("Selected node IDs: [1, 2]", { exact: true })).toBeVisible();
+  await camera.click({ modifiers: ["Control"] });
+  await expect(page.getByText("Selected node IDs: [2]", { exact: true })).toBeVisible();
+});
+test("the inspector keeps rendering responsive with a selected instance under CPU load", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 640, height: 480 });
+  await page.addInitScript(() => {
+    const info = Object.getOwnPropertyDescriptor(GPUAdapter.prototype, "info")!.get!;
+    Object.defineProperty(GPUAdapter.prototype, "info", {
+      get() {
+        const value = info.call(this);
+        Object.defineProperty(value, "isFallbackAdapter", { value: false });
+        return value;
+      },
+    });
+  });
+  const browser = await page.context().newCDPSession(page);
+  await browser.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  await page.goto("/simple/");
+  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
+  await page.addStyleTag({
+    content: ".scene-canvas { width: 128px !important; height: 128px !important; }",
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().fps), { timeout: 15_000 })
+    .toBeGreaterThan(30);
+  await page.keyboard.press("F12");
+  await page.getByText("Properties", { exact: true }).click();
+  await page.evaluate(() => {
+    const bridge = window.__TERRARIUM__!;
+    bridge.command("devtools.selection", [bridge.state().devtools!.tree!.children[0].id]);
+  });
+  await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
+  await expect
+    .poll(
+      async () => {
+        const samples = [];
+        for (let i = 0; i < 3; i++) {
+          await page.waitForTimeout(1100);
+          samples.push(await page.evaluate(() => window.__TERRARIUM__!.state().fps));
+        }
+        return samples.reduce((sum, fps) => sum + fps, 0) / samples.length;
+      },
+      { timeout: 20_000 },
+    )
+    .toBeGreaterThan(30);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});
 test("hardware rendering stays responsive when GPU completion callbacks arrive late", async ({
   page,
 }) => {
