@@ -21,6 +21,7 @@ mod meshpart;
 mod outline;
 mod part;
 mod pv;
+mod rig;
 #[cfg(feature = "sound")]
 mod sound;
 mod workspace;
@@ -31,6 +32,7 @@ pub use meshpart::*;
 pub use outline::*;
 pub use part::*;
 pub use pv::*;
+pub use rig::*;
 #[cfg(feature = "sound")]
 pub use sound::*;
 pub use workspace::*;

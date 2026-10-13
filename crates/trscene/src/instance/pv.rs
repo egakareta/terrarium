@@ -1,7 +1,7 @@
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, Instance, Part,
+    BasePart, Camera, Instance, Part, Rig,
     glam::{EulerRot, Mat4, Quat, Vec3},
 };
 
@@ -46,6 +46,14 @@ pub trait HasPVInstance {
     /// Returns mutable access to the underlying [`PVInstance`].
     fn pv_mut(&mut self) -> &mut PVInstance;
 
+    /// Sets the world-space pivot in place.
+    ///
+    /// The default implementation changes only this instance. [`Rig`] also
+    /// moves its descendants, preserving their relative transforms.
+    fn set_pivot(&mut self, pivot: Mat4) {
+        self.pv_mut().pivot = pivot;
+    }
+
     /// The world-space transform of the instance's pivot.
     fn pivot(&self) -> Mat4 {
         self.pv().pivot
@@ -81,7 +89,8 @@ pub trait HasPVInstance {
     /// Descendants receive the same transform delta, preserving their transforms
     /// relative to this instance, including scale. Non-spatial descendants are
     /// traversed so their spatial children also move.
-    /// Use [`Self::with_pivot`] to change only this instance's transform.
+    /// For instances other than [`Rig`], [`Self::with_pivot`] changes only the
+    /// instance's own transform.
     ///
     /// ```
     /// use terrarium::{HasPVInstance, Instance, Part, glam::{Mat4, Vec3}};
@@ -104,30 +113,19 @@ pub trait HasPVInstance {
     where
         Self: Instance,
     {
-        let current = self.pivot();
-        if current == pivot {
-            return;
-        }
-        let transform = pivot * current.inverse();
-        assert!(
-            transform.is_finite(),
-            "pivot_to requires an invertible current pivot and a finite transform delta"
-        );
-        self.pv_mut().pivot = pivot;
-        for child in self.children_mut() {
-            transform_subtree(child, transform);
-        }
+        pivot_hierarchy_to(self, pivot);
     }
 
-    /// Replaces only this instance's position, orientation and scale.
+    /// Replaces this instance's position, orientation and scale.
     ///
-    /// Descendants keep their world-space transforms. Use [`Self::pivot_to`]
-    /// to move an instance hierarchy together.
+    /// Descendants keep their world-space transforms by default. [`Rig`]
+    /// moves its descendants with it. Use [`Self::pivot_to`] to move any
+    /// instance hierarchy together.
     fn with_pivot(mut self, pivot: Mat4) -> Self
     where
         Self: Sized,
     {
-        self.pv_mut().pivot = pivot;
+        self.set_pivot(pivot);
         self
     }
 
@@ -138,7 +136,7 @@ pub trait HasPVInstance {
     {
         let pivot = self.pivot();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+        self.set_pivot(PVInstance::pose_from_transform(pose) * Mat4::from_scale(size));
         self
     }
 
@@ -148,7 +146,7 @@ pub trait HasPVInstance {
         Self: Sized,
     {
         let pivot = self.pivot();
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size);
+        self.set_pivot(PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size));
         self
     }
 
@@ -160,8 +158,9 @@ pub trait HasPVInstance {
         let pivot = self.pivot();
         let (_, rotation, _) = pivot.to_scale_rotation_translation();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot =
-            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size);
+        self.set_pivot(
+            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size),
+        );
         self
     }
 
@@ -173,15 +172,17 @@ pub trait HasPVInstance {
         let pivot = self.pivot();
         let position = self.position();
         let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = Mat4::from_rotation_translation(
-            Quat::from_euler(
-                EulerRot::XYZ,
-                orientation.x.to_radians(),
-                orientation.y.to_radians(),
-                orientation.z.to_radians(),
-            ),
-            position,
-        ) * Mat4::from_scale(size);
+        self.set_pivot(
+            Mat4::from_rotation_translation(
+                Quat::from_euler(
+                    EulerRot::XYZ,
+                    orientation.x.to_radians(),
+                    orientation.y.to_radians(),
+                    orientation.z.to_radians(),
+                ),
+                position,
+            ) * Mat4::from_scale(size),
+        );
         self
     }
 }
@@ -204,6 +205,29 @@ impl<T: HasPVInstance + ?Sized> HasPVInstance for &mut T {
     fn pv_mut(&mut self) -> &mut PVInstance {
         (**self).pv_mut()
     }
+
+    fn set_pivot(&mut self, pivot: Mat4) {
+        (**self).set_pivot(pivot);
+    }
+}
+
+pub(crate) fn pivot_hierarchy_to<T: HasPVInstance + Instance + ?Sized>(
+    instance: &mut T,
+    pivot: Mat4,
+) {
+    let current = instance.pivot();
+    if current == pivot {
+        return;
+    }
+    let transform = pivot * current.inverse();
+    assert!(
+        transform.is_finite(),
+        "pivot_to requires an invertible current pivot and a finite transform delta"
+    );
+    instance.pv_mut().pivot = pivot;
+    for child in instance.children_mut() {
+        transform_subtree(child, transform);
+    }
 }
 
 fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
@@ -213,6 +237,8 @@ fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
         transform_pivot(part, transform);
     } else if let Some(camera) = instance.downcast_mut::<Camera>() {
         transform_pivot(camera, transform);
+    } else if let Some(rig) = instance.downcast_mut::<Rig>() {
+        transform_pivot(rig, transform);
     }
     #[cfg(feature = "meshpart")]
     if let Some(part) = instance.downcast_mut::<MeshPart>() {
@@ -227,6 +253,46 @@ fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
 fn transform_pivot(instance: &mut impl HasPVInstance, transform: Mat4) {
     let pivot = transform * instance.pivot();
     instance.pv_mut().pivot = pivot;
+}
+
+pub(crate) fn instance_pivot(instance: &dyn Instance) -> Option<Mat4> {
+    if let Some(part) = instance.downcast_ref::<Part>() {
+        return Some(part.pivot());
+    }
+    if let Some(part) = instance.downcast_ref::<BasePart>() {
+        return Some(part.pivot());
+    }
+    if let Some(camera) = instance.downcast_ref::<Camera>() {
+        return Some(camera.pivot());
+    }
+    if let Some(rig) = instance.downcast_ref::<Rig>() {
+        return Some(rig.pivot());
+    }
+    #[cfg(feature = "meshpart")]
+    if let Some(part) = instance.downcast_ref::<MeshPart>() {
+        return Some(part.pivot());
+    }
+    None
+}
+
+pub(crate) fn pivot_instance_to(instance: &mut dyn Instance, pivot: Mat4) -> bool {
+    if let Some(part) = instance.downcast_mut::<Part>() {
+        part.pivot_to(pivot);
+    } else if let Some(part) = instance.downcast_mut::<BasePart>() {
+        part.pivot_to(pivot);
+    } else if let Some(camera) = instance.downcast_mut::<Camera>() {
+        camera.pivot_to(pivot);
+    } else if let Some(rig) = instance.downcast_mut::<Rig>() {
+        rig.pivot_to(pivot);
+    } else {
+        #[cfg(feature = "meshpart")]
+        if let Some(part) = instance.downcast_mut::<MeshPart>() {
+            part.pivot_to(pivot);
+            return true;
+        }
+        return false;
+    }
+    true
 }
 
 #[cfg(test)]

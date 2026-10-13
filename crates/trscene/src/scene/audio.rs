@@ -9,7 +9,7 @@ use thiserror::Error;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Part, Sound,
+    BasePart, Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Part, Rig, Sound,
     Workspace, glam::Vec3,
 };
 
@@ -136,7 +136,8 @@ fn emitter(workspace: &Workspace, sound: &Sound) -> Option<(InstanceId, Vec3)> {
                 instance
                     .downcast_ref::<BasePart>()
                     .map(HasPVInstance::pivot)
-            });
+            })
+            .or_else(|| instance.downcast_ref::<Rig>().map(HasPVInstance::pivot));
         #[cfg(feature = "meshpart")]
         let pivot = pivot.or_else(|| {
             instance
