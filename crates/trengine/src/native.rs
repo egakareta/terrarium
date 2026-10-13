@@ -65,7 +65,7 @@ struct NativeHost {
     viewports: HashMap<String, Presenter>,
 }
 impl NativeHost {
-    fn frame(&mut self, input: FrameInput, layout: Layout) -> Result<UiSnapshot, AppCreationError> {
+    fn frame(&mut self, input: FrameInput, layout: Layout) -> Result<bool, AppCreationError> {
         let scale = if input.scale.is_finite() {
             input.scale.clamp(0.1, 8.0)
         } else {
@@ -160,7 +160,7 @@ impl NativeHost {
             active.push(region.key);
         }
         self.viewports.retain(|id, _| active.contains(id));
-        Ok(self.runtime.snapshot())
+        Ok(self.runtime.is_close_requested())
     }
     fn parent_destroyed(&mut self) {
         self.main.parent_destroyed();
@@ -264,9 +264,12 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
                         "terrarium_frame" => {
                             let input = serde_json::from_value(payload["input"].clone())?;
                             let layout = serde_json::from_value(payload["layout"].clone())?;
-                            let snapshot = host.frame(input, layout)?;
-                            let close = snapshot.close;
-                            resolver.resolve(snapshot);
+                            let close = host.frame(input, layout)?;
+                            if payload["snapshot"].as_bool() == Some(false) {
+                                resolver.resolve(close);
+                            } else {
+                                resolver.resolve(host.runtime.snapshot());
+                            }
                             if close {
                                 close_handle.exit(0);
                             }

@@ -1,5 +1,6 @@
 import { nativeLayout } from "./native-layout";
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { assetBase, exampleFromLocation } from "./routing";
 
 export interface PropertyValue {
   Bool?: boolean;
@@ -59,6 +60,7 @@ export interface FrameInput {
 }
 export interface Transport {
   native: boolean;
+  advance(input: FrameInput): Promise<boolean>;
   frame(input: FrameInput): Promise<Snapshot>;
   state(): Promise<Snapshot>;
   command(command: string, payload?: unknown): Promise<unknown>;
@@ -68,7 +70,9 @@ export interface Transport {
 }
 interface WasmBridge {
   backend(): string;
+  software_adapter(): boolean;
   wait_for_gpu(): Promise<void>;
+  render(input: FrameInput): boolean;
   frame(input: FrameInput): Snapshot;
   state(): Snapshot;
   command(command: string, payload: unknown): unknown;
@@ -88,6 +92,12 @@ export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
   if (isTauri()) {
     return {
       native: true,
+      advance: (input) =>
+        invoke<boolean>("terrarium_frame", {
+          input,
+          layout: nativeLayout(canvas),
+          snapshot: false,
+        }),
       frame: (input) =>
         invoke<Snapshot>("terrarium_frame", { input, layout: nativeLayout(canvas) }),
       state: () => invoke<Snapshot>("terrarium_state"),
@@ -97,7 +107,7 @@ export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
     };
   }
   if (!window.__TERRARIUM__) {
-    const example = new URLSearchParams(location.search).get("example") ?? "app";
+    const example = exampleFromLocation() ?? "app";
     if (!/^[a-z_]+$/.test(example)) throw new Error("Invalid example name");
     const readiness = new Promise<void>((resolve, reject) => {
       const ready = () => {
@@ -106,9 +116,7 @@ export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
       };
       window.addEventListener("terrarium-ready", ready);
     });
-    const module = await import(
-      /* @vite-ignore */ new URL(`./wasm/${example}.js`, document.baseURI).href
-    );
+    const module = await import(/* @vite-ignore */ new URL(`wasm/${example}.js`, assetBase()).href);
     await module.default();
     await readiness;
   }
@@ -117,11 +125,12 @@ export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
   let disposed = false;
   return {
     native: false,
-    frame: async (input) => {
-      const snapshot = bridge.frame(input);
-      await bridge.wait_for_gpu();
-      return snapshot;
+    advance: async (input) => {
+      const close = bridge.render(input);
+      if (bridge.software_adapter()) await bridge.wait_for_gpu();
+      return close;
     },
+    frame: async (input) => bridge.frame(input),
     state: async () => bridge.state(),
     command: async (command, payload = null) => bridge.command(command, payload),
     viewport: async (id) => bridge.viewport(id),

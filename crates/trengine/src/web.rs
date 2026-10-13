@@ -11,6 +11,7 @@ use crate::{
 #[wasm_bindgen]
 pub struct WebBridge {
     runtime: Box<dyn HostApp>,
+    software_adapter: bool,
     surface: wgpu::Surface<'static>,
     configuration: wgpu::SurfaceConfiguration,
     canvas: HtmlCanvasElement,
@@ -33,6 +34,10 @@ fn js_error(error: impl std::fmt::Display) -> JsValue {
 
 #[wasm_bindgen]
 impl WebBridge {
+    /// Whether WebGPU selected a CPU fallback adapter.
+    pub fn software_adapter(&self) -> bool {
+        self.software_adapter
+    }
     /// Returns the selected GPU backend for diagnostics.
     pub fn backend(&self) -> String {
         format!(
@@ -49,7 +54,7 @@ impl WebBridge {
 
     /// Resolves when previously submitted GPU work completes.
     ///
-    /// Browser hosts await this between frames to bound the submission queue on slow GPUs.
+    /// CPU fallback hosts use this to bound submissions; hardware rendering does not wait.
     pub fn wait_for_gpu(&self) -> js_sys::Promise {
         let state = &self.runtime.engine().creation_context().wgpu_render_state;
         if state.adapter.get_info().backend != wgpu::Backend::BrowserWebGpu {
@@ -68,6 +73,13 @@ impl WebBridge {
 
     /// Advances and presents one frame, returning UI state.
     pub fn frame(&mut self, input: JsValue) -> Result<JsValue, JsValue> {
+        self.render(input)?;
+        self.state()
+    }
+
+    /// Advances and presents a frame without serializing application or inspector state.
+    /// Returns whether the application requested shutdown.
+    pub fn render(&mut self, input: JsValue) -> Result<bool, JsValue> {
         let input: FrameInput = serde_wasm_bindgen::from_value(input).map_err(js_error)?;
         let size = input.physical_size();
         let state = &self.runtime.engine().creation_context().wgpu_render_state;
@@ -140,7 +152,7 @@ impl WebBridge {
             .wgpu_render_state
             .device
             .poll(wgpu::PollType::Poll);
-        self.state()
+        Ok(self.runtime.is_close_requested())
     }
     /// Attaches a WebGPU canvas to a viewport; WebGL hosts use asynchronous readback.
     pub fn mount_viewport(
@@ -271,6 +283,9 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
             let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
             let surface = instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))?;
             let state = RenderState::create(options, instance, Some(&surface)).await?;
+            let info = state.adapter.get_info();
+            let software_adapter = info.backend == wgpu::Backend::BrowserWebGpu
+                && info.device_type == wgpu::DeviceType::Cpu;
             let mut configuration = surface
                 .get_default_config(&state.adapter, size[0], size[1])
                 .ok_or("surface configuration is unavailable")?;
@@ -287,6 +302,7 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
             let runtime = launcher.initialize(state, initialize)?;
             let bridge: JsValue = WebBridge {
                 runtime: Box::new(runtime),
+                software_adapter,
                 surface,
                 configuration,
                 canvas,

@@ -241,17 +241,20 @@ const panels = { explorer: Explorer, properties: Properties, fonts: FontMarket }
 function addPanels(api: DockviewApi) {
   api.addPanel({ id: "explorer", component: "explorer", title: "Explorer" });
   api.addPanel({
-    id: "properties",
-    component: "properties",
-    title: "Properties",
-    position: { referencePanel: "explorer", direction: "right" },
-  });
-  api.addPanel({
     id: "fonts",
     component: "fonts",
     title: "Font Market",
-    position: { referencePanel: "properties", direction: "within" },
+    position: { referencePanel: "explorer", direction: "within" },
+    inactive: true,
   });
+  api.addPanel({
+    id: "properties",
+    component: "properties",
+    title: "Properties",
+    position: { referencePanel: "explorer", direction: "below" },
+    inactive: true,
+  });
+  api.getPanel("explorer")?.group.api.setSize({ height: api.height * 0.55 });
 }
 export function Devtools() {
   const { snapshot, command } = useEngine();
@@ -261,73 +264,76 @@ export function Devtools() {
     addPanels(event.api);
   }, []);
   if (!snapshot.devtools) return null;
-  if (!snapshot.devtools.visible)
-    return (
-      <Text className="development-notice">Development build: Press F12 to enable DevTools</Text>
-    );
+  const notice = (
+    <Text className="development-notice">Development build: Press F12 to enable DevTools</Text>
+  );
+  if (!snapshot.devtools.visible) return notice;
   return (
-    <Window
-      title="DevTools"
-      width={980}
-      height={620}
-      className="devtools-window"
-      onClose={() => void command("devtools.visible", false)}
-    >
-      <Group className="devtools-toolbar" gap="xs">
-        <Button
-          leftSection={<ArrowCounterClockwiseIcon />}
-          onClick={() => {
-            api.current?.clear();
-            if (api.current) addPanels(api.current);
-          }}
-        >
-          Reset layout
-        </Button>
-        <Menu>
-          <Menu.Target>
-            <Button>Panels</Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            {Object.keys(panels).map((id) => (
-              <Menu.Item
-                key={id}
-                onClick={() => {
-                  const dock = api.current;
-                  if (!dock) return;
-                  const panel = dock.getPanel(id);
-                  if (panel) panel.api.setActive();
-                  else
-                    dock.addPanel({
-                      id,
-                      component: id,
-                      title:
-                        id === "fonts"
-                          ? "Font Market"
-                          : id === "explorer"
-                            ? "Explorer"
-                            : "Properties",
-                    });
-                }}
-              >
-                {id === "fonts" ? "Font Market" : id === "explorer" ? "Explorer" : "Properties"}
-              </Menu.Item>
-            ))}
-          </Menu.Dropdown>
-        </Menu>
-        <Text>{snapshot.devtools.selected.length} selected</Text>
-        <Button
-          leftSection={<TrashIcon />}
-          disabled={!snapshot.devtools.selected.length}
-          onClick={() => void command("devtools.delete")}
-        >
-          Delete selection
-        </Button>
-      </Group>
-      <DockviewReact
-        className="devtools-dock dockview-theme-dark"
-        components={panels}
-        onReady={ready}
-      />
-    </Window>
+    <>
+      <Window
+        title="DevTools"
+        width={340}
+        height={420}
+        className="devtools-window"
+        onClose={() => void command("devtools.visible", false)}
+      >
+        <Group className="devtools-toolbar" gap="xs">
+          <Menu>
+            <Menu.Target>
+              <Button>Panels</Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              {Object.keys(panels).map((id) => (
+                <Menu.Item
+                  key={id}
+                  onClick={() => {
+                    const dock = api.current;
+                    if (!dock) return;
+                    const panel = dock.getPanel(id);
+                    if (panel) panel.api.setActive();
+                    else
+                      dock.addPanel({
+                        id,
+                        component: id,
+                        title:
+                          id === "fonts"
+                            ? "Font Market"
+                            : id === "explorer"
+                              ? "Explorer"
+                              : "Properties",
+                      });
+                  }}
+                >
+                  {id === "fonts" ? "Font Market" : id === "explorer" ? "Explorer" : "Properties"}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+          <Button
+            leftSection={<ArrowCounterClockwiseIcon />}
+            onClick={() => {
+              api.current?.clear();
+              if (api.current) addPanels(api.current);
+            }}
+          >
+            Reset layout
+          </Button>
+          <Text>{snapshot.devtools.selected.length} selected</Text>
+          <Button
+            leftSection={<TrashIcon />}
+            disabled={!snapshot.devtools.selected.length}
+            onClick={() => void command("devtools.delete")}
+          >
+            Delete selection
+          </Button>
+        </Group>
+        <DockviewReact
+          className="devtools-dock dockview-theme-dark"
+          components={panels}
+          onReady={ready}
+        />
+      </Window>
+      {notice}
+    </>
   );
 }

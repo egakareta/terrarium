@@ -31,7 +31,7 @@ for (const example of examples) {
     const failures: string[] = [];
     page.on("pageerror", (error) => failures.push(error.message));
     await page.goto(
-      `/?example=${example}${example === "render_benchmark" ? "&parts=32&warmup=1&frames=2&width=128&height=128" : ""}`,
+      `/${example}/${example === "render_benchmark" ? "?parts=32&warmup=1&frames=2&width=128&height=128" : ""}`,
     );
     await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
     await expect(page.getByRole("alert")).toHaveCount(0);
@@ -75,6 +75,55 @@ for (const example of examples) {
     expect(failures).toEqual([]);
   });
 }
+test("the examples hub opens and closes an interactive preview", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Terrarium examples 🌍" })).toBeVisible();
+  await expect(page.getByText("the main example", { exact: true })).toBeVisible();
+  await expect(page.getByText("a custom 3d model", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "open app", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page.getByRole("link", { name: "open full-size app" })).toHaveAttribute(
+    "href",
+    /\/app\/$/,
+  );
+  const preview = page.frameLocator('iframe[title="app example"]');
+  await expect(preview.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
+  await expect(preview.getByRole("alert")).toHaveCount(0);
+  await preview.getByRole("slider", { name: "Clock time" }).press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "open app", exact: true })).toBeFocused();
+});
+test("the development notice and default inspector layout retain their original presentation", async ({
+  page,
+}) => {
+  await page.goto("/simple/");
+  const notice = page.getByText("Development build: Press F12 to enable DevTools", { exact: true });
+  await expect(notice).toBeVisible({ timeout: 90_000 });
+  const style = await notice.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      color: style.color,
+      outline: style.webkitTextStrokeWidth,
+      bounds: element.getBoundingClientRect().toJSON(),
+    };
+  });
+  expect(style.color).toBe("rgb(255, 0, 0)");
+  expect(style.outline).toBe("3px");
+  expect(style.bounds.x + style.bounds.width / 2).toBeCloseTo(page.viewportSize()!.width / 2, 0);
+  await page.keyboard.press("F12");
+  const explorer = page.getByText("Explorer", { exact: true });
+  const fonts = page.getByText("Font Market", { exact: true });
+  const properties = page.getByText("Properties", { exact: true });
+  await expect(explorer).toBeVisible();
+  await expect(properties).toBeVisible();
+  const top = await explorer.boundingBox();
+  const bottom = await properties.boundingBox();
+  const font = await fonts.boundingBox();
+  expect(bottom!.y).toBeGreaterThan(top!.y + top!.height);
+  expect(bottom!.x).toBeCloseTo(top!.x, 0);
+  expect(font!.y).toBeCloseTo(top!.y, 0);
+  await expect(notice).toBeVisible();
+});
 test("outline controls edit the running scene", async ({ page }) => {
   await page.goto("/?example=outlines");
   await expect(page.getByRole("checkbox", { name: "Focus on duck" })).toBeVisible({
@@ -85,6 +134,32 @@ test("outline controls edit the running scene", async ({ page }) => {
   await expect
     .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().app))
     .toMatchObject({ mode: "Toon", focus: false });
+});
+test("hardware rendering stays responsive when GPU completion callbacks arrive late", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 320, height: 240 });
+  await page.addInitScript(() => {
+    const info = Object.getOwnPropertyDescriptor(GPUAdapter.prototype, "info")!.get!;
+    Object.defineProperty(GPUAdapter.prototype, "info", {
+      get() {
+        const value = info.call(this);
+        Object.defineProperty(value, "isFallbackAdapter", { value: false });
+        return value;
+      },
+    });
+    const completed = GPUQueue.prototype.onSubmittedWorkDone;
+    GPUQueue.prototype.onSubmittedWorkDone = async function () {
+      await completed.call(this);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    };
+  });
+  await page.goto("/simple/");
+  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect
+    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().fps), { timeout: 15_000 })
+    .toBeGreaterThan(30);
 });
 for (const widget of widgetNames) {
   test(`${widget} mounts its package-backed components`, async ({ page }) => {

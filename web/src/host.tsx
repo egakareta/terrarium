@@ -39,17 +39,17 @@ const theme = createTheme({
 export function TerrariumHost({
   components = applications,
   canvasId = "app",
+  gallery = new URLSearchParams(location.search).has("gallery") ||
+    location.pathname.endsWith("/examples.html"),
 }: {
   components?: Record<string, () => React.ReactNode>;
   canvasId?: string;
+  gallery?: boolean;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [transport, setTransport] = useState<Transport>();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState<string>();
-  const gallery =
-    new URLSearchParams(location.search).has("gallery") ||
-    location.pathname.endsWith("/examples.html");
   const widget = new URLSearchParams(location.search).get("widget");
   useEffect(() => {
     if (widget || gallery) return;
@@ -66,12 +66,19 @@ export function TerrariumHost({
         }
         setTransport(connection);
         setSnapshot(await connection.state());
+        let lastSnapshot = performance.now();
         const render = async (now: number) => {
           try {
-            const next = await connection.frame(input.next(now));
+            const events = input.next(now);
+            const close = await connection.advance(events);
             if (stopped) return;
-            setSnapshot(next);
-            if (!next.close) animation = requestAnimationFrame(render);
+            if (close || events.pressed.length || now - lastSnapshot >= 1000 / 30) {
+              const next = await connection.state();
+              if (stopped) return;
+              setSnapshot(next);
+              lastSnapshot = now;
+            }
+            if (!close) animation = requestAnimationFrame(render);
           } catch (error) {
             if (!stopped) setError(String(error));
           }

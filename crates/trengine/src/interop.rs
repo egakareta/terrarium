@@ -32,6 +32,7 @@ pub struct UiSnapshot {
 
 pub(crate) trait HostApp {
     fn frame(&mut self, input: FrameInput) -> Result<(), AppCreationError>;
+    fn is_close_requested(&self) -> bool;
     fn snapshot(&self) -> UiSnapshot;
     fn command(&mut self, command: &str, payload: Value) -> Result<Value, AppCreationError>;
     fn engine(&self) -> &Engine;
@@ -61,6 +62,9 @@ impl<A: App> Runtime<A> {
 }
 
 impl<A: App> HostApp for Runtime<A> {
+    fn is_close_requested(&self) -> bool {
+        self.frame.is_close_requested()
+    }
     fn frame(&mut self, mut input: FrameInput) -> Result<(), AppCreationError> {
         self.app.raw_input_hook(&mut self.engine, &mut input);
         self.app.logic(&mut self.engine, &input, &mut self.frame);

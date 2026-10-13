@@ -7,8 +7,8 @@ import {
   Stack,
   Text,
   Title,
-  SegmentedControl,
   Select,
+  NumberInput,
 } from "@mantine/core";
 import { WidgetGallery, widgetNames } from "./Widgets";
 import { useEngine } from "../context";
@@ -33,19 +33,34 @@ function SceneApp() {
   const { snapshot, state, command } = useEngine<{ clock: number; time: string }>();
   return (
     <div className="top-panel">
-      <Group>
+      <Group gap={8}>
         <Text>FPS: {snapshot.fps.toFixed(0)}</Text>
         <Divider orientation="vertical" />
         <Text ff="monospace">{state.time}</Text>
         <Slider
           aria-label="Clock time"
+          thumbLabel="Clock time"
           value={state.clock}
           min={0}
           max={24}
           step={0.01}
           label={(v) => `${v.toFixed(2)}h`}
           onChange={(v) => void command("clock", v)}
-          w={200}
+          w={100}
+        />
+        <NumberInput
+          aria-label="Clock time value"
+          value={state.clock}
+          min={0}
+          max={24}
+          step={0.01}
+          suffix="h"
+          decimalScale={2}
+          hideControls
+          size="xs"
+          w={64}
+          ff="monospace"
+          onChange={(value) => typeof value === "number" && void command("clock", value)}
         />
       </Group>
     </div>
@@ -70,24 +85,40 @@ function OutlinesApp() {
   const { state, command } = useEngine<{ mode: string; width: number; focus: boolean }>();
   return (
     <div className="top-panel">
-      <Group>
+      <Group gap={8}>
         <Text>Outline:</Text>
-        <SegmentedControl
-          aria-label="Outline mode"
-          data={["Toon", "Silhouette", "Stencil"]}
-          value={state.mode}
-          onChange={(v) => void command("mode", v)}
-        />
+        {["Toon", "Silhouette", "Stencil"].map((mode) => (
+          <Button
+            key={mode}
+            aria-pressed={state.mode === mode}
+            onClick={() => void command("mode", mode)}
+          >
+            {mode}
+          </Button>
+        ))}
         <Divider orientation="vertical" />
         <Text>Width</Text>
         <Slider
           aria-label="Width"
+          thumbLabel="Width"
           min={0.5}
           max={10}
           step={0.1}
           value={state.width}
-          w={180}
+          w={100}
           onChange={(v) => void command("width", v)}
+        />
+        <NumberInput
+          aria-label="Width value"
+          value={state.width}
+          min={0.5}
+          max={10}
+          step={0.1}
+          decimalScale={1}
+          hideControls
+          size="xs"
+          w={54}
+          onChange={(value) => typeof value === "number" && void command("width", value)}
         />
         <Divider orientation="vertical" />
         <Checkbox
@@ -143,6 +174,7 @@ function SoundApp() {
             <Text>{label}</Text>
             <Slider
               aria-label={label}
+              thumbLabel={label}
               min={min}
               max={max}
               step={0.01}
@@ -184,14 +216,12 @@ function ViewportApp() {
     textures: { id: string; size: [number, number] }[];
   }>();
   return (
-    <Window title="Viewport" width={580} height={390}>
+    <Window title="Viewport" width={340} height={600}>
       <Stack gap="xs">
         <Text>This is an image :)</Text>
-        <Group align="start">
-          {state.textures.map((texture) => (
-            <Viewport key={texture.id} {...texture} />
-          ))}
-        </Group>
+        {state.textures.map((texture) => (
+          <Viewport key={texture.id} {...texture} />
+        ))}
         <Text>{state.pixels}</Text>
       </Stack>
     </Window>

@@ -1,6 +1,16 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { mkdirSync, copyFileSync, cpSync, rmSync, createReadStream, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  copyFileSync,
+  cpSync,
+  rmSync,
+  createReadStream,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { exampleNames } from "./src/routing";
 
 export default defineConfig({
   base: "./",
@@ -26,6 +36,11 @@ export default defineConfig({
       },
       closeBundle() {
         copyFileSync("dist/index.html", "dist/examples.html");
+        const entry = readFileSync("dist/index.html", "utf8").replaceAll("./assets/", "../assets/");
+        for (const example of exampleNames) {
+          mkdirSync("dist/" + example, { recursive: true });
+          writeFileSync("dist/" + example + "/index.html", entry);
+        }
         mkdirSync("dist/fonts", { recursive: true });
         for (const font of ["Outfit", "SUSEMono"]) {
           copyFileSync(
