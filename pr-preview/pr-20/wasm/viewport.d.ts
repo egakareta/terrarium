@@ -115,22 +115,41 @@ export class WebBridge {
      */
     backend(): string;
     /**
-     * Dispatches an application or inspector command.
+     * Dispatches an application command.
      */
     command(command: string, payload: any): any;
+    /**
+     * Enables egui's generated accessibility tree for assistive hosts and diagnostics.
+     */
+    enable_accessibility(): void;
+    /**
+     * Returns the renderer's measured frames per second.
+     */
+    fps(): number;
     /**
      * Advances and presents one frame, returning UI state.
      */
     frame(input: any): any;
     /**
+     * Returns the frontend component and initial host configuration.
+     */
+    info(): any;
+    /**
+     * Mounts an onscreen canvas for egui above the application's web UI.
+     */
+    mount_gui(canvas: HTMLCanvasElement): void;
+    /**
      * Attaches a WebGPU canvas to a viewport; WebGL hosts use asynchronous readback.
      */
     mount_viewport(id: string, canvas: HTMLCanvasElement): number | undefined;
     /**
-     * Advances and presents a frame without serializing application or inspector state.
-     * Returns whether the application requested shutdown.
+     * Returns the latest standard egui platform output, including accessibility updates.
      */
-    render(input: any): boolean;
+    platform_output(): any;
+    /**
+     * Advances and presents a frame, returning FPS, shutdown status, and egui platform output.
+     */
+    render(input: any): any;
     /**
      * Whether WebGPU selected a CPU fallback adapter.
      */
@@ -273,8 +292,13 @@ export interface InitOutput {
     readonly waitOnline: (a: any) => any;
     readonly webbridge_backend: (a: number) => [number, number];
     readonly webbridge_command: (a: number, b: number, c: number, d: any) => [number, number, number];
+    readonly webbridge_enable_accessibility: (a: number) => void;
+    readonly webbridge_fps: (a: number) => number;
     readonly webbridge_frame: (a: number, b: any) => [number, number, number];
+    readonly webbridge_info: (a: number) => [number, number, number];
+    readonly webbridge_mount_gui: (a: number, b: any) => [number, number];
     readonly webbridge_mount_viewport: (a: number, b: number, c: number, d: any) => [number, number, number];
+    readonly webbridge_platform_output: (a: number) => [number, number, number];
     readonly webbridge_render: (a: number, b: any) => [number, number, number];
     readonly webbridge_software_adapter: (a: number) => number;
     readonly webbridge_state: (a: number) => [number, number, number];
@@ -285,10 +309,11 @@ export interface InitOutput {
     readonly writeText: (a: number, b: number, c: number, d: number) => [number, number];
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___js_sys_e46af6bc04ed6125___Function_fn_wasm_bindgen_8582d61557fb93d3___JsValue_____wasm_bindgen_8582d61557fb93d3___sys__Undefined___js_sys_e46af6bc04ed6125___Function_fn_wasm_bindgen_8582d61557fb93d3___JsValue_____wasm_bindgen_8582d61557fb93d3___sys__Undefined_______true_: (a: number, b: number, c: any, d: any) => void;
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___JsValue__core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true_: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__54: (a: number, b: number, c: any) => [number, number];
-    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_f3c6ab705f305eb1___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__55: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_93b8ca173d8aac9c___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true_: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_93b8ca173d8aac9c___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__59: (a: number, b: number, c: any) => [number, number];
+    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke___wasm_bindgen_8582d61557fb93d3___sys__JsNullable_wgpu_93b8ca173d8aac9c___backend__webgpu__webgpu_sys__gen_GpuError__GpuError___core_58b45624238b1c28___result__Result_____wasm_bindgen_8582d61557fb93d3___JsError___true__60: (a: number, b: number, c: any) => [number, number];
     readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke_______true_: (a: number, b: number) => void;
+    readonly wasm_bindgen_8582d61557fb93d3___convert__closures_____invoke_______true__1_: (a: number, b: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
