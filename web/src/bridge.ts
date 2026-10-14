@@ -2,39 +2,23 @@ import { nativeLayout } from "./native-layout";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { assetBase, exampleFromLocation } from "./routing";
 
-export interface PropertyValue {
-  Bool?: boolean;
-  Number?: number;
-  Text?: string;
-  Json?: string;
-  Vector?: number[];
-  Color?: number[];
-  Choice?: { selected: string; options: string[] };
-}
-export interface SceneNode {
-  id: string;
-  name: string;
-  class: string;
-  children: SceneNode[];
-}
-export interface InspectorState {
-  visible: boolean;
-  tree: SceneNode | null;
-  selected: string[];
-  properties:
-    | { property: { path: string; value: PropertyValue; editable: boolean }; mixed: boolean }[]
-    | null;
-}
-export interface Snapshot {
+export interface HostInfo {
   ui: string;
-  app: unknown;
-  fps: number;
-  close: boolean;
   bundled_fonts: boolean;
-  touch_geometry?: [number, number, number] | null;
-  touch_enabled: boolean;
-  touch_movement: [number, number];
-  devtools: InspectorState | null;
+}
+export interface PlatformOutput {
+  cursor_icon: string;
+  commands: { CopyText?: string; OpenUrl?: { url: string; new_tab: boolean } }[];
+  ime?: { cursor_rect: { min: { x: number; y: number }; max: { x: number; y: number } } } | null;
+  accesskit_update?: unknown;
+}
+export interface FrameOutput {
+  fps: number;
+  pixels_per_point: number;
+  gui_regions: [number, number, number, number][];
+  gui_input_regions: [number, number, number, number][];
+  close: boolean;
+  platform: PlatformOutput;
 }
 export interface TouchEvent {
   device: number;
@@ -44,6 +28,7 @@ export interface TouchEvent {
   captured: boolean;
 }
 export interface FrameInput {
+  gui_events: unknown[];
   delta: number;
   size: [number, number];
   scale: number;
@@ -60,21 +45,25 @@ export interface FrameInput {
 }
 export interface Transport {
   native: boolean;
-  advance(input: FrameInput): Promise<boolean>;
-  frame(input: FrameInput): Promise<Snapshot>;
-  state(): Promise<Snapshot>;
+  info: HostInfo;
+  advance(input: FrameInput): Promise<FrameOutput>;
+  state(): Promise<unknown>;
   command(command: string, payload?: unknown): Promise<unknown>;
   viewport(id: string): Promise<Uint8Array | undefined>;
   mountViewport?(id: string, canvas: HTMLCanvasElement): (() => void) | undefined;
   dispose(): void;
 }
 interface WasmBridge {
+  mount_gui(canvas: HTMLCanvasElement): void;
   backend(): string;
   software_adapter(): boolean;
   wait_for_gpu(): Promise<void>;
-  render(input: FrameInput): boolean;
-  frame(input: FrameInput): Snapshot;
-  state(): Snapshot;
+  info(): HostInfo;
+  fps(): number;
+  enable_accessibility(): void;
+  platform_output(): PlatformOutput;
+  render(input: FrameInput): FrameOutput;
+  state(): unknown;
   command(command: string, payload: unknown): unknown;
   viewport(id: string): Uint8Array | undefined;
   mount_viewport(id: string, canvas: HTMLCanvasElement): number | undefined;
@@ -88,19 +77,20 @@ declare global {
   }
 }
 
-export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
+export async function connect(
+  canvas: HTMLCanvasElement,
+  overlay: HTMLCanvasElement,
+): Promise<Transport> {
   if (isTauri()) {
     return {
       native: true,
+      info: await invoke<HostInfo>("terrarium_info"),
       advance: (input) =>
-        invoke<boolean>("terrarium_frame", {
+        invoke<FrameOutput>("terrarium_frame", {
           input,
           layout: nativeLayout(canvas),
-          snapshot: false,
         }),
-      frame: (input) =>
-        invoke<Snapshot>("terrarium_frame", { input, layout: nativeLayout(canvas) }),
-      state: () => invoke<Snapshot>("terrarium_state"),
+      state: () => invoke("terrarium_state"),
       command: (command, payload = null) => invoke("terrarium_command", { command, payload }),
       viewport: async () => undefined,
       dispose() {},
@@ -122,15 +112,17 @@ export async function connect(canvas: HTMLCanvasElement): Promise<Transport> {
   }
   const bridge = window.__TERRARIUM__;
   if (!bridge) throw new Error("WASM renderer did not provide an interop bridge");
+  if (bridge.backend() === "Gl") canvas.classList.add("combined-canvas");
+  else bridge.mount_gui(overlay);
   let disposed = false;
   return {
     native: false,
+    info: bridge.info(),
     advance: async (input) => {
-      const close = bridge.render(input);
+      const output = bridge.render(input);
       if (bridge.software_adapter()) await bridge.wait_for_gpu();
-      return close;
+      return output;
     },
-    frame: async (input) => bridge.frame(input),
     state: async () => bridge.state(),
     command: async (command, payload = null) => bridge.command(command, payload),
     viewport: async (id) => bridge.viewport(id),

@@ -2,7 +2,7 @@ use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::HtmlCanvasElement;
 
 use crate::{
-    interop::HostApp,
+    runtime::HostApp,
     trscene::{FrameInput, WorkspacePreset},
     *,
 };
@@ -12,6 +12,11 @@ use crate::{
 pub struct WebBridge {
     runtime: Box<dyn HostApp>,
     software_adapter: bool,
+    gui_surface: Option<(
+        wgpu::Surface<'static>,
+        wgpu::SurfaceConfiguration,
+        HtmlCanvasElement,
+    )>,
     surface: wgpu::Surface<'static>,
     configuration: wgpu::SurfaceConfiguration,
     canvas: HtmlCanvasElement,
@@ -34,9 +39,31 @@ fn js_error(error: impl std::fmt::Display) -> JsValue {
 
 #[wasm_bindgen]
 impl WebBridge {
+    /// Mounts an onscreen canvas for egui above the application's web UI.
+    pub fn mount_gui(&mut self, canvas: HtmlCanvasElement) -> Result<(), JsValue> {
+        let state = &self.runtime.engine().creation_context().wgpu_render_state;
+        let surface = state
+            .instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+            .map_err(js_error)?;
+        let mut configuration = surface
+            .get_default_config(&state.adapter, 1, 1)
+            .ok_or_else(|| js_error("egui surface configuration is unavailable"))?;
+        configuration.format = state.target_format;
+        configuration.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+        canvas.set_width(1);
+        canvas.set_height(1);
+        surface.configure(&state.device, &configuration);
+        self.gui_surface = Some((surface, configuration, canvas));
+        Ok(())
+    }
     /// Whether WebGPU selected a CPU fallback adapter.
     pub fn software_adapter(&self) -> bool {
         self.software_adapter
+    }
+    /// Returns the renderer's measured frames per second.
+    pub fn fps(&self) -> f32 {
+        self.runtime.engine().renderer().fps()
     }
     /// Returns the selected GPU backend for diagnostics.
     pub fn backend(&self) -> String {
@@ -77,9 +104,8 @@ impl WebBridge {
         self.state()
     }
 
-    /// Advances and presents a frame without serializing application or inspector state.
-    /// Returns whether the application requested shutdown.
-    pub fn render(&mut self, input: JsValue) -> Result<bool, JsValue> {
+    /// Advances and presents a frame, returning FPS, shutdown status, and egui platform output.
+    pub fn render(&mut self, input: JsValue) -> Result<JsValue, JsValue> {
         let input: FrameInput = serde_wasm_bindgen::from_value(input).map_err(js_error)?;
         let size = input.physical_size();
         let state = &self.runtime.engine().creation_context().wgpu_render_state;
@@ -99,6 +125,13 @@ impl WebBridge {
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
                 self.runtime.engine().renderer().paint_scene(&target);
+                if self.gui_surface.is_none() {
+                    self.runtime.engine().gui.borrow_mut().paint(
+                        &target,
+                        &[[0, 0, size[0], size[1]]],
+                        false,
+                    );
+                }
                 self.runtime
                     .engine()
                     .creation_context()
@@ -117,6 +150,35 @@ impl WebBridge {
         if reconfigure {
             let state = &self.runtime.engine().creation_context().wgpu_render_state;
             self.surface.configure(&state.device, &self.configuration);
+        }
+        if let Some((surface, configuration, canvas)) = &mut self.gui_surface {
+            let state = &self.runtime.engine().creation_context().wgpu_render_state;
+            if [configuration.width, configuration.height] != size {
+                canvas.set_width(size[0]);
+                canvas.set_height(size[1]);
+                configuration.width = size[0];
+                configuration.height = size[1];
+                surface.configure(&state.device, configuration);
+            }
+            match surface.get_current_texture() {
+                wgpu::CurrentSurfaceTexture::Success(texture)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => {
+                    let target = texture.texture.create_view(&Default::default());
+                    self.runtime.engine().gui.borrow_mut().paint(
+                        &target,
+                        &[[0, 0, size[0], size[1]]],
+                        true,
+                    );
+                    state.queue.present(texture);
+                }
+                wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                    surface.configure(&state.device, configuration)
+                }
+                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {}
+                wgpu::CurrentSurfaceTexture::Validation => {
+                    return Err(js_error("egui surface validation failed"));
+                }
+            }
         }
         #[cfg(feature = "meshpart")]
         for viewport in self.viewports.values_mut() {
@@ -152,7 +214,13 @@ impl WebBridge {
             .wgpu_render_state
             .device
             .poll(wgpu::PollType::Poll);
-        Ok(self.runtime.is_close_requested())
+        self.runtime
+            .status()
+            .serialize(
+                &serde_wasm_bindgen::Serializer::json_compatible()
+                    .serialize_large_number_types_as_bigints(true),
+            )
+            .map_err(js_error)
     }
     /// Attaches a WebGPU canvas to a viewport; WebGL hosts use asynchronous readback.
     pub fn mount_viewport(
@@ -215,11 +283,33 @@ impl WebBridge {
     /// Returns current UI state without advancing the simulation.
     pub fn state(&self) -> Result<JsValue, JsValue> {
         self.runtime
-            .snapshot()
+            .state()
             .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(js_error)
     }
-    /// Dispatches an application or inspector command.
+    /// Returns the frontend component and initial host configuration.
+    pub fn info(&self) -> Result<JsValue, JsValue> {
+        self.runtime
+            .info()
+            .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(js_error)
+    }
+    /// Enables egui's generated accessibility tree for assistive hosts and diagnostics.
+    pub fn enable_accessibility(&self) {
+        self.runtime.engine().egui_context().enable_accesskit();
+    }
+    /// Returns the latest standard egui platform output, including accessibility updates.
+    pub fn platform_output(&self) -> Result<JsValue, JsValue> {
+        self.runtime
+            .status()
+            .platform
+            .serialize(
+                &serde_wasm_bindgen::Serializer::json_compatible()
+                    .serialize_large_number_types_as_bigints(true),
+            )
+            .map_err(js_error)
+    }
+    /// Dispatches an application command.
     pub fn command(&mut self, command: &str, payload: JsValue) -> Result<JsValue, JsValue> {
         let payload = if payload.is_undefined() {
             serde_json::Value::Null
@@ -303,6 +393,7 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
             let bridge: JsValue = WebBridge {
                 runtime: Box::new(runtime),
                 software_adapter,
+                gui_surface: None,
                 surface,
                 configuration,
                 canvas,

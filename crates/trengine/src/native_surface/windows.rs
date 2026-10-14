@@ -43,6 +43,12 @@ pub(super) struct Child {
     last: Option<(Bounds, Vec<Rect>)>,
 }
 impl Child {
+    pub fn new_on_display(
+        window: tauri::WebviewWindow,
+        _owner: &Self,
+    ) -> Result<Self, AppCreationError> {
+        Self::new(window)
+    }
     pub fn requires_alpha(&self) -> bool {
         false
     }

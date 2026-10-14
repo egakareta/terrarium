@@ -11,6 +11,7 @@ license.workspace = true
 resolver = "3"
 members = [
   ".",
+  "crates/egui-text-outline/",
   "crates/trclipboard/",
   "crates/trdevtools-derive/",
   "crates/trdevtools/",
@@ -26,6 +27,7 @@ members = [
 ]
 default-members = [
   ".",
+  "crates/egui-text-outline/",
   "crates/trclipboard/",
   "crates/trdevtools-derive/",
   "crates/trdevtools/",
@@ -49,6 +51,7 @@ repository = "https://github.com/egakareta/terrarium"
 license = "MIT"
 
 [workspace.dependencies]
+egui-text-outline = { path = "crates/egui-text-outline/", version = "0.1" }
 trclipboard = { path = "crates/trclipboard/", version = "0.1" }
 trdevtools = { path = "crates/trdevtools/", version = "0.1", default-features = false }
 trdevtools-derive = { path = "crates/trdevtools-derive/", version = "0.1" }

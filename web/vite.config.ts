@@ -61,8 +61,6 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("opentype.js") || id.includes("fflate")) return "font-tools";
-          if (id.includes("dockview")) return "dockview";
           if (id.includes("node_modules")) return "vendor";
         },
       },

@@ -40,6 +40,20 @@ impl Child {
             _ => Err("unsupported Linux native window handle".into()),
         }
     }
+    pub fn new_on_display(
+        window: tauri::WebviewWindow,
+        owner: &Self,
+    ) -> Result<Self, AppCreationError> {
+        if let (RawWindowHandle::Xlib(parent), Self::X11(owner)) =
+            (window.window_handle()?.as_raw(), owner)
+        {
+            return Ok(Self::X11(Box::new(X11Child::with_connection(
+                parent.window,
+                owner.connection.clone(),
+            )?)));
+        }
+        Self::new(window)
+    }
     pub fn handles(&self) -> Result<(RawDisplayHandle, RawWindowHandle), AppCreationError> {
         Ok(match self {
             Self::X11(child) => (
@@ -128,7 +142,6 @@ pub(super) struct X11Child {
 impl X11Child {
     fn new(parent: u64) -> Result<Self, AppCreationError> {
         let api = xlib::Xlib::open()?;
-        let fixes = xfixes::Xlib::open()?;
         unsafe {
             (api.XInitThreads)();
         }
@@ -142,6 +155,14 @@ impl X11Child {
             display: display as usize,
             screen,
         });
+        Self::with_connection(parent, connection)
+    }
+    fn with_connection(
+        parent: u64,
+        connection: Arc<X11Connection>,
+    ) -> Result<Self, AppCreationError> {
+        let fixes = xfixes::Xlib::open()?;
+        let display = connection.display as *mut _;
         let mut event = 0;
         let mut error = 0;
         if unsafe { (fixes.XFixesQueryExtension)(display, &mut event, &mut error) } == 0 {

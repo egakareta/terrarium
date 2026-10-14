@@ -2,7 +2,7 @@
 name = "trengine"
 version.workspace = true
 edition.workspace = true
-description = "Tauri, React, and wgpu application runtime for Terrarium."
+description = "Tauri and wgpu application runtime for Terrarium."
 documentation = "https://docs.rs/trengine"
 repository.workspace = true
 license.workspace = true
@@ -17,6 +17,13 @@ include = [
 ]
 
 [dependencies]
+egui = { version = "0.36", features = ["serde"] }
+egui-wgpu = { version = "0.36", default-features = false, features = [
+  "fragile-send-sync-non-atomic-wasm",
+] }
+egui-phosphor = { version = "0.14", default-features = false, features = [
+  "regular",
+], optional = true }
 bevy_app = { version = "0.20", features = ["web"], optional = true }
 bevy_ecs = { version = "0.20", optional = true }
 bevy_tasks = { version = "0.20", optional = true }
@@ -34,7 +41,9 @@ wgpu = { version = "30", default-features = false, features = ["std"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = "1"
-tauri = { version = "2.12", default-features = false, features = [
+trclipboard = { workspace = true }
+webbrowser = "1"
+tauri = { version = "2", default-features = false, features = [
   "wry",
   "compression",
   "custom-protocol",
@@ -42,10 +51,10 @@ tauri = { version = "2.12", default-features = false, features = [
 ] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.build-dependencies]
-tauri-build = { version = "2.6", features = [] }
+tauri-build = { version = "2", features = [] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11-dl = "2.21"
+x11-dl = "2"
 wayland-client = "0.31"
 wayland-backend = { version = "0.3", features = ["client_system"] }
 
@@ -86,8 +95,8 @@ bevy = ["dep:bevy_app", "dep:bevy_ecs", "dep:bevy_tasks", "dep:bevy_time"]
 default-fonts = ["trfont/default-fonts"]
 default-materials = ["trrender/default-materials", "trscene/default-materials"]
 default-skybox = ["trrender/default-skybox", "trscene/default-skybox"]
-devtools = ["dep:trdevtools", "trscene/devtools"]
-phosphor = []
+devtools = ["dep:trdevtools", "dep:egui-phosphor", "trscene/devtools"]
+phosphor = ["dep:egui-phosphor"]
 x11 = []
 
 # <forward trscene exclude="default-materials,default-skybox,devtools">

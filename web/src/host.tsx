@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, MantineProvider, createTheme } from "@mantine/core";
 import "@mantine/core/styles.css";
-import "dockview-react/dist/styles/dockview.css";
 import "./style.css";
-import { connect, type Snapshot, type Transport } from "./bridge";
+import { connect, type Transport } from "./bridge";
 import { collectInput } from "./input";
 import { EngineContext } from "./context";
 import { applications } from "./examples/Applications";
-import { Devtools } from "./components/Devtools";
+import { platformOutput } from "./platform";
 import { Gallery } from "./examples/Gallery";
 import { WidgetGallery } from "./examples/Widgets";
 
@@ -36,32 +35,11 @@ const theme = createTheme({
   },
 });
 
-function shareInspector(previous: Snapshot["devtools"], next: Snapshot["devtools"]) {
-  if (!previous || !next) return next;
-  const tree =
-    JSON.stringify(previous.tree) === JSON.stringify(next.tree) ? previous.tree : next.tree;
-  const selected =
-    JSON.stringify(previous.selected) === JSON.stringify(next.selected)
-      ? previous.selected
-      : next.selected;
-  const properties =
-    JSON.stringify(previous.properties) === JSON.stringify(next.properties)
-      ? previous.properties
-      : next.properties;
-  return previous.visible === next.visible &&
-    tree === previous.tree &&
-    selected === previous.selected &&
-    properties === previous.properties
-    ? previous
-    : { ...next, tree, selected, properties };
-}
-
 interface HostProps {
   components?: Record<string, () => React.ReactNode>;
   canvasId?: string;
   gallery?: boolean;
 }
-
 export function TerrariumHost(props: HostProps) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
@@ -69,7 +47,6 @@ export function TerrariumHost(props: HostProps) {
     </MantineProvider>
   );
 }
-
 function HostContent({
   components = applications,
   canvasId = "app",
@@ -77,44 +54,50 @@ function HostContent({
     location.pathname.endsWith("/examples.html"),
 }: HostProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const overlay = useRef<HTMLCanvasElement>(null);
   const [transport, setTransport] = useState<Transport>();
-  const [snapshot, setSnapshot] = useState<Snapshot>();
+  const [state, setState] = useState<unknown>();
+  const [fps, setFps] = useState(0);
   const [error, setError] = useState<string>();
-  const updateSnapshot = useCallback((next: Snapshot) => {
-    setSnapshot((previous) => ({
-      ...next,
-      devtools: shareInspector(previous?.devtools ?? null, next.devtools),
-    }));
-  }, []);
   const widget = new URLSearchParams(location.search).get("widget");
   useEffect(() => {
     if (widget || gallery) return;
     let stopped = false,
       animation = 0;
     let bridge: Transport | undefined;
-    const input = collectInput(canvas.current!);
-    void connect(canvas.current!)
+    const input = collectInput(canvas.current!, overlay.current!);
+    const platform = platformOutput(canvas.current!, overlay.current!);
+    void connect(canvas.current!, overlay.current!)
       .then(async (connection) => {
         bridge = connection;
         if (stopped) {
           connection.dispose();
           return;
         }
+        const initial = await connection.state();
+        if (stopped) return;
+        setState(initial);
         setTransport(connection);
-        updateSnapshot(await connection.state());
-        let lastSnapshot = performance.now();
+        let lastState = performance.now();
         const render = async (now: number) => {
           try {
             const events = input.next(now);
-            const close = await connection.advance(events);
+            const output = await connection.advance(events);
             if (stopped) return;
-            if (close || events.pressed.length || now - lastSnapshot >= 1000 / 30) {
+            platform.apply(
+              output.platform,
+              output.pixels_per_point,
+              output.gui_regions,
+              output.gui_input_regions,
+            );
+            if (output.close || events.pressed.length || now - lastState >= 1000 / 30) {
               const next = await connection.state();
               if (stopped) return;
-              updateSnapshot(next);
-              lastSnapshot = now;
+              setState(next);
+              setFps(output.fps);
+              lastState = now;
             }
-            if (!close) animation = requestAnimationFrame(render);
+            if (!output.close) animation = requestAnimationFrame(render);
           } catch (error) {
             if (!stopped) setError(String(error));
           }
@@ -128,72 +111,51 @@ function HostContent({
       stopped = true;
       cancelAnimationFrame(animation);
       input.dispose();
+      platform.dispose();
       bridge?.dispose();
     };
-  }, [widget, gallery, updateSnapshot]);
+  }, [widget, gallery]);
   const command = useCallback(
     async (name: string, payload?: unknown) => {
       try {
         await transport!.command(name, payload);
-        updateSnapshot(await transport!.state());
+        setState(await transport!.state());
       } catch (error) {
         setError(String(error));
       }
     },
-    [transport, updateSnapshot],
+    [transport],
   );
-  const joystick = snapshot?.touch_geometry;
-  const Application = snapshot ? components[snapshot.ui] : undefined;
+  const Application = transport ? components[transport.info.ui] : undefined;
   return (
     <div
       className="terrarium-host"
       style={
-        snapshot?.bundled_fonts === false
+        transport?.info.bundled_fonts === false
           ? ({ "--terrarium-default-font": "system-ui" } as React.CSSProperties)
           : undefined
       }
     >
       {!widget && !gallery && (
-        <canvas ref={canvas} id={canvasId} className="scene-canvas" aria-label="3D scene" />
+        <>
+          <canvas ref={canvas} id={canvasId} className="scene-canvas" aria-label="3D scene" />
+          <canvas ref={overlay} className="egui-canvas" aria-label="Internal tools" />
+        </>
       )}
       {gallery && <Gallery />}
       {widget && <WidgetGallery name={widget} />}
-      {snapshot && transport && (
-        <EngineContext.Provider value={{ snapshot, command, transport }}>
+      {transport && (
+        <EngineContext.Provider value={{ state, fps, command, transport }}>
           <div className="ui-layer">
             {Application ? (
               <Application />
             ) : (
-              <Alert color="red">Unknown UI component: {snapshot.ui}</Alert>
-            )}
-            <Devtools />
-            {snapshot.touch_enabled && joystick && (
-              <div
-                className="joystick"
-                aria-hidden="true"
-                style={{
-                  left: joystick[0] - joystick[2],
-                  top: joystick[1] - joystick[2],
-                  bottom: "auto",
-                  width: joystick[2] * 2,
-                  height: joystick[2] * 2,
-                }}
-              >
-                <span
-                  style={{
-                    transform: `translate(${snapshot.touch_movement[0] * joystick[2] * 0.65}px, ${snapshot.touch_movement[1] * joystick[2] * 0.65}px)`,
-                    width: joystick[2] * 0.6,
-                    height: joystick[2] * 0.6,
-                    left: joystick[2] * 0.7,
-                    top: joystick[2] * 0.7,
-                  }}
-                />
-              </div>
+              <Alert color="red">Unknown UI component: {transport.info.ui}</Alert>
             )}
           </div>
         </EngineContext.Provider>
       )}
-      {!snapshot && !error && !widget && !gallery && (
+      {!transport && !error && !widget && !gallery && (
         <div className="loading" role="status">
           Starting renderer…
         </div>

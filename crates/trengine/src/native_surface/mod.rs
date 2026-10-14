@@ -184,8 +184,9 @@ impl Presenter {
         window: &tauri::WebviewWindow,
         state: &RenderState,
         size: [u32; 2],
+        owner: &Self,
     ) -> Result<Self, AppCreationError> {
-        let mut child = Child::new(window.clone())?;
+        let mut child = Child::new_on_display(window.clone(), &owner.child)?;
         child.layout(
             Bounds {
                 x: 0,

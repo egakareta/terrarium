@@ -3,7 +3,7 @@
 ## Structure
 
 - This is a Cargo workspace.
-- The main runtime path is `Terrarium -> Engine -> Workspace/Renderer`: `Workspace` owns the scene tree, camera, lighting, textures, meshes, and optional physics; `Renderer` is the host-independent WGPU renderer. Tauri hosts native windows; React renders UI through the same command bridge used by WASM.
+- The main runtime path is `Terrarium -> Engine -> Workspace/Renderer`: `Workspace` owns the scene tree, camera, lighting, textures, meshes, and optional physics; `Renderer` is the host-independent WGPU renderer. Tauri hosts native windows; egui renders internal tools directly on the GPU; example UIs use the Tauri frontend and the same application bridge on WASM.
 - This workspace has `#![deny(missing_docs)]`; document every new public item.
 
 ## Toolchain And Commands

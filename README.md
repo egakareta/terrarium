@@ -7,7 +7,7 @@
 `terrarium` is a simple, extensible 3D engine built around two core crates:
 
 - [wgpu](https://github.com/gfx-rs/wgpu) for 3D graphics
-- [Tauri](https://tauri.app) and [React](https://react.dev) for application windows and UI
+- [Tauri](https://tauri.app) for application windows
 
 Here's an example of how Terrarium can render a 1x1x1 cube.
 

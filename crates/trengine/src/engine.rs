@@ -32,6 +32,7 @@ impl Frame {
 /// Owns a workspace and its GPU renderer independently of the UI host.
 pub struct Engine {
     renderer: Rc<RefCell<RenderAdapter>>,
+    pub(crate) gui: RefCell<crate::gui::Gui>,
     /// The workspace rendered by this engine.
     pub workspace: Workspace,
     /// The F12 workspace inspector, initially hidden.
@@ -53,6 +54,7 @@ impl Engine {
         let renderer = RenderAdapter::new(&context.wgpu_render_state, size)?;
         let mut engine = Self {
             renderer: Rc::new(RefCell::new(renderer)),
+            gui: RefCell::new(crate::gui::Gui::new(&context.wgpu_render_state)),
             workspace,
             #[cfg(feature = "devtools")]
             devtools: trdevtools::Devtools::default(),
@@ -65,6 +67,51 @@ impl Engine {
         Ok(engine)
     }
 
+    /// Returns the egui context used by internal tools.
+    pub fn egui_context(&self) -> egui::Context {
+        self.gui.borrow().context.clone()
+    }
+    pub(crate) fn paint_touch_controls(&self, context: &egui::Context) {
+        let camera = self.workspace.camera_controller();
+        if !camera.touch_controls_visible() {
+            return;
+        }
+        let Some([x, y, radius]) = camera.touch_geometry() else {
+            return;
+        };
+        let zoom = context.zoom_factor();
+        let center = egui::pos2(x / zoom, y / zoom);
+        let radius = radius / zoom;
+        let painter = context.layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("terrarium_camera_joystick"),
+        ));
+        painter.circle(
+            center,
+            radius,
+            egui::Color32::from_black_alpha(80),
+            egui::Stroke::new(2.0, egui::Color32::from_white_alpha(110)),
+        );
+        let tick = radius * 0.75;
+        for direction in [
+            egui::vec2(1.0, 0.0),
+            egui::vec2(-1.0, 0.0),
+            egui::vec2(0.0, 1.0),
+            egui::vec2(0.0, -1.0),
+        ] {
+            painter.line_segment(
+                [center + direction * tick, center + direction * (tick + 6.0)],
+                egui::Stroke::new(2.0, egui::Color32::from_white_alpha(140)),
+            );
+        }
+        let movement = camera.touch_movement();
+        painter.circle(
+            center + egui::vec2(movement[0], movement[1]) * radius * 0.65,
+            radius * 0.3,
+            egui::Color32::from_white_alpha(100),
+            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(160)),
+        );
+    }
     /// Returns the GPU resources associated with application creation.
     pub fn creation_context(&self) -> &CreationContext {
         &self.creation_context
@@ -267,7 +314,7 @@ impl<'a> Terrarium<'a> {
         &mut self,
         state: RenderState,
         initialize: impl FnOnce(&mut Engine) -> Result<A, E>,
-    ) -> Result<crate::interop::Runtime<A>, AppCreationError> {
+    ) -> Result<crate::runtime::Runtime<A>, AppCreationError> {
         let mut engine = Engine::new(
             &CreationContext {
                 wgpu_render_state: state,
@@ -275,6 +322,20 @@ impl<'a> Terrarium<'a> {
             self.size,
             Workspace::preset(self.workspace_preset),
         )?;
+        let fonts = if self.bundle_fonts {
+            trfont::font_definitions()
+        } else {
+            egui::FontDefinitions::default()
+        };
+        #[cfg(any(feature = "phosphor", feature = "devtools"))]
+        let fonts = {
+            let mut fonts = fonts;
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+            fonts
+        };
+        #[cfg(feature = "devtools")]
+        engine.devtools.set_base_font_definitions(fonts.clone());
+        engine.egui_context().set_fonts(fonts);
         #[cfg(feature = "bevy")]
         if let Some(app) = self.bevy_app.take() {
             engine.bevy_app = Some(crate::bevy::attach_app(app, &mut engine.workspace)?);
@@ -284,7 +345,7 @@ impl<'a> Terrarium<'a> {
         if let Some(app) = engine.bevy_app.as_mut() {
             crate::bevy::finalize_app(app, &mut engine.workspace);
         }
-        Ok(crate::interop::Runtime::new(
+        Ok(crate::runtime::Runtime::new(
             engine,
             app,
             self.ui.to_owned(),

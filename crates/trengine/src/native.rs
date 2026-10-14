@@ -3,8 +3,8 @@ use std::{cell::RefCell, collections::HashMap, sync::OnceLock};
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder, ipc::InvokeBody};
 
 use crate::{
-    interop::{HostApp, Runtime},
     native_surface::{Bounds, Layout, Presenter, visible_regions},
+    runtime::{HostApp, Runtime},
     trscene::FrameInput,
     *,
 };
@@ -48,7 +48,7 @@ pub(crate) fn run_headless<A: App>(
             ..Default::default()
         })?;
         runtime.engine().renderer().finish_frame();
-        if runtime.snapshot().close {
+        if runtime.is_close_requested() {
             break;
         }
         if let Some(remaining) = remaining.as_mut() {
@@ -63,21 +63,29 @@ struct NativeHost {
     main: Presenter,
     window: tauri::WebviewWindow,
     viewports: HashMap<String, Presenter>,
+    gui: Option<Presenter>,
+    clipboard: Option<trclipboard::Clipboard>,
 }
 impl NativeHost {
-    fn frame(&mut self, input: FrameInput, layout: Layout) -> Result<bool, AppCreationError> {
+    fn frame(
+        &mut self,
+        input: FrameInput,
+        layout: Layout,
+    ) -> Result<crate::runtime::FrameOutput, AppCreationError> {
         let scale = if input.scale.is_finite() {
             input.scale.clamp(0.1, 8.0)
         } else {
             1.0
         };
         self.runtime.frame(input)?;
+        let output = self.runtime.status();
         let engine = self.runtime.engine();
         let size = engine.renderer().size();
         let state = &engine.creation_context().wgpu_render_state;
         let holes: Vec<_> = layout
             .occlusions
             .iter()
+            .chain(&output.gui_regions)
             .filter_map(|bounds| Layout::physical_rect(*bounds, scale, size))
             .collect();
         let regions = visible_regions(size, &holes);
@@ -93,7 +101,7 @@ impl NativeHost {
             regions,
         )?;
         self.main.present(state, |target, regions| {
-            engine.renderer().paint_native(target, regions, None)
+            engine.renderer().paint_native(target, regions, None);
         })?;
         let mut active = Vec::new();
         for region in layout.viewports {
@@ -123,6 +131,7 @@ impl NativeHost {
             let holes: Vec<_> = region
                 .occlusions
                 .iter()
+                .chain(&output.gui_regions)
                 .filter_map(|hole| {
                     Layout::physical_rect(
                         [
@@ -147,7 +156,12 @@ impl NativeHost {
             if let std::collections::hash_map::Entry::Vacant(entry) =
                 self.viewports.entry(region.key.clone())
             {
-                entry.insert(Presenter::new(&self.window, state, [width, height])?);
+                entry.insert(Presenter::new(
+                    &self.window,
+                    state,
+                    [width, height],
+                    &self.main,
+                )?);
             }
             let presenter = self
                 .viewports
@@ -160,10 +174,60 @@ impl NativeHost {
             active.push(region.key);
         }
         self.viewports.retain(|id, _| active.contains(id));
-        Ok(self.runtime.is_close_requested())
+        let gui = match &mut self.gui {
+            Some(gui) => gui,
+            slot @ None => slot.insert(Presenter::new(&self.window, state, size, &self.main)?),
+        };
+        let boxes: Vec<_> = output
+            .gui_regions
+            .iter()
+            .filter_map(|bounds| Layout::physical_rect(*bounds, scale, size))
+            .collect();
+        let regions = visible_regions(size, &visible_regions(size, &boxes));
+        gui.layout(
+            state,
+            Bounds {
+                x: (layout.scene[0] * scale).round() as i32,
+                y: (layout.scene[1] * scale).round() as i32,
+                width: size[0],
+                height: size[1],
+            },
+            self.window.scale_factor()?,
+            regions,
+        )?;
+        gui.present(state, |target, regions| {
+            engine.renderer().paint_native(target, regions, None);
+            let regions: Vec<_> = regions
+                .iter()
+                .map(|r| [r.x, r.y, r.width, r.height])
+                .collect();
+            engine.gui.borrow_mut().paint(target, &regions, false);
+        })?;
+        let mut output = output;
+        for command in output.platform.commands.drain(..) {
+            match command {
+                egui::OutputCommand::CopyText(text) => {
+                    if let Some(clipboard) = &mut self.clipboard
+                        && let Err(error) = pollster::block_on(clipboard.write_text(&text))
+                    {
+                        log::warn!("{error}");
+                    }
+                }
+                egui::OutputCommand::OpenUrl(url) => {
+                    if let Err(error) = webbrowser::open(&url.url) {
+                        log::warn!("{error}");
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(output)
     }
     fn parent_destroyed(&mut self) {
         self.main.parent_destroyed();
+        if let Some(gui) = &mut self.gui {
+            gui.parent_destroyed();
+        }
         for presenter in self.viewports.values_mut() {
             presenter.parent_destroyed();
         }
@@ -205,6 +269,8 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
                 main,
                 window: window.clone(),
                 viewports: HashMap::new(),
+                gui: None,
+                clipboard: trclipboard::Clipboard::new().ok(),
             })
         }))
     });
@@ -240,7 +306,7 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
             let command = invoke.message.command().to_owned();
             if !matches!(
                 command.as_str(),
-                "terrarium_frame" | "terrarium_state" | "terrarium_command"
+                "terrarium_frame" | "terrarium_state" | "terrarium_command" | "terrarium_info"
             ) {
                 return false;
             }
@@ -264,17 +330,15 @@ pub(crate) fn start<A: App, E: Into<AppCreationError>>(
                         "terrarium_frame" => {
                             let input = serde_json::from_value(payload["input"].clone())?;
                             let layout = serde_json::from_value(payload["layout"].clone())?;
-                            let close = host.frame(input, layout)?;
-                            if payload["snapshot"].as_bool() == Some(false) {
-                                resolver.resolve(close);
-                            } else {
-                                resolver.resolve(host.runtime.snapshot());
-                            }
+                            let output = host.frame(input, layout)?;
+                            let close = output.close;
+                            resolver.resolve(output);
                             if close {
                                 close_handle.exit(0);
                             }
                         }
-                        "terrarium_state" => resolver.resolve(host.runtime.snapshot()),
+                        "terrarium_state" => resolver.resolve(host.runtime.state()),
+                        "terrarium_info" => resolver.resolve(host.runtime.info()),
                         "terrarium_command" => {
                             let command = payload["command"]
                                 .as_str()

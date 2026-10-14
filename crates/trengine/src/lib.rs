@@ -15,15 +15,17 @@ pub use trscene::{self, winit};
 pub use wgpu;
 
 mod gpu;
-mod interop;
+mod gui;
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_surface;
+mod runtime;
 #[cfg(target_arch = "wasm32")]
 mod web;
+/// Egui APIs for internal tools and custom engine overlays.
+pub use egui;
 pub use gpu::*;
-pub use interop::*;
 
 #[cfg(feature = "bevy")]
 pub mod bevy;

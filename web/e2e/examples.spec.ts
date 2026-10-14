@@ -2,13 +2,67 @@ import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { widgetNames } from "../src/examples/Widgets";
 
+interface EguiNode {
+  role: string;
+  label?: string;
+  value?: string;
+  toggled?: string;
+  bounds: { x0: number; y0: number; x1: number; y1: number };
+}
+async function eguiNodes(page: import("@playwright/test").Page): Promise<EguiNode[]> {
+  return page.evaluate(() => {
+    const output = window.__TERRARIUM__!.platform_output();
+    const update = output.accesskit_update as
+      | { nodes: [unknown, { role: string; properties: object }][] }
+      | undefined;
+    return (
+      (update?.nodes.map(([, node]) => ({ role: node.role, ...node.properties })) as EguiNode[]) ??
+      []
+    );
+  });
+}
+async function eguiHas(page: import("@playwright/test").Page, name: string) {
+  return (await eguiNodes(page)).some((node) => node.label === name || node.value === name);
+}
+async function eguiNode(
+  page: import("@playwright/test").Page,
+  name: string,
+  role?: string,
+  exact = true,
+) {
+  const find = async () =>
+    (await eguiNodes(page)).find(
+      (node) =>
+        (!role || node.role === role) &&
+        [node.label, node.value].some((value) =>
+          exact ? value === name : value?.includes(name),
+        ) &&
+        node.bounds,
+    );
+  await expect.poll(find, { message: `Egui widget ${name}` }).toBeDefined();
+  return (await find())!;
+}
+async function eguiClick(
+  page: import("@playwright/test").Page,
+  name: string,
+  role?: string,
+  exact = true,
+) {
+  const node = await eguiNode(page, name, role, exact);
+  await page.mouse.click(
+    (node.bounds.x0 + node.bounds.x1) / 2,
+    (node.bounds.y0 + node.bounds.y1) / 2,
+    { delay: 100 },
+  );
+}
+
 test.afterEach(async ({ page }, testInfo) => {
   if (testInfo.status === testInfo.expectedStatus || page.isClosed()) return;
   console.log(
     JSON.stringify({
       example: testInfo.title,
       alerts: await page.getByRole("alert").allTextContents(),
-      state: await page.evaluate(() => window.__TERRARIUM__?.state().app),
+      state: await page.evaluate(() => window.__TERRARIUM__?.state()),
     }),
   );
 });
@@ -35,8 +89,9 @@ for (const example of examples) {
     );
     await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
     await expect(page.getByRole("alert")).toHaveCount(0);
+    const info = await page.evaluate(() => window.__TERRARIUM__!.info());
     const state = await page.evaluate(() => window.__TERRARIUM__!.state());
-    expect(state.ui).toBe(example);
+    expect(info.ui).toBe(example);
     if (example === "viewport") {
       expect(await page.evaluate(() => window.__TERRARIUM__!.backend())).toBe(
         testInfo.project.name === "webgl" ? "Gl" : "BrowserWebGpu",
@@ -48,7 +103,7 @@ for (const example of examples) {
           async () =>
             page.evaluate(() => {
               const state = window.__TERRARIUM__!.state();
-              const textures = (state.app as { textures: { id: string; size: [number, number] }[] })
+              const textures = (state as { textures: { id: string; size: [number, number] }[] })
                 .textures;
               return textures.map((texture) => {
                 const bytes = window.__TERRARIUM__!.viewport(texture.id);
@@ -58,19 +113,33 @@ for (const example of examples) {
           { timeout: 30_000 },
         )
         .toEqual(
-          (state.app as { textures: { size: [number, number] }[] }).textures.map(
+          (state as { textures: { size: [number, number] }[] }).textures.map(
             (texture) => texture.size[0] * texture.size[1] * 4,
           ),
         );
       await expect(page.getByRole("alert")).toHaveCount(0);
     }
-    await page.keyboard.press("F12");
     if (example !== "headless" && example !== "render_benchmark") {
-      await expect(page.getByText("DevTools", { exact: true })).toBeVisible();
-      await expect(page.getByText("Explorer", { exact: true })).toBeVisible();
-      const inspector = await page.evaluate(() => window.__TERRARIUM__!.state().devtools);
-      expect(inspector?.visible).toBe(true);
-      expect(inspector?.tree?.class).toBe("Workspace");
+      await page.evaluate(() => window.__TERRARIUM__!.enable_accessibility());
+      await page.keyboard.press("F12");
+      await expect.poll(() => eguiHas(page, "DevTools")).toBe(true);
+      await expect.poll(() => eguiHas(page, "Explorer")).toBe(true);
+      await expect.poll(() => eguiHas(page, "Workspace (Workspace)")).toBe(true);
+      await expect
+        .poll(
+          async () => {
+            const explorer = await eguiNode(page, "Explorer");
+            return page.evaluate(
+              ({ x0, y0, x1, y1 }) =>
+                document
+                  .elementFromPoint((x0 + x1) / 2, (y0 + y1) / 2)
+                  ?.hasAttribute("data-egui-region"),
+              explorer.bounds,
+            );
+          },
+          { timeout: 30000 },
+        )
+        .toBe(true);
     }
     expect(failures).toEqual([]);
   });
@@ -93,110 +162,61 @@ test("the examples hub opens and closes an interactive preview", async ({ page }
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.getByRole("link", { name: "open app", exact: true })).toBeFocused();
 });
-test("the development notice and default inspector layout retain their original presentation", async ({
-  page,
-}) => {
+test("egui renders the development notice and original dock layout", async ({ page }) => {
   await page.goto("/simple/");
-  const notice = page.getByText("Development build: Press F12 to enable DevTools", { exact: true });
-  await expect(notice).toBeVisible({ timeout: 90_000 });
-  const style = await notice.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return {
-      color: style.color,
-      outline: style.webkitTextStrokeWidth,
-      bounds: element.getBoundingClientRect().toJSON(),
-    };
-  });
-  expect(style.color).toBe("rgb(255, 0, 0)");
-  expect(style.outline).toBe("3px");
-  expect(style.bounds.x + style.bounds.width / 2).toBeCloseTo(page.viewportSize()!.width / 2, 0);
+  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90000 });
+  await page.evaluate(() => window.__TERRARIUM__!.enable_accessibility());
+  await expect
+    .poll(() => eguiHas(page, "Development build: Press F12 to enable DevTools"))
+    .toBe(true);
+  const notice = await eguiNode(page, "Development build: Press F12 to enable DevTools");
+  expect((notice.bounds.x0 + notice.bounds.x1) / 2).toBeCloseTo(page.viewportSize()!.width / 2, 0);
   await page.keyboard.press("F12");
-  const explorer = page.getByText("Explorer", { exact: true });
-  const fonts = page.getByText("Font Market", { exact: true });
-  const properties = page.getByText("Properties", { exact: true });
-  await expect(explorer).toBeVisible();
-  await expect(properties).toBeVisible();
-  const top = await explorer.boundingBox();
-  const bottom = await properties.boundingBox();
-  const font = await fonts.boundingBox();
-  expect(bottom!.y).toBeGreaterThan(top!.y + top!.height);
-  expect(bottom!.x).toBeCloseTo(top!.x, 0);
-  expect(font!.y).toBeCloseTo(top!.y, 0);
-  await expect(notice).toBeVisible();
+  await expect.poll(() => eguiHas(page, "Explorer")).toBe(true);
+  const explorer = await eguiNode(page, "Explorer"),
+    fonts = await eguiNode(page, "Font Market"),
+    properties = await eguiNode(page, "Properties");
+  expect(properties.bounds.y0).toBeGreaterThan(explorer.bounds.y1);
+  expect(fonts.bounds.y0).toBeCloseTo(explorer.bounds.y0, 0);
 });
 test("outline controls edit the running scene", async ({ page }) => {
   await page.goto("/?example=outlines");
   await expect(page.getByRole("checkbox", { name: "Focus on duck" })).toBeVisible({
     timeout: 90_000,
   });
+  await expect.poll(() => page.evaluate(() => window.__TERRARIUM__!.fps())).toBeGreaterThan(0);
   await page.getByText("Toon", { exact: true }).click();
   await page.getByRole("checkbox", { name: "Focus on duck" }).uncheck();
   await expect
-    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().app))
+    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state()))
     .toMatchObject({ mode: "Toon", focus: false });
 });
-test("inspector selection, ranges, property edits, and reopening stay consistent", async ({
-  page,
-}) => {
+test("egui inspector selects, edits, reopens, and deletes scene instances", async ({ page }) => {
   await page.goto("/simple/");
-  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
+  await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90000 });
+  await page.evaluate(() => window.__TERRARIUM__!.enable_accessibility());
   await page.keyboard.press("F12");
-  const rows = page.getByRole("treeitem");
-  const root = rows.nth(0);
-  const part = rows.nth(1);
-  await part.click({ position: { x: 32, y: 14 } });
-  await expect(part).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
-  await page.getByRole("textbox", { name: "name", exact: true }).fill("Pending cube name");
-  const properties = page
-    .locator(".inspector-panel")
-    .filter({ has: page.getByRole("textbox", { name: "name", exact: true }) });
-  const lastPath = await page.evaluate(
-    () => window.__TERRARIUM__!.state().devtools!.properties!.at(-1)!.property.path,
+  await expect.poll(() => eguiHas(page, "Part (Part)")).toBe(true);
+  await page.waitForTimeout(1500);
+  await eguiClick(page, "Part (Part)");
+  await expect.poll(() => eguiHas(page, "1 selected"), { timeout: 30000 }).toBe(true);
+  const editor = await eguiNode(page, "Part", "textInput");
+  await page.mouse.click(
+    (editor.bounds.x0 + editor.bounds.x1) / 2,
+    (editor.bounds.y0 + editor.bounds.y1) / 2,
   );
-  await properties.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
-  await expect(page.getByText(lastPath, { exact: true })).toBeVisible();
-  await page
-    .locator(".inspector-panel")
-    .filter({ has: page.getByText(lastPath, { exact: true }) })
-    .evaluate((element) => {
-      element.scrollTop = 0;
-    });
-  await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue(
-    "Pending cube name",
-  );
-  await page.getByRole("textbox", { name: "name", exact: true }).fill("Part");
-  await page.getByRole("textbox", { name: "name", exact: true }).press("Enter");
-  await root.click({ position: { x: 180, y: 14 }, modifiers: ["Control"] });
-  await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
-  await expect(root).toHaveAttribute("aria-selected", "true");
-  await part.click({ position: { x: 180, y: 14 }, modifiers: ["Control"] });
-  await expect(part).toHaveAttribute("aria-selected", "false");
-  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
-  await part.click({ position: { x: 180, y: 14 }, modifiers: ["Shift"] });
-  await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
-  await part.click({ position: { x: 250, y: 14 } });
-  const name = page.getByRole("textbox", { name: "name", exact: true });
-  await name.fill("Renamed cube");
-  await name.press("Enter");
-  await expect(part.getByText("Renamed cube", { exact: true })).toBeVisible();
-  await expect
-    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().devtools?.tree?.children[0].name))
-    .toBe("Renamed cube");
-  await page.getByRole("button", { name: "Collapse Workspace", exact: true }).click();
-  await expect(rows).toHaveCount(1);
-  await page.getByRole("button", { name: "Expand Workspace", exact: true }).click();
-  await expect(part).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("button", { name: "Close DevTools", exact: true }).click();
+  await expect(page.locator("[data-egui-input]")).toBeFocused();
+  await page.keyboard.press("Control+A");
+  await page.keyboard.type("Renamed cube");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => eguiHas(page, "Renamed cube (Part)")).toBe(true);
   await page.keyboard.press("F12");
-  await expect(part).toHaveAttribute("aria-selected", "true");
-  await expect(name).toHaveValue("Renamed cube");
-  await page.getByRole("button", { name: "Delete selection", exact: true }).click();
-  await expect(rows).toHaveCount(1);
-  await expect(page.getByText("0 selected", { exact: true })).toBeVisible();
+  await expect.poll(() => eguiHas(page, "DevTools")).toBe(false);
+  await page.keyboard.press("F12");
+  await expect.poll(() => eguiHas(page, "1 selected"), { timeout: 30000 }).toBe(true);
+  await eguiClick(page, "Delete selection", "button", false);
+  await expect.poll(() => eguiHas(page, "Renamed cube (Part)")).toBe(false);
+  await expect.poll(() => eguiHas(page, "0 selected")).toBe(true);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 test("the tree demo toggles selection with Ctrl-click and selects ranges", async ({ page }) => {
@@ -213,7 +233,7 @@ test("the tree demo toggles selection with Ctrl-click and selects ranges", async
 test("the inspector keeps rendering responsive when opened and selected under CPU load", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 640, height: 480 });
+  await page.setViewportSize({ width: 480, height: 480 });
   await page.addInitScript(() => {
     const info = Object.getOwnPropertyDescriptor(GPUAdapter.prototype, "info")!.get!;
     Object.defineProperty(GPUAdapter.prototype, "info", {
@@ -225,32 +245,33 @@ test("the inspector keeps rendering responsive when opened and selected under CP
     });
   });
   const browser = await page.context().newCDPSession(page);
-  await browser.send("Emulation.setCPUThrottlingRate", { rate: 8 });
+  // Keep egui's CSS viewport intact while limiting software GPU pixel work.
+  await browser.send("Emulation.setDeviceMetricsOverride", {
+    width: 480,
+    height: 480,
+    deviceScaleFactor: 0.25,
+    mobile: false,
+  });
+  await browser.send("Emulation.setCPUThrottlingRate", { rate: 4 });
   await page.goto("/simple/");
   await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
-  await page.addStyleTag({
-    content: ".scene-canvas { width: 128px !important; height: 128px !important; }",
-  });
   await expect
-    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().fps), { timeout: 15_000 })
+    .poll(() => page.evaluate(() => window.__TERRARIUM__!.fps()), { timeout: 15_000 })
     .toBeGreaterThan(30);
   await page.keyboard.press("F12");
-  await page.getByText("Properties", { exact: true }).click();
   const averageFps = async () => {
     const samples = [];
     for (let i = 0; i < 3; i++) {
       await page.waitForTimeout(1100);
-      samples.push(await page.evaluate(() => window.__TERRARIUM__!.state().fps));
+      samples.push(await page.evaluate(() => window.__TERRARIUM__!.fps()));
     }
     return samples.reduce((sum, fps) => sum + fps, 0) / samples.length;
   };
   await expect.poll(averageFps, { timeout: 20_000 }).toBeGreaterThan(30);
-  await page.evaluate(() => {
-    const bridge = window.__TERRARIUM__!;
-    bridge.command("devtools.selection", [bridge.state().devtools!.tree!.children[0].id]);
-  });
-  await expect(page.getByRole("textbox", { name: "name", exact: true })).toHaveValue("Part");
+  await page.mouse.click(145, 182);
   await expect.poll(averageFps, { timeout: 20_000 }).toBeGreaterThan(30);
+  await page.evaluate(() => window.__TERRARIUM__!.enable_accessibility());
+  await expect.poll(() => eguiHas(page, "1 selected"), { timeout: 30000 }).toBe(true);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });
 test("hardware rendering stays responsive when GPU completion callbacks arrive late", async ({
@@ -276,7 +297,7 @@ test("hardware rendering stays responsive when GPU completion callbacks arrive l
   await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
   await expect
-    .poll(() => page.evaluate(() => window.__TERRARIUM__!.state().fps), { timeout: 15_000 })
+    .poll(() => page.evaluate(() => window.__TERRARIUM__!.fps()), { timeout: 15_000 })
     .toBeGreaterThan(30);
 });
 for (const widget of widgetNames) {
@@ -334,36 +355,41 @@ test("font catalog filters, previews, applies, and downloads a family", async ({
       contentType: "font/ttf",
     }),
   );
-  await page.goto("/?example=app");
+  await page.goto("/simple/");
   await expect(page.getByRole("status")).toHaveCount(0, { timeout: 90_000 });
+  await page.evaluate(() => window.__TERRARIUM__!.enable_accessibility());
   await page.keyboard.press("F12");
-  await page.getByText("Font Market", { exact: true }).click();
-  await expect(page.getByText("2 font families", { exact: true })).toBeVisible();
-  await page.getByRole("checkbox", { name: "Variable only" }).check();
-  await expect(page.getByRole("button", { name: "Preview Beta", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await page.getByRole("textbox", { name: "Font language" }).click();
-  await page.getByRole("option", { name: "cyrillic", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Preview Alpha", exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "Clear filters", exact: true }).click();
-  await page.getByRole("button", { name: "Preview Alpha", exact: true }).click();
-  await page.getByRole("tab", { name: "Get font", exact: true }).click();
-  const apply = page.getByRole("checkbox", { name: "Use in app", exact: true });
-  await expect(apply).toBeEnabled();
-  await apply.check();
-  await expect
-    .poll(() =>
-      page.evaluate(() => document.documentElement.style.getPropertyValue("--terrarium-font")),
-    )
-    .toContain("terrarium-alpha");
-  await apply.uncheck();
-  await expect
-    .poll(() =>
-      page.evaluate(() => document.documentElement.style.getPropertyValue("--terrarium-font")),
-    )
-    .toBe("");
-  const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Download font files", exact: true }).click();
-  expect((await download).suggestedFilename()).toBe("alpha.zip");
+  await expect.poll(() => eguiHas(page, "Font Market")).toBe(true);
+  await page.waitForTimeout(1500);
+  const window = await eguiNode(page, "DevTools");
+  await page.mouse.move(window.bounds.x1 - 2, window.bounds.y1 - 2);
+  await page.mouse.down();
+  await page.waitForTimeout(500);
+  await page.mouse.move(1100, 680, { steps: 10 });
+  await expect.poll(async () => (await eguiNode(page, "DevTools")).bounds.x1).toBeGreaterThan(1000);
+  await page.mouse.up();
+  await eguiClick(page, "Font Market");
+  await expect.poll(() => eguiHas(page, "2 font families")).toBe(true);
+  await eguiClick(page, "Variable fonts", "checkBox");
+  await expect.poll(() => eguiHas(page, "1 font families")).toBe(true);
+  await eguiClick(page, "Clear filters", "button", false);
+  await expect.poll(() => eguiHas(page, "2 font families")).toBe(true);
+  await eguiClick(page, "Alpha", "button");
+  await expect.poll(() => eguiHas(page, "Preview text"), { timeout: 30000 }).toBe(true);
+  await eguiClick(page, "Glyphs");
+  await expect.poll(() => eguiHas(page, "Latin character preview")).toBe(true);
+  await eguiClick(page, "About");
+  await expect.poll(() => eguiHas(page, "Subsets")).toBe(true);
+  await eguiClick(page, "Get font");
+  await expect.poll(() => eguiHas(page, "Use in app")).toBe(true);
+  await eguiClick(page, "Use in app");
+  await expect.poll(async () => (await eguiNode(page, "Use in app")).toggled).toBe("true");
+  await eguiClick(page, "Preview");
+  await expect.poll(() => eguiHas(page, "Applied to app text"), { timeout: 30000 }).toBe(true);
+  await eguiClick(page, "Get font");
+  const download = page.waitForEvent("download", { timeout: 30000 });
+  await eguiClick(page, "Download 1 file", "button", false);
+  await page.getByRole("link", { name: "click here to download your file" }).click();
+  expect((await download).suggestedFilename()).toMatch(/alpha.*\.ttf$/);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

@@ -67,6 +67,8 @@ pub struct TouchEvent {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct FrameInput {
+    /// Serialized egui input events from the host, in viewport-local CSS pixels.
+    pub gui_events: Vec<serde_json::Value>,
     /// Seconds since the previous frame.
     pub delta: f32,
     /// Viewport dimensions in CSS pixels.
@@ -98,6 +100,7 @@ pub struct FrameInput {
 impl Default for FrameInput {
     fn default() -> Self {
         Self {
+            gui_events: Vec::new(),
             delta: 1.0 / 60.0,
             size: [1280.0, 720.0],
             scale: 1.0,

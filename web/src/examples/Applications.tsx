@@ -30,11 +30,11 @@ function WidgetsApp() {
   );
 }
 function SceneApp() {
-  const { snapshot, state, command } = useEngine<{ clock: number; time: string }>();
+  const { fps, state, command } = useEngine<{ clock: number; time: string }>();
   return (
     <div className="top-panel">
       <Group gap={8}>
-        <Text>FPS: {snapshot.fps.toFixed(0)}</Text>
+        <Text>FPS: {fps.toFixed(0)}</Text>
         <Divider orientation="vertical" />
         <Text ff="monospace">{state.time}</Text>
         <Slider
@@ -67,13 +67,13 @@ function SceneApp() {
   );
 }
 function PhysicsApp() {
-  const { snapshot, state, command } = useEngine<{ bodies: number; gravity: number[] }>();
+  const { fps, state, command } = useEngine<{ bodies: number; gravity: number[] }>();
   return (
     <aside className="side-panel" style={{ width: 220 }}>
       <Stack gap="xs">
         <Text>Dynamic bodies: {state.bodies}</Text>
         <Text>Gravity: ({state.gravity.map((v) => v.toFixed(1)).join(", ")})</Text>
-        <Text>FPS: {snapshot.fps.toFixed(0)}</Text>
+        <Text>FPS: {fps.toFixed(0)}</Text>
         <Divider />
         <Button onClick={() => void command("reset")}>Reset stack</Button>
         <Button onClick={() => void command("kick")}>Kick stack</Button>

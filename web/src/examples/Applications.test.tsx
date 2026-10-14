@@ -6,8 +6,6 @@ import { MantineProvider } from "@mantine/core";
 import { EngineContext } from "../context";
 import { applications } from "./Applications";
 import { WidgetGallery } from "./Widgets";
-import { Devtools } from "../components/Devtools";
-import type { Snapshot } from "../bridge";
 
 beforeAll(() => {
   Object.defineProperty(window, "matchMedia", {
@@ -20,24 +18,15 @@ beforeAll(() => {
   };
 });
 afterEach(cleanup);
-function mount(name: string, app: unknown, devtools: Snapshot["devtools"] = null) {
+function mount(name: string, app: unknown) {
   const commands: { name: string; payload: unknown }[] = [];
-  const snapshot: Snapshot = {
-    ui: name,
-    app,
-    fps: 60,
-    close: false,
-    bundled_fonts: true,
-    touch_enabled: false,
-    touch_movement: [0, 0],
-    devtools,
-  };
   const Application = applications[name];
   render(
     <MantineProvider>
       <EngineContext.Provider
         value={{
-          snapshot,
+          state: app,
+          fps: 60,
           command: async (name, payload) => {
             commands.push({ name, payload });
           },
@@ -45,7 +34,6 @@ function mount(name: string, app: unknown, devtools: Snapshot["devtools"] = null
         }}
       >
         <Application />
-        <Devtools />
       </EngineContext.Provider>
     </MantineProvider>,
   );
@@ -67,10 +55,6 @@ describe("example controls", () => {
       { name: "mode", payload: "Toon" },
       { name: "focus", payload: false },
     ]);
-  });
-  it("keeps the development notice visible while the inspector is hidden", () => {
-    mount("simple", null, { visible: false, tree: null, selected: [], properties: null });
-    expect(screen.getByText("Development build: Press F12 to enable DevTools")).toBeTruthy();
   });
   it("disables the widget leaf using its checkbox", async () => {
     render(
