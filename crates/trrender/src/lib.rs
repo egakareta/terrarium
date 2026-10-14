@@ -139,9 +139,6 @@ fn renderer_pipeline_cache(_device: &wgpu::Device) -> Option<wgpu::PipelineCache
 /// Errors returned while creating or using a renderer.
 #[derive(Debug, Error)]
 pub enum RendererError {
-    /// eframe was not configured to use its WGPU renderer.
-    #[error("eframe WGPU render state is unavailable")]
-    MissingEframeWgpuRenderState,
     /// A custom mesh had no vertices or indices.
     #[error("mesh must contain at least one vertex and one index")]
     EmptyMesh,

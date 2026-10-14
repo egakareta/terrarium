@@ -1,0 +1,69 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import {
+  mkdirSync,
+  copyFileSync,
+  cpSync,
+  rmSync,
+  createReadStream,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { exampleNames } from "./src/routing";
+
+export default defineConfig({
+  base: "./",
+  plugins: [
+    react(),
+    {
+      name: "terrarium-fonts",
+      configResolved(config) {
+        if (config.command === "build") rmSync("dist/assets", { recursive: true, force: true });
+      },
+      configureServer(server) {
+        server.middlewares.use((request, response, next) => {
+          const url = (request.url ?? "").split("?")[0];
+          if (!/^\/wasm\/[a-z_]+(?:_bg)?\.(?:js|wasm)$/.test(url)) return next();
+          const path = `dist${url}`;
+          if (!existsSync(path)) return next();
+          response.setHeader(
+            "Content-Type",
+            url.endsWith(".wasm") ? "application/wasm" : "text/javascript",
+          );
+          createReadStream(path).pipe(response);
+        });
+      },
+      closeBundle() {
+        copyFileSync("dist/index.html", "dist/examples.html");
+        const entry = readFileSync("dist/index.html", "utf8").replaceAll("./assets/", "../assets/");
+        for (const example of exampleNames) {
+          mkdirSync("dist/" + example, { recursive: true });
+          writeFileSync("dist/" + example + "/index.html", entry);
+        }
+        mkdirSync("dist/fonts", { recursive: true });
+        for (const font of ["Outfit", "SUSEMono"]) {
+          copyFileSync(
+            `../crates/trfont/src/bin/${font}-VariableFont_wght.ttf`,
+            `dist/fonts/${font}.ttf`,
+          );
+        }
+        rmSync("../crates/trengine/frontend/assets", { recursive: true, force: true });
+        mkdirSync("../crates/trengine/frontend", { recursive: true });
+        for (const path of ["index.html", "assets", "fonts"])
+          cpSync(`dist/${path}`, `../crates/trengine/frontend/${path}`, { recursive: true });
+      },
+    },
+  ],
+  build: {
+    emptyOutDir: false,
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) return "vendor";
+        },
+      },
+    },
+  },
+});

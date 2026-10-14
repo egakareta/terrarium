@@ -1,6 +1,6 @@
 use terrarium::{
     App, AppCreationError, Color3, Engine, Instance, InstanceId, MeshPart, Outline, OutlineMode,
-    Terrarium, eframe, egui, glam::Vec3,
+    Terrarium, glam::Vec3,
 };
 
 struct OutlinesApp {
@@ -37,46 +37,47 @@ impl OutlinesApp {
 }
 
 impl App for OutlinesApp {
-    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let mut selected_mode = self.mode;
-        let mut focus_on_duck = self.focus_on_duck;
-        let mut width_changed = false;
-        egui::Panel::top("outline_modes")
-            .resizable(false)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Outline:");
-                    ui.selectable_value(&mut selected_mode, OutlineMode::Toon, "Toon");
-                    ui.selectable_value(&mut selected_mode, OutlineMode::Silhouette, "Silhouette");
-                    ui.selectable_value(&mut selected_mode, OutlineMode::Stencil, "Stencil");
-
-                    ui.separator();
-
-                    width_changed = ui
-                        .add(egui::Slider::new(&mut self.width, 0.5..=10.0).text("Width"))
-                        .changed();
-
-                    ui.separator();
-                    ui.checkbox(&mut focus_on_duck, "Focus on duck");
-                });
-            });
-
-        if selected_mode != self.mode || width_changed {
-            self.set_mode(engine, selected_mode);
+    fn state(&self, _engine: &Engine) -> terrarium::serde_json::Value {
+        terrarium::serde_json::json!({ "mode": format!("{:?}", self.mode), "width": self.width, "focus": self.focus_on_duck })
+    }
+    fn command(
+        &mut self,
+        engine: &mut Engine,
+        command: &str,
+        payload: terrarium::serde_json::Value,
+    ) -> Result<terrarium::serde_json::Value, AppCreationError> {
+        match command {
+            "mode" => self.set_mode(
+                engine,
+                match payload.as_str() {
+                    Some("Toon") => OutlineMode::Toon,
+                    Some("Silhouette") => OutlineMode::Silhouette,
+                    Some("Stencil") => OutlineMode::Stencil,
+                    _ => return Err("invalid outline mode".into()),
+                },
+            ),
+            "width" => {
+                self.width = payload
+                    .as_f64()
+                    .filter(|v| (0.5..=10.0).contains(v))
+                    .ok_or("invalid outline width")? as f32;
+                self.set_mode(engine, self.mode);
+            }
+            "focus" => {
+                self.focus_on_duck = payload.as_bool().ok_or("focus must be a boolean")?;
+                engine
+                    .current_camera
+                    .set_subject(self.focus_on_duck.then_some(self.mesh_part));
+            }
+            _ => return Err("unknown command".into()),
         }
-
-        if focus_on_duck != self.focus_on_duck {
-            self.focus_on_duck = focus_on_duck;
-            engine
-                .workspace
-                .current_camera
-                .set_subject(focus_on_duck.then_some(self.mesh_part));
-        }
+        Ok(terrarium::serde_json::Value::Null)
     }
 }
 
 fn main() {
     Terrarium::new()
+        .with_ui("outlines")
         .run(|engine| {
             let mesh = engine.add_mesh(include_bytes!("../crates/trscene/fixtures/Duck.glb"))?;
 

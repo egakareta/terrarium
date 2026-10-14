@@ -4,7 +4,7 @@ mod support;
 use taffy::prelude::length;
 use tregui::egui_taffy::{TuiBuilderLogic, taffy, tui};
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Taffy: responsive",
         |_| {},

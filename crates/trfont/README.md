@@ -1,3 +1,3 @@
 # trfont
 
-Bundled Outfit and SUSE Mono fonts with `egui` font definitions.
+Bundled Outfit and SUSE Mono fonts for Terrarium.

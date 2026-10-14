@@ -33,13 +33,8 @@ impl SoundApp {
 }
 
 impl App for SoundApp {
-    fn logic(&mut self, engine: &mut Engine, context: &egui::Context, _frame: &mut eframe::Frame) {
-        let delta = context.input(|input| input.stable_dt);
-        let delta = if delta.is_finite() {
-            delta.clamp(0.0, 0.1)
-        } else {
-            0.0
-        };
+    fn logic(&mut self, engine: &mut Engine, input: &FrameInput, _frame: &mut Frame) {
+        let delta = input.delta_secs();
         if self.moving {
             self.angle = (self.angle + delta * self.orbit_speed).rem_euclid(TAU);
         }
@@ -53,77 +48,81 @@ impl App for SoundApp {
                 1.0,
                 self.radius * self.angle.sin(),
             ));
-        engine.update(context);
+        engine.update(input);
     }
 
-    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::left("sound_controls")
-            .resizable(false)
-            .default_size(280.0)
-            .show(ui, |ui| {
-                ui.heading("Spatial sound");
-                ui.label("Click Play to enable audio. Headphones recommended.");
-                ui.label("WASD + left-click drag moves the camera/listener.");
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    if ui.button("Play / resume").clicked() {
-                        self.unlock_output(engine);
-                        engine.get_mut::<Sound>(self.sound).unwrap().play();
+    fn state(&self, engine: &Engine) -> serde_json::Value {
+        let sound = engine.get::<Sound>(self.sound).unwrap();
+        let position = engine.get::<Part>(self.emitter).unwrap().position();
+        serde_json::json!({
+            "moving": self.moving, "volume": self.volume, "radius": self.radius, "speed": self.orbit_speed, "occluded": self.occluded,
+            "playback": sound.playback_state().map(|state| format!("{state:?}")).unwrap_or_else(|e| e.to_string()),
+            "position": sound.time_position().ok().map(|v| v.as_secs_f32()), "emitter": position.to_array(),
+            "distance": position.distance(engine.current_camera.position()), "error": self.output_error,
+        })
+    }
+    fn command(
+        &mut self,
+        engine: &mut Engine,
+        command: &str,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, AppCreationError> {
+        match command {
+            "play" => {
+                self.unlock_output(engine);
+                engine.get_mut::<Sound>(self.sound).unwrap().play();
+            }
+            "replay" => {
+                self.unlock_output(engine);
+                engine.get_mut::<Sound>(self.sound).unwrap().replay();
+            }
+            "pause" => {
+                engine.get_mut::<Sound>(self.sound).unwrap().pause();
+            }
+            "stop" => {
+                engine.get_mut::<Sound>(self.sound).unwrap().stop();
+            }
+            "volume" | "radius" | "speed" => {
+                let bounds = match command {
+                    "radius" => 1.0..=12.0,
+                    "speed" => 0.0..=3.0,
+                    _ => 0.0..=1.0,
+                };
+                let value = payload
+                    .as_f64()
+                    .filter(|v| bounds.contains(v))
+                    .ok_or("invalid sound setting")? as f32;
+                match command {
+                    "radius" => self.radius = value,
+                    "speed" => self.orbit_speed = value,
+                    _ => {
+                        self.volume = value;
+                        engine
+                            .get_mut::<Sound>(self.sound)
+                            .unwrap()
+                            .with_volume(value);
                     }
-                    if ui.button("Pause").clicked() {
-                        engine.get_mut::<Sound>(self.sound).unwrap().pause();
-                    }
+                }
+            }
+            "moving" => self.moving = payload.as_bool().ok_or("moving must be a boolean")?,
+            "occluded" => {
+                self.occluded = payload.as_bool().ok_or("occluded must be a boolean")?;
+                let sound = engine.get_mut::<Sound>(self.sound).unwrap();
+                sound.with_spatial_settings(SpatialSound {
+                    occlusion: if self.occluded {
+                        Occlusion {
+                            gain: 0.25,
+                            low_pass_hz: Some(1_200.0),
+                        }
+                    } else {
+                        Occlusion::default()
+                    },
+                    ..sound.spatial_settings()
                 });
-                ui.horizontal(|ui| {
-                    if ui.button("Replay").clicked() {
-                        self.unlock_output(engine);
-                        engine.get_mut::<Sound>(self.sound).unwrap().replay();
-                    }
-                    if ui.button("Stop").clicked() {
-                        engine.get_mut::<Sound>(self.sound).unwrap().stop();
-                    }
-                });
-                if ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).text("Volume")).changed() {
-                    engine.get_mut::<Sound>(self.sound).unwrap().with_volume(self.volume);
-                }
-                ui.separator();
-                ui.checkbox(&mut self.moving, "Orbit the emitter");
-                ui.add(egui::Slider::new(&mut self.radius, 1.0..=12.0).text("Radius (m)"));
-                ui.add(egui::Slider::new(&mut self.orbit_speed, 0.0..=3.0).text("Speed (rad/s)"));
-                if ui.checkbox(&mut self.occluded, "Simulate wall occlusion").changed() {
-                    let sound = engine.get_mut::<Sound>(self.sound).unwrap();
-                    let settings = sound.spatial_settings();
-                    sound.with_spatial_settings(SpatialSound {
-                        occlusion: if self.occluded {
-                            Occlusion { gain: 0.25, low_pass_hz: Some(1_200.0) }
-                        } else {
-                            Occlusion::default()
-                        },
-                        ..settings
-                    });
-                }
-                ui.label("Occlusion is supplied explicitly; no geometry raycasts are used.");
-                ui.separator();
-
-                let sound = engine.get::<Sound>(self.sound).unwrap();
-                match sound.playback_state() {
-                    Ok(state) => { ui.label(format!("Playback: {state:?}")); }
-                    Err(error) => { ui.colored_label(egui::Color32::LIGHT_RED, error.to_string()); }
-                }
-                if let Ok(position) = sound.time_position() {
-                    ui.label(format!("Loop position: {:.2} s", position.as_secs_f32()));
-                }
-                let position = engine.get::<Part>(self.emitter).unwrap().position();
-                let distance = position.distance(engine.current_camera.position());
-                ui.label(format!("Emitter: ({:.1}, {:.1}, {:.1}) m", position.x, position.y, position.z));
-                ui.label(format!("Distance: {distance:.1} m"));
-                ui.label("HRTF, distance attenuation, and Doppler are enabled.");
-                if let Some(error) = &self.output_error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, error);
-                    ui.label("Try Play again after enabling browser audio or connecting an output device.");
-                }
-            });
+            }
+            _ => return Err("unknown command".into()),
+        }
+        Ok(serde_json::Value::Null)
     }
 }
 
@@ -211,7 +210,7 @@ fn demo_audio() -> Vec<u8> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::new().with_ui("sound").run(initialize).unwrap();
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ mod support;
 
 use tregui::{egui, egui_text_outline::OutlinedLabel};
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Text outline: basic",
         |_| {},

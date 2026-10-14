@@ -7,7 +7,7 @@ use tregui::{
     egui_taffy::{TuiBuilderLogic, taffy, tui},
 };
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Taffy: egui widgets",
         |_| {},

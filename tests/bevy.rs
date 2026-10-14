@@ -3,7 +3,7 @@ use std::time::Duration;
 use approx::assert_abs_diff_eq;
 #[cfg(not(target_arch = "wasm32"))]
 use terrarium::bevy::{
-    EguiContext,
+    FrameContext,
     app::{AppExit, Plugin, Startup, Update},
 };
 use terrarium::{
@@ -131,24 +131,24 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
     }
 
     impl terrarium::App for SceneCallbacks {
-        fn after_update(
-            &mut self,
-            engine: &mut Engine,
-            _context: &egui::Context,
-            _frame: &mut eframe::Frame,
-        ) {
+        fn after_update(&mut self, engine: &mut Engine, _input: &FrameInput, _frame: &mut Frame) {
             let part = engine.get_mut::<Part>(self.subject).unwrap();
             let mut position = part.position();
             position.y = 4.0;
             part.with_position(position);
         }
 
-        fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-            ui.label("Ordinary Terrarium UI");
+        fn render(
+            &mut self,
+            engine: &mut Engine,
+            input: &FrameInput,
+            _frame: &mut Frame,
+        ) -> Result<(), RendererError> {
             let part = engine.get_mut::<Part>(self.subject).unwrap();
             let mut position = part.position();
             position.z = 8.0;
             part.with_position(position);
+            engine.render(input)
         }
     }
 
@@ -161,7 +161,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
         subject: Res<Subject>,
         mut scene: NonSendMut<Workspace>,
         mut exit: MessageWriter<AppExit>,
-        context: NonSend<EguiContext>,
+        context: NonSend<FrameContext>,
         close_with_context: Res<CloseWithContext>,
     ) {
         frames.0 += 1;
@@ -171,9 +171,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             .with_position(Vec3::new(frames.0 as f32, 0.0, 0.0));
         if frames.0 == 3 {
             if close_with_context.0 {
-                context
-                    .get()
-                    .send_viewport_cmd(egui::ViewportCommand::Close);
+                context.close();
             } else {
                 exit.write(AppExit::Success);
             }

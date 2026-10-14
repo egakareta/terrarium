@@ -1,7 +1,6 @@
 use terrarium::{
-    Instance, Part, Workspace,
+    Instance, Modifiers, Part, Workspace,
     devtools::{Devtools, PropertyValue},
-    egui::Modifiers,
 };
 
 #[test]

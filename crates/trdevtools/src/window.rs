@@ -1,18 +1,16 @@
 use std::collections::HashMap;
 
 use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
-use tregui::{
-    egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder, TreeViewState},
-    egui_phosphor::regular,
-    egui_text_outline,
-};
+use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder, TreeViewState};
+use egui_phosphor::regular;
+use tregui::{egui, egui_ltreeview, egui_phosphor, egui_text_outline};
 use trscene::{Instance, InstanceId, Workspace};
 
 use super::{Property, PropertyError, PropertyValue};
 use crate::font_market::FontMarket;
 
 /// Properties shared by the current selection.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub struct SelectionProperty {
     /// Field descriptor from the first selected instance.
     pub property: Property,
@@ -92,7 +90,7 @@ impl Devtools {
     pub fn select(
         &mut self,
         id: InstanceId,
-        modifiers: egui::Modifiers,
+        modifiers: trscene::Modifiers,
         visible_order: &[InstanceId],
     ) {
         let additive = modifiers.ctrl || modifiers.command;
@@ -159,6 +157,20 @@ impl Devtools {
         self.error = None;
     }
 
+    /// Processes inspector shortcuts for hosts that do not draw an egui frame.
+    pub fn process_input(&mut self, input: &trscene::FrameInput, workspace: &mut Workspace) {
+        if input.pressed.iter().any(|key| key == "F12") {
+            self.set_visible(!self.visible);
+        }
+        self.prune(workspace);
+        if self.visible
+            && self.active
+            && !input.keyboard_captured
+            && input.pressed.iter().any(|key| key == "Delete")
+        {
+            self.destroy_selection(workspace);
+        }
+    }
     /// Processes F12 and draws the inspector into the current egui frame.
     pub fn show(&mut self, context: &egui::Context, workspace: &mut Workspace) {
         let frame = context.cumulative_frame_nr();
@@ -314,6 +326,15 @@ impl TabViewer for DevtoolsTabViewer<'_> {
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
         tab.title().into()
+    }
+
+    fn on_tab_button(&mut self, tab: &mut Self::Tab, response: &egui::Response) {
+        let label = match tab {
+            DevtoolsTab::Explorer => "Explorer",
+            DevtoolsTab::Properties => "Properties",
+            DevtoolsTab::FontMarket => "Font Market",
+        };
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {

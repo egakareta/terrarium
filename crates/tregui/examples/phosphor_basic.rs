@@ -3,7 +3,7 @@ mod support;
 
 use tregui::egui_phosphor::{self, regular};
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Phosphor: basic",
         |fonts| egui_phosphor::add_to_fonts(fonts, egui_phosphor::Variant::Regular),

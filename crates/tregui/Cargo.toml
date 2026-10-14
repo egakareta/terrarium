@@ -18,10 +18,7 @@ egui-phosphor = { version = "0.14", default-features = false, features = [
 egui_taffy = { version = "0.14", optional = true }
 
 [dev-dependencies]
-eframe = { version = "0.36", default-features = false, features = [
-  "wgpu_no_default_features",
-  "wayland",
-] }
+trengine = { workspace = true, features = ["compat", "dx12", "gles", "metal", "webgpu"] }
 
 [features]
 default = []

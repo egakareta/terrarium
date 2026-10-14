@@ -486,134 +486,69 @@ impl CameraController {
         }
     }
 
-    /// Feeds eframe's normalized input state into the controller.
-    pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
-        self.process_eframe_input_with_capture(input, false, false);
-    }
-
-    /// Feeds eframe's normalized input state into the controller while
-    /// respecting egui's pointer and keyboard capture state.
-    ///
-    /// `egui_wants_pointer_input` and `egui_wants_keyboard_input` should come
-    /// from the matching [`crate::egui::Context`] methods. Camera input is
-    /// suppressed independently for each device while egui owns it.
-    pub fn process_eframe_input_with_capture(
-        &mut self,
-        input: &crate::egui::InputState,
-        egui_wants_pointer_input: bool,
-        egui_wants_keyboard_input: bool,
-    ) {
-        self.process_eframe_input_inner(
-            input,
-            egui_wants_pointer_input,
-            egui_wants_keyboard_input,
-            |_| egui_wants_pointer_input,
-        );
-    }
-
-    /// Processes eframe input with UI capture and draws the touchscreen joystick.
-    ///
-    /// Call once per frame before [`Self::update_camera`]. Touch gestures are
-    /// assigned at touch-down, allowing simultaneous joystick movement and look.
-    /// Touches starting on UI areas are left to egui.
-    pub fn process_eframe_context(&mut self, context: &crate::egui::Context) {
-        let pointer_capture = context.egui_wants_pointer_input();
-        let keyboard_capture = context.egui_wants_keyboard_input();
-        let mut captured_touches = context.input(|input| {
-            input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    crate::egui::Event::Touch {
-                        phase: crate::egui::TouchPhase::Start,
-                        pos,
-                        ..
-                    } => Some(*pos),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let interactive_rects = if captured_touches.is_empty() {
-            Vec::new()
-        } else {
-            context.interactive_rects_last_pass()
-        };
-        captured_touches.retain(|position| {
-            interactive_rects
-                .iter()
-                .any(|rect| rect.contains(*position))
-                || context
-                    .layer_id_at(*position)
-                    .is_some_and(|layer| layer.order != crate::egui::Order::Background)
-        });
-        context.input(|input| {
-            self.process_eframe_input_inner(input, pointer_capture, keyboard_capture, |position| {
-                captured_touches.contains(&position)
-            });
-        });
-        self.paint_touch_controls(context);
-    }
-
-    /// Draws the joystick for callers that process normalized input themselves.
-    pub fn paint_touch_controls(&self, context: &crate::egui::Context) {
-        if self.touch_enabled && self.touch.detected {
-            self.touch.paint(context);
-        }
-    }
-
-    fn process_eframe_input_inner(
-        &mut self,
-        input: &crate::egui::InputState,
-        egui_wants_pointer_input: bool,
-        egui_wants_keyboard_input: bool,
-        touch_captured: impl Fn(crate::egui::Pos2) -> bool,
-    ) {
+    /// Processes normalized browser or webview input, honoring UI capture per device.
+    pub fn process_input(&mut self, input: &crate::FrameInput) {
         self.touch.observe_input(input);
         if !input.focused {
             self.clear_keys();
             return;
         }
-
         if self.touch_enabled {
-            self.touch.process(input, touch_captured);
+            self.touch.process(input);
         } else {
             self.touch.clear();
         }
-
-        if !self.keyboard_enabled || egui_wants_keyboard_input {
+        if !self.keyboard_enabled || input.keyboard_captured {
             self.clear_keyboard_input();
         } else {
-            let key_down = |binding: &[KeyCode]| {
-                binding
+            let down = |bindings: &[KeyCode]| {
+                bindings
                     .iter()
-                    .copied()
-                    .any(|key| eframe_key(key).is_some_and(|key| input.key_down(key)))
+                    .any(|key| input.keys.contains(&format!("{key:?}")))
             };
-            self.forward = key_down(&self.key_bindings.forward);
-            self.backward = key_down(&self.key_bindings.backward);
-            self.left = key_down(&self.key_bindings.left);
-            self.right = key_down(&self.key_bindings.right);
-            self.up = key_down(&self.key_bindings.up);
-            self.down = key_down(&self.key_bindings.down);
-            self.sprint = key_down(&self.key_bindings.sprint);
+            self.forward = down(&self.key_bindings.forward);
+            self.backward = down(&self.key_bindings.backward);
+            self.left = down(&self.key_bindings.left);
+            self.right = down(&self.key_bindings.right);
+            self.up = down(&self.key_bindings.up);
+            self.down = down(&self.key_bindings.down);
+            self.sprint = down(&self.key_bindings.sprint);
         }
-
-        // Integrations emit pointer events alongside touch events. Processing
-        // both would rotate twice or rotate when dragging the joystick.
-        let touch_pointer = input.any_touches()
-            || input
-                .events
-                .iter()
-                .any(|event| matches!(event, crate::egui::Event::Touch { .. }));
-        if !self.mouse_enabled || egui_wants_pointer_input || touch_pointer {
+        if !self.mouse_enabled
+            || input.pointer_captured
+            || self.touch.has_fingers()
+            || !input.touches.is_empty()
+        {
             self.mouse_delta = (0.0, 0.0);
             self.stop_mouse_drag();
-        } else if let Some(button) = eframe_button(self.mouse_drag_button)
-            && input.pointer.button_down(button)
-        {
-            let delta = input.pointer.delta() * input.pixels_per_point;
-            self.process_mouse_motion((delta.x, delta.y));
+        } else {
+            let button = match self.mouse_drag_button {
+                MouseButton::Left => 0,
+                MouseButton::Middle => 1,
+                MouseButton::Right => 2,
+                MouseButton::Back => 3,
+                MouseButton::Forward => 4,
+                MouseButton::Other(button) => button,
+            };
+            if input.buttons.contains(&button) {
+                self.process_mouse_motion((input.mouse_delta[0], input.mouse_delta[1]));
+            }
         }
+    }
+
+    /// Returns whether touch controls should be visible.
+    pub fn touch_controls_visible(&self) -> bool {
+        self.touch_enabled && self.touch.detected
+    }
+
+    /// Returns the joystick center and radius in viewport-local CSS pixels.
+    pub fn touch_geometry(&self) -> Option<[f32; 3]> {
+        self.touch.geometry()
+    }
+
+    /// Returns joystick movement for drawing touch controls in the host UI.
+    pub fn touch_movement(&self) -> [f32; 2] {
+        self.touch.movement.to_array()
     }
 
     fn process_key(&mut self, key: KeyCode, pressed: bool) -> bool {
@@ -678,7 +613,7 @@ impl CameraController {
         camera: &mut Camera,
         delta_seconds: f32,
         axes: Vec3,
-        look: crate::egui::Vec2,
+        look: glam::Vec2,
     ) {
         self.orbit_subject = None;
 
@@ -752,10 +687,9 @@ impl CameraController {
         }
 
         let axes = self.movement_axes();
-        let look =
-            crate::egui::vec2(self.mouse_delta.0, self.mouse_delta.1) + self.touch.look_delta;
+        let look = glam::Vec2::new(self.mouse_delta.0, self.mouse_delta.1) + self.touch.look_delta;
         self.mouse_delta = (0.0, 0.0);
-        self.touch.look_delta = crate::egui::Vec2::ZERO;
+        self.touch.look_delta = glam::Vec2::ZERO;
 
         let delta_seconds = if delta_seconds.is_finite() {
             delta_seconds.clamp(0.0, 0.1)
@@ -889,40 +823,6 @@ fn set_key(key: &mut bool, pressed: bool) -> bool {
     true
 }
 
-fn eframe_key(key: KeyCode) -> Option<crate::egui::Key> {
-    use crate::egui::Key;
-
-    Some(match key {
-        KeyCode::KeyA => Key::A,
-        KeyCode::KeyD => Key::D,
-        KeyCode::KeyS => Key::S,
-        KeyCode::KeyW => Key::W,
-        KeyCode::Space => Key::Space,
-        KeyCode::ControlLeft => Key::ControlLeft,
-        KeyCode::ControlRight => Key::ControlRight,
-        KeyCode::ShiftLeft => Key::ShiftLeft,
-        KeyCode::ShiftRight => Key::ShiftRight,
-        KeyCode::ArrowDown => Key::ArrowDown,
-        KeyCode::ArrowLeft => Key::ArrowLeft,
-        KeyCode::ArrowRight => Key::ArrowRight,
-        KeyCode::ArrowUp => Key::ArrowUp,
-        _ => return None,
-    })
-}
-
-fn eframe_button(button: MouseButton) -> Option<crate::egui::PointerButton> {
-    use crate::egui::PointerButton;
-
-    Some(match button {
-        MouseButton::Left => PointerButton::Primary,
-        MouseButton::Right => PointerButton::Secondary,
-        MouseButton::Middle => PointerButton::Middle,
-        MouseButton::Back => PointerButton::Extra1,
-        MouseButton::Forward => PointerButton::Extra2,
-        MouseButton::Other(_) => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -955,31 +855,33 @@ mod tests {
     }
 
     #[test]
-    fn egui_keyboard_capture_clears_camera_movement() {
+    fn ui_keyboard_capture_clears_camera_movement() {
         let mut controller = CameraController {
             forward: true,
             sprint: true,
             ..Default::default()
         };
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-
-        controller.process_eframe_input_with_capture(&input, false, true);
+        let input = crate::FrameInput {
+            keyboard_captured: true,
+            ..Default::default()
+        };
+        controller.process_input(&input);
 
         assert!(!controller.forward);
         assert!(!controller.sprint);
     }
 
     #[test]
-    fn egui_pointer_capture_clears_camera_look_delta() {
+    fn ui_pointer_capture_clears_camera_look_delta() {
         let mut controller = CameraController {
             mouse_delta: (4.0, -2.0),
             ..Default::default()
         };
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-
-        controller.process_eframe_input_with_capture(&input, true, false);
+        let input = crate::FrameInput {
+            pointer_captured: true,
+            ..Default::default()
+        };
+        controller.process_input(&input);
 
         assert_eq!(controller.mouse_delta, (0.0, 0.0));
     }
@@ -989,11 +891,10 @@ mod tests {
         let mut controller = CameraController::default().with_keyboard_enabled(false);
         assert!(!controller.keyboard_enabled);
 
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-        input.keys_down.insert(crate::egui::Key::W);
+        let mut input = crate::FrameInput::default();
+        input.keys.push("KeyW".into());
 
-        controller.process_eframe_input_with_capture(&input, false, false);
+        controller.process_input(&input);
         assert!(!controller.forward);
 
         assert!(!controller.process_key(KeyCode::KeyW, true));

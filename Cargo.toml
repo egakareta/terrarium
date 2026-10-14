@@ -16,8 +16,8 @@ members = [
   "crates/trdevtools-derive/",
   "crates/trdevtools/",
   "crates/trdylib/",
-  "crates/tregui/",
   "crates/trengine/",
+  "crates/tregui/",
   "crates/trfont/",
   "crates/trinternal/",
   "crates/trpersistence/",
@@ -33,8 +33,8 @@ default-members = [
   "crates/trdevtools-derive/",
   "crates/trdevtools/",
   "crates/trdylib/",
-  "crates/tregui/",
   "crates/trengine/",
+  "crates/tregui/",
   "crates/trfont/",
   "crates/trinternal/",
   "crates/trpersistence/",
@@ -58,8 +58,8 @@ trclipboard = { path = "crates/trclipboard/", version = "0.1" }
 trdevtools = { path = "crates/trdevtools/", version = "0.1", default-features = false }
 trdevtools-derive = { path = "crates/trdevtools-derive/", version = "0.1" }
 trdylib = { path = "crates/trdylib/", version = "0.1" }
-tregui = { path = "crates/tregui/", version = "0.1", default-features = false }
 trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
+tregui = { path = "crates/tregui/", version = "0.1", default-features = false }
 trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
 trinternal = { path = "crates/trinternal/", version = "0.1" }
 trpersistence = { path = "crates/trpersistence/", version = "0.1" }
@@ -112,12 +112,14 @@ trinternal = { workspace = true, optional = true }
 approx = "0.5"
 bevy_ecs = "0.20"
 pollster = "1"
+web-time = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 trdylib = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["Window", "Location"] }
 
 [features]
 default = ["static_linking"]
@@ -136,7 +138,6 @@ default-materials = ["trinternal?/default-materials"]
 default-skybox = ["trinternal?/default-skybox"]
 devtools = ["trinternal?/devtools"]
 dx12 = ["trinternal?/dx12"]
-eframe-default-fonts = ["trinternal?/eframe-default-fonts"]
 flac = ["trinternal?/flac"]
 gles = ["trinternal?/gles"]
 jack = ["trinternal?/jack"]

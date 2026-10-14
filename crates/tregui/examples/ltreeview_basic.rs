@@ -3,7 +3,7 @@ mod support;
 
 use tregui::egui_ltreeview::TreeView;
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Tree view: basic",
         |_| {},

@@ -7,6 +7,7 @@ use std::{
 
 use egui::{FontFamily, FontId, RichText};
 use serde::Deserialize;
+use tregui::{egui, egui_phosphor};
 
 const FONTS_API: &str = "https://api.fontsource.org/v1/fonts";
 const PREVIEW_SENTENCE: &str = "Sphinx of black quartz, judge my vow.";
@@ -488,10 +489,7 @@ impl FontMarket {
             );
             ui.checkbox(&mut self.variable_only, "Variable fonts");
             if ui
-                .button(format!(
-                    "{} Clear filters",
-                    tregui::egui_phosphor::regular::TRASH
-                ))
+                .button(format!("{} Clear filters", egui_phosphor::regular::TRASH))
                 .clicked()
             {
                 self.search.clear();
@@ -644,11 +642,19 @@ impl FontMarket {
                                     );
                                 });
                             });
-                            let response = ui.interact(
+                            let mut response = ui.interact(
                                 cell_rect,
                                 ui.id().with(("font_market_card", &id)),
                                 egui::Sense::click(),
                             );
+                            response.rect = response.interact_rect;
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    &font.family,
+                                )
+                            });
                             if response.clicked() {
                                 chosen = Some((*font).clone());
                             }
@@ -1151,10 +1157,7 @@ impl FontMarket {
         };
         let mut definitions = base_font_definitions.cloned().unwrap_or_else(|| {
             let mut definitions = egui::FontDefinitions::default();
-            tregui::egui_phosphor::add_to_fonts(
-                &mut definitions,
-                tregui::egui_phosphor::Variant::Regular,
-            );
+            egui_phosphor::add_to_fonts(&mut definitions, egui_phosphor::Variant::Regular);
             definitions
         });
         self.add_cached_fonts(&mut definitions);
@@ -1185,10 +1188,7 @@ impl FontMarket {
     ) {
         let mut definitions = base_font_definitions.cloned().unwrap_or_else(|| {
             let mut definitions = egui::FontDefinitions::default();
-            tregui::egui_phosphor::add_to_fonts(
-                &mut definitions,
-                tregui::egui_phosphor::Variant::Regular,
-            );
+            egui_phosphor::add_to_fonts(&mut definitions, egui_phosphor::Variant::Regular);
             definitions
         });
         self.add_cached_fonts(&mut definitions);

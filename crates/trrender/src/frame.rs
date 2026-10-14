@@ -29,12 +29,37 @@ fn map_web_readback(
         });
 }
 
+#[cfg(target_arch = "wasm32")]
+fn map_completed_web_copy(
+    queue: &wgpu::Queue,
+    buffer: &wgpu::Buffer,
+    callback: impl FnOnce(Result<(), wgpu::BufferAsyncError>) + 'static,
+) {
+    let buffer = buffer.clone();
+    let key = WEB_READBACK_CALLBACKS.with(|callbacks| {
+        callbacks.borrow_mut().insert(Box::new(move |_| {
+            map_web_readback(&buffer, callback);
+        }))
+    });
+    queue.on_submitted_work_done(move || {
+        let callback = WEB_READBACK_CALLBACKS.with(|callbacks| callbacks.borrow_mut().remove(key));
+        if let Some(callback) = callback {
+            callback(Ok(()));
+        }
+    });
+}
+
 impl Renderer {
     /// Sets the color used to clear the color attachment before each frame.
     ///
     pub fn with_clear_color(&mut self, color: wgpu::Color) -> &mut Self {
         self.clear_color = color;
         self
+    }
+
+    /// Returns the physical scene output dimensions.
+    pub fn size(&self) -> [u32; 2] {
+        [self.width, self.height]
     }
 
     /// Returns the average number of successfully rendered frames per second over the last
@@ -240,7 +265,7 @@ impl Renderer {
         let width = self.width;
         let height = self.height;
         let format = self.output.format;
-        map_web_readback(&buffer, move |result| {
+        map_completed_web_copy(&self.queue, &buffer, move |result| {
             let pixels = match result {
                 Ok(()) => match callback_buffer.slice(..).get_mapped_range() {
                     Ok(mapped) => {
@@ -357,6 +382,25 @@ impl Renderer {
         pass.set_pipeline(&self.output.pipeline);
         pass.set_bind_group(0, &self.output.bind_group, &[]);
         pass.draw(0..3, 0..1);
+        self.record_frame();
+    }
+
+    /// Draws the prepared output into visible regions of a native drawable.
+    /// Regions are physical pixel rectangles `[x, y, width, height]`.
+    pub fn paint_regions(&mut self, pass: &mut wgpu::RenderPass<'_>, regions: &[[u32; 4]]) {
+        pass.set_pipeline(&self.output.pipeline);
+        pass.set_bind_group(0, &self.output.bind_group, &[]);
+        for &[x, y, width, height] in regions {
+            if width > 0 && height > 0 {
+                pass.set_scissor_rect(x, y, width, height);
+                pass.draw(0..3, 0..1);
+            }
+        }
+        self.record_frame();
+    }
+
+    /// Records a completed frame displayed by an offscreen host.
+    pub fn finish_frame(&mut self) {
         self.record_frame();
     }
 

@@ -90,7 +90,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
-fn multiple_viewports_keep_independent_egui_textures() -> Result<(), AppCreationError> {
+fn multiple_viewports_keep_independent_textures() -> Result<(), AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
     Terrarium::new()
         .with_size([128, 128])

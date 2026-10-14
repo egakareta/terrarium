@@ -20,13 +20,7 @@ struct Orbits(Vec<Orbit>);
 
 struct SceneUi;
 
-impl terrarium::App for SceneUi {
-    fn ui(&mut self, _engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Window::new("Bevy").show(ui, |ui| {
-            ui.label("Bevy systems animate ordinary Terrarium parts.");
-        });
-    }
-}
+impl terrarium::App for SceneUi {}
 
 fn animate_orbits(time: Res<Time>, orbits: Res<Orbits>, mut scene: NonSendMut<Workspace>) {
     let elapsed = time.elapsed_secs();
@@ -101,6 +95,7 @@ fn main() {
         .add_systems(bevy_app::Update, animate_orbits);
 
     Terrarium::new()
+        .with_ui("bevy")
         .with_bevy(app)
         .run(|_engine| Ok::<_, AppCreationError>(SceneUi))
         .unwrap();

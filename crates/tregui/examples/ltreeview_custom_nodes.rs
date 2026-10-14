@@ -3,7 +3,7 @@ mod support;
 
 use tregui::egui_ltreeview::{NodeBuilder, TreeView};
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Tree view: custom nodes",
         |_| {},

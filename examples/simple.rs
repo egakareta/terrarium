@@ -2,7 +2,7 @@
 //!
 //! If you cloned the repo, you can run this in:
 //! - your native platform. `cargo run --example simple`
-//! - a browser at http://localhost:8080. `trunk serve --example simple`
+//! - a browser at http://localhost:5173/?example=simple. `mise run serve:examples:app`
 //!
 //! By default, Terrarium gives you a camera, a skybox and shadows.
 //! Use WASD and left click drag to move the camera.
@@ -13,6 +13,7 @@ use terrarium::*;
 
 fn main() {
     Terrarium::new()
+        .with_ui("simple")
         .run(|engine| {
             // Create a cube
             let part = Part::new().with_size(glam::Vec3::new(2.0, 2.0, 2.0));

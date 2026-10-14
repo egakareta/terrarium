@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// A value understood by the property editor.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PropertyValue {
     /// A checkbox value.
     Bool(bool),
@@ -42,7 +42,7 @@ pub enum PropertyValue {
 }
 
 /// An instance field exposed to the inspector.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Property {
     /// Dot-separated field path, used when applying an edit.
     pub path: String,

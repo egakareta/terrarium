@@ -1,9 +1,7 @@
 use trdevtools::{Devtools, Inspect, PropertyError, PropertyValue};
 use trscene::{
-    BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance, Part,
-    PartShape, PointLight, Workspace,
-    egui::{self, Event, Key, Modifiers},
-    glam::Vec3,
+    BasePart, Color3, FrameInput, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart,
+    Instance, Modifiers, Part, PartShape, PointLight, Workspace, glam::Vec3,
 };
 
 #[derive(Clone, Debug, Inspect)]
@@ -17,117 +15,20 @@ struct CustomInstance {
     runtime_counter: usize,
 }
 
-fn key(key: Key, repeat: bool) -> Event {
-    Event::Key {
-        key,
-        physical_key: None,
-        pressed: true,
-        repeat,
-        modifiers: Modifiers::NONE,
-    }
-}
-
-fn release(key: Key) -> Event {
-    Event::Key {
-        key,
-        physical_key: None,
-        pressed: false,
-        repeat: false,
-        modifiers: Modifiers::NONE,
-    }
-}
-
-fn frame(
-    context: &egui::Context,
-    devtools: &mut Devtools,
-    workspace: &mut Workspace,
-    events: Vec<Event>,
-) {
-    let mut output = context.run_ui(
-        egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1280.0, 720.0),
-            )),
-            events,
-            ..Default::default()
-        },
-        |ui| devtools.show(ui.ctx(), workspace),
-    );
-    output.textures_delta.clear();
-}
-
-fn contains_text(shape: &egui::Shape, target: &str) -> bool {
-    match shape {
-        egui::Shape::Text(text) => text.galley.text() == target,
-        egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains_text(shape, target)),
-        _ => false,
-    }
-}
-
-#[test]
-fn hidden_inspector_shows_the_development_notice() {
-    let mut workspace = Workspace::new();
-    let mut devtools = Devtools::default();
-    let context = egui::Context::default();
-    let raw_input = || egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1280.0, 720.0),
-        )),
-        ..Default::default()
-    };
-    let mut first_output = context.run_ui(raw_input(), |ui| {
-        devtools.show(ui.ctx(), &mut workspace);
-    });
-    first_output.textures_delta.clear();
-    let mut output = context.run_ui(raw_input(), |ui| {
-        devtools.show(ui.ctx(), &mut workspace);
-    });
-
-    let visible = output.shapes.iter().any(|clipped| {
-        contains_text(
-            &clipped.shape,
-            "Development build: Press F12 to enable DevTools",
-        )
-    });
-    output.textures_delta.clear();
-    assert!(visible);
-}
-
 #[test]
 fn f12_toggles_the_inspector_once_per_key_press() {
     let mut workspace = Workspace::new();
     let mut devtools = Devtools::default();
-    let context = egui::Context::default();
-
+    let mut input = FrameInput::default();
     assert!(!devtools.is_visible());
-    frame(
-        &context,
-        &mut devtools,
-        &mut workspace,
-        vec![key(Key::F12, false)],
-    );
+    input.pressed.push("F12".into());
+    devtools.process_input(&input, &mut workspace);
     assert!(devtools.is_visible());
-    frame(
-        &context,
-        &mut devtools,
-        &mut workspace,
-        vec![key(Key::F12, true)],
-    );
+    input.pressed.clear();
+    devtools.process_input(&input, &mut workspace);
     assert!(devtools.is_visible());
-    frame(
-        &context,
-        &mut devtools,
-        &mut workspace,
-        vec![release(Key::F12)],
-    );
-    frame(
-        &context,
-        &mut devtools,
-        &mut workspace,
-        vec![key(Key::F12, false)],
-    );
+    input.pressed.push("F12".into());
+    devtools.process_input(&input, &mut workspace);
     assert!(!devtools.is_visible());
 }
 
@@ -322,17 +223,17 @@ fn deleting_nested_selection_preserves_root_and_unselected_siblings() {
     let root = workspace.id();
     let order = [root, parent, child, sibling];
     let mut devtools = Devtools::default();
-    let context = egui::Context::default();
 
     devtools.set_visible(true);
     devtools.select(root, Modifiers::NONE, &order);
     devtools.select(parent, Modifiers::CTRL, &order);
     devtools.select(child, Modifiers::CTRL, &order);
-    frame(
-        &context,
-        &mut devtools,
+    devtools.process_input(
+        &FrameInput {
+            pressed: vec!["Delete".into()],
+            ..Default::default()
+        },
         &mut workspace,
-        vec![key(Key::Delete, false)],
     );
 
     assert!(workspace.instance(parent).is_none());

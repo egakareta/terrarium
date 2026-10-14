@@ -6,7 +6,7 @@ use tregui::{
     egui_ltreeview::{Action, TreeView},
 };
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     let mut selected = Vec::new();
     support::run(
         "Tree view: selection",

@@ -7,7 +7,7 @@ tregui::egui_phosphor::subset! {
     }
 }
 
-fn main() -> eframe::Result<()> {
+fn main() -> Result<(), trengine::AppCreationError> {
     support::run(
         "Phosphor: subset",
         demo_icons::regular::add_to_fonts,

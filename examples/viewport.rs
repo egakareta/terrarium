@@ -1,9 +1,8 @@
-//! Render an arbitrary mesh into a GPU texture and display it in egui.
+//! Render an arbitrary mesh into a GPU texture and display it in React.
 
 use terrarium::{
     App, AppCreationError, Color3, Engine, GltfError, HasBasePart, HasPVInstance, Instance, Mesh,
-    MeshPart, Part, RendererError, Terrarium, Viewport, ViewportTexture, eframe, egui, glam::Vec3,
-    push_triangle,
+    MeshPart, Part, Terrarium, Viewport, ViewportTexture, glam::Vec3, push_triangle,
 };
 
 struct ViewportApp {
@@ -12,28 +11,19 @@ struct ViewportApp {
 }
 
 impl App for ViewportApp {
-    fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Window::new("Viewport").show(ui, |ui| {
-            ui.label("This is an image :)");
-            let [width, height] = self.texture1.size();
-            ui.image((self.texture1.id(), egui::vec2(width as f32, height as f32)));
-
-            let [width, height] = self.texture2.size();
-            ui.image((self.texture2.id(), egui::vec2(width as f32, height as f32)));
-
-            match engine.renderer().read_pixels() {
-                Ok(pixels) => {
-                    let red_pixels = pixels.iter().filter(|pixel| pixel[0] > 180).count();
-                    ui.label(format!("Red pixels: {red_pixels}"));
-                }
-                Err(RendererError::PixelReadbackPending) => {
-                    ui.label("Reading pixels...");
-                }
-                Err(error) => {
-                    ui.label(format!("Pixel readback failed: {error}"));
-                }
-            }
-        });
+    fn state(&self, engine: &Engine) -> terrarium::serde_json::Value {
+        let pixels = match engine.renderer().read_pixels() {
+            Ok(pixels) => format!(
+                "Red pixels: {}",
+                pixels.iter().filter(|pixel| pixel[0] > 180).count()
+            ),
+            Err(terrarium::RendererError::PixelReadbackPending) => "Reading pixels...".to_owned(),
+            Err(error) => format!("Pixel readback failed: {error}"),
+        };
+        terrarium::serde_json::json!({ "pixels": pixels, "textures": [
+            { "id": self.texture1.id().to_string(), "size": self.texture1.size() },
+            { "id": self.texture2.id().to_string(), "size": self.texture2.size() }
+        ] })
     }
 }
 
@@ -90,5 +80,8 @@ fn initialize(engine: &mut Engine) -> Result<ViewportApp, AppCreationError> {
 }
 
 fn main() {
-    Terrarium::new().run(initialize).unwrap();
+    Terrarium::new()
+        .with_ui("viewport")
+        .run(initialize)
+        .unwrap();
 }

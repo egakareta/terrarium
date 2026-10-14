@@ -3,10 +3,10 @@ clang = "latest"
 "github:egakareta/cargo-forward-flags" = "0.3.0"
 "github:Unreal-Works/cmdshim" = "latest"
 "github:rust-cross/cargo-xwin" = "latest"
-"github:trunk-rs/trunk" = "latest"
-"github:wasm-bindgen/wasm-pack" = "latest"
 lefthook = "latest"
 oxfmt = "latest"
+node = "24"
+"cargo:wasm-bindgen-cli" = "0.2.129"
 rust = { version = "nightly-2026-03-12", components = ["clippy", "rustfmt", "rust-src"] }
 
 [hooks]
@@ -15,11 +15,11 @@ postinstall = ["lefthook install"]
 [tasks.check]
 description = "Run all linting and formatting checks"
 depends = ["lint"]
-run = "mise format:cargo --check && mise format:oxfmt --check"
+run = "cargo fmt --all --check && oxfmt --check . && npm --prefix web run check"
 
 [tasks.format]
 description = "Format .rs/.toml/.yml"
-depends = ["format:cargo", "format:oxfmt"]
+depends = ["format:cargo", "format:oxfmt", "format:web"]
 
 [tasks."format:cargo"]
 description = "Format .rs"
@@ -30,38 +30,40 @@ description = "Format .toml/.yml"
 run = "oxfmt"
 
 [tasks.lint]
+depends = ["build:ui"]
 description = "Lint .rs"
 run = "cargo clippy --all-targets --all-features --workspace -- -D warnings"
 
 [tasks.test]
+depends = ["build:ui"]
 description = "Run .rs tests"
-run = "cargo test --workspace --all-targets --all-features"
+run = "cargo test --workspace --all-targets --all-features && npm --prefix web test"
 
 [tasks."bench:native"]
 description = "Run benchmarks for native"
 run = "cargo bench --workspace --benches"
 
+[tasks."build:ui"]
+description = "Build the React assets embedded by the Tauri host"
+run = "npm --prefix web ci && npm --prefix web run build"
+
+[tasks."format:web"]
+description = "Format React and TypeScript sources"
+run = "npm --prefix web run format"
+
 [tasks."build:examples:web"]
-description = "Build the web examples gallery for GitHub Pages"
+description = "Build the React and WASM examples gallery"
 dir = "{{config_root}}"
 env = { RUSTFLAGS = "" }
-run = """
-set -eu
-mkdir -p examples/dist
-for example in app gltf outlines physics simple viewport; do
-  trunk build --release --locked --all-features --example "$example" \\
-    --dist "examples/dist/$example" \\
-    --public-url "${PAGES_BASE_PATH:-}/$example/"
-done
-cp assets/web/examples.html examples/dist/index.html
-"""
+run = "npm --prefix web ci && npm --prefix web run build:gallery"
 
 [tasks."serve:examples:app"]
-description = "Serve the example app with Trunk"
-dir = "{{config_root}}"
-run = "trunk serve"
+description = "Serve the React host and WASM example"
+depends = ["build:examples:web"]
+run = "npm --prefix web run dev"
 
 [tasks."run:examples:app"]
+depends = ["build:ui"]
 description = "Run the example app natively"
 dir = "{{config_root}}"
 run = "cargo run --example app"
@@ -91,3 +93,6 @@ run = [
 "apt:libjack-jackd2-dev" = "latest"
 "apt:libudev-dev" = "latest"
 "apt:pkg-config" = "latest"
+"apt:libwebkit2gtk-4.1-dev" = "latest"
+"apt:libgtk-3-dev" = "latest"
+"apt:librsvg2-dev" = "latest"
