@@ -7,6 +7,7 @@ use std::{
 
 use egui::{FontFamily, FontId, RichText};
 use serde::Deserialize;
+use tregui::{egui, egui_phosphor};
 
 const FONTS_API: &str = "https://api.fontsource.org/v1/fonts";
 const PREVIEW_SENTENCE: &str = "Sphinx of black quartz, judge my vow.";

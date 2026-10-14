@@ -17,6 +17,7 @@ members = [
   "crates/trdevtools/",
   "crates/trdylib/",
   "crates/trengine/",
+  "crates/tregui/",
   "crates/trfont/",
   "crates/trinternal/",
   "crates/trpersistence/",
@@ -33,6 +34,7 @@ default-members = [
   "crates/trdevtools/",
   "crates/trdylib/",
   "crates/trengine/",
+  "crates/tregui/",
   "crates/trfont/",
   "crates/trinternal/",
   "crates/trpersistence/",
@@ -57,6 +59,7 @@ trdevtools = { path = "crates/trdevtools/", version = "0.1", default-features = 
 trdevtools-derive = { path = "crates/trdevtools-derive/", version = "0.1" }
 trdylib = { path = "crates/trdylib/", version = "0.1" }
 trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
+tregui = { path = "crates/tregui/", version = "0.1", default-features = false }
 trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
 trinternal = { path = "crates/trinternal/", version = "0.1" }
 trpersistence = { path = "crates/trpersistence/", version = "0.1" }

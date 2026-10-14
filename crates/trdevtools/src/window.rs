@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use egui_dock::{DockArea, DockState, NodeIndex, Style, TabViewer};
 use egui_ltreeview::{Action, NodeBuilder, TreeView, TreeViewBuilder, TreeViewState};
 use egui_phosphor::regular;
+use tregui::{egui, egui_ltreeview, egui_phosphor, egui_text_outline};
 use trscene::{Instance, InstanceId, Workspace};
 
 use super::{Property, PropertyError, PropertyValue};

@@ -8,6 +8,8 @@ pub use serde_json;
 pub use tauri;
 #[cfg(feature = "devtools")]
 pub use trdevtools;
+#[cfg(feature = "phosphor")]
+pub use tregui::egui_phosphor;
 pub use trfont;
 pub use trrender;
 pub use trscene::{self, winit};

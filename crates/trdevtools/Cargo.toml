@@ -8,15 +8,12 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-egui = "0.36"
 egui_dock = "0.21"
 ehttp = "0.7"
 rfd = "0.17"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-egui_ltreeview = "0.9"
-egui-phosphor = { version = "0.14", default-features = false, features = ["regular"] }
-egui-text-outline = { workspace = true }
+tregui = { workspace = true, features = ["ltreeview", "phosphor", "text-outline"] }
 trscene = { workspace = true, features = ["devtools"] }
 trtask = { workspace = true }
 zip = { version = "9", default-features = false, features = ["deflate"] }
