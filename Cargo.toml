@@ -120,7 +120,25 @@ trdylib = { workspace = true, optional = true }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
-default = ["static_linking"]
+default = [
+  "clipboard",
+  "default-fonts",
+  "default-materials",
+  "default-skybox",
+  "dx12",
+  "flac",
+  "gles",
+  "meshpart",
+  "metal",
+  "mp3",
+  "persistence",
+  "physics",
+  "sound",
+  "static_linking",
+  "vorbis",
+  "wav",
+  "webgpu",
+]
 static_linking = ["dep:trinternal"]
 dynamic_linking = ["dep:trdylib", "dep:trinternal"]
 

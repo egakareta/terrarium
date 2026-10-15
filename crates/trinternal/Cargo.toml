@@ -13,26 +13,6 @@ trengine = { workspace = true }
 trpersistence = { workspace = true, optional = true }
 
 [features]
-default = [
-  "asio",
-  "clipboard",
-  "default-fonts",
-  "default-materials",
-  "default-skybox",
-  "dx12",
-  "flac",
-  "gles",
-  "meshpart",
-  "metal",
-  "mp3",
-  "persistence",
-  "physics",
-  "sound",
-  "vorbis",
-  "wav",
-  "webgpu",
-]
-
 clipboard = ["dep:trclipboard"]
 persistence = ["dep:trpersistence"]
 
