@@ -2,7 +2,7 @@ use std::{
     env,
     fmt::Display,
     str::FromStr,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use terrarium::{
@@ -81,10 +81,7 @@ impl Benchmark {
         )?;
         let base_camera_pivot = engine.current_camera.pivot();
         let base_parts = engine.get_all::<Part>().cloned().collect();
-        let random_state = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(1, |duration| duration.as_nanos() as u64)
-            | 1;
+        let random_state = 0x4d59_5df4_d0f3_3173;
         let mut app = Self {
             config,
             base_camera_pivot,
