@@ -32,6 +32,12 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
             .emissive
             .is_some())
     );
+    let occlusion_material = terrarium::Face::ALL
+        .into_iter()
+        .map(|slot| meshpart.material_slot(slot))
+        .find(|material| material.occlusion_texture().is_some())
+        .expect("DamagedHelmet has an occlusion map");
+    assert_eq!(occlusion_material.occlusion_strength(), 1.0);
     let pixels = engine.renderer().read_pixels()?;
     let rendered_pixels = pixels
         .iter()
@@ -296,5 +302,273 @@ fn builtin_material_loads_lazily_and_renders() -> Result<(), AppCreationError> {
     let builtin_pixels = render(builtin)?;
     let factors_only_pixels = render(factors_only)?;
     assert_ne!(builtin_pixels, factors_only_pixels);
+    Ok(())
+}
+
+#[test]
+fn metallic_roughness_changes_rendered_environment_reflections() -> Result<(), AppCreationError> {
+    let _gpu_test_guard = serialize_gpu_test();
+    fn render(roughness: f32) -> Result<Vec<[u8; 4]>, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.workspace.current_camera =
+                    Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+                engine.add_child(
+                    Part::new()
+                        .with_shape(PartShape::Ball)
+                        .with_position(Vec3::new(0.0, 1.0, 0.0))
+                        .with_size(Vec3::splat(2.0))
+                        .with_material(
+                            Material::default()
+                                .with_metallic(1.0)
+                                .with_roughness(roughness),
+                        ),
+                );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+
+        Ok(engine.renderer().read_pixels()?)
+    }
+
+    let smooth = render(0.1)?;
+    let rough = render(0.9)?;
+    let changed_pixels = smooth
+        .iter()
+        .zip(&rough)
+        .filter(|(smooth, rough)| {
+            smooth[..3]
+                .iter()
+                .zip(&rough[..3])
+                .any(|(smooth, rough)| smooth.abs_diff(*rough) > 2)
+        })
+        .count();
+
+    assert!(
+        changed_pixels > 16,
+        "changing metallic roughness should alter the reflected environment across the surface; changed {changed_pixels} pixels"
+    );
+    Ok(())
+}
+
+#[test]
+fn occlusion_texture_changes_ambient_but_preserves_direct_light() -> Result<(), AppCreationError> {
+    let _gpu_test_guard = serialize_gpu_test();
+    fn render(occlusion: u8, outdoor_ambient: Color3) -> Result<Vec<[u8; 4]>, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.lighting.clear_skybox();
+                engine.lighting.outdoor_ambient = outdoor_ambient;
+                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.workspace.current_camera =
+                    Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+                let occlusion_map = engine.add_texture(Texture::linear(
+                    1,
+                    1,
+                    vec![occlusion, occlusion, occlusion, 255],
+                )?)?;
+                engine.add_child(
+                    Part::new()
+                        .with_shape(PartShape::Block)
+                        .with_position(Vec3::new(0.0, 1.0, 0.0))
+                        .with_size(Vec3::splat(2.0))
+                        .with_material(Material::default().with_occlusion_texture(occlusion_map)),
+                );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+
+        Ok(engine.renderer().read_pixels()?)
+    }
+
+    let unoccluded = render(255, Color3::new(1.0, 1.0, 1.0))?;
+    let occluded = render(0, Color3::new(1.0, 1.0, 1.0))?;
+    let changed_pixels = unoccluded
+        .iter()
+        .zip(&occluded)
+        .filter(|(unoccluded, occluded)| {
+            unoccluded[..3]
+                .iter()
+                .zip(&occluded[..3])
+                .any(|(unoccluded, occluded)| unoccluded.abs_diff(*occluded) > 2)
+        })
+        .count();
+
+    assert!(
+        changed_pixels > 16,
+        "changing ambient occlusion should alter indirect light across the receiver; changed {changed_pixels} pixels"
+    );
+    let direct_only_unoccluded = render(255, Color3::BLACK)?;
+    let direct_only_occluded = render(0, Color3::BLACK)?;
+    assert_eq!(direct_only_unoccluded, direct_only_occluded);
+    assert!(
+        direct_only_occluded
+            .iter()
+            .any(|pixel| pixel[..3].iter().any(|c| *c > 8))
+    );
+    Ok(())
+}
+
+#[test]
+fn dielectric_reflectance_changes_rendered_direct_specular() -> Result<(), AppCreationError> {
+    let _gpu_test_guard = serialize_gpu_test();
+    fn render(reflectance: f32) -> Result<Vec<[u8; 4]>, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.lighting.clear_skybox();
+                engine.lighting.ambient = Color3::BLACK;
+                engine.lighting.outdoor_ambient = Color3::BLACK;
+                engine.lighting.with_sun_direction(Vec3::new(0.0, 0.5, 1.0));
+                engine.workspace.current_camera =
+                    Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
+                engine.add_child(
+                    Part::new()
+                        .with_shape(PartShape::Ball)
+                        .with_position(Vec3::new(0.0, 1.0, 0.0))
+                        .with_size(Vec3::splat(2.0))
+                        .with_material(Material::default().with_reflectance(reflectance)),
+                );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+
+        Ok(engine.renderer().read_pixels()?)
+    }
+
+    let zero_reflectance = render(0.0)?;
+    let full_reflectance = render(1.0)?;
+    let changed_pixels = zero_reflectance
+        .iter()
+        .zip(&full_reflectance)
+        .filter(|(zero, full)| {
+            zero[..3]
+                .iter()
+                .zip(&full[..3])
+                .any(|(zero, full)| zero.abs_diff(*full) > 2)
+        })
+        .count();
+
+    assert!(
+        changed_pixels > 16,
+        "changing dielectric reflectance should alter direct specular response; changed {changed_pixels} pixels"
+    );
+    Ok(())
+}
+
+#[test]
+fn directional_shadow_filter_softness_changes_shadow_edges() -> Result<(), AppCreationError> {
+    let _gpu_test_guard = serialize_gpu_test();
+    fn render(softness: f32) -> Result<Vec<[u8; 4]>, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.workspace.current_camera =
+                    Camera::new(Vec3::new(4.0, 4.0, 6.0), Vec3::new(0.0, 0.0, 0.0), 1.0);
+                engine
+                    .lighting
+                    .with_sun_direction(Vec3::new(-0.4, 1.0, 0.3));
+                engine.lighting.shadow_softness = softness;
+                engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::new(0.0, -0.05, 0.0))
+                        .with_size(Vec3::new(8.0, 0.1, 8.0)),
+                );
+                engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::new(0.0, 0.6, 0.0))
+                        .with_size(Vec3::splat(1.2)),
+                );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+
+        Ok(engine.renderer().read_pixels()?)
+    }
+
+    let hard = render(0.0)?;
+    let soft = render(1.0)?;
+    let changed_pixels = hard
+        .iter()
+        .zip(&soft)
+        .filter(|(hard, soft)| {
+            hard[..3]
+                .iter()
+                .zip(&soft[..3])
+                .any(|(hard, soft)| hard.abs_diff(*soft) > 2)
+        })
+        .count();
+
+    assert!(
+        changed_pixels > 0,
+        "directional shadow softness should change rendered shadow filtering"
+    );
+    Ok(())
+}
+
+#[test]
+fn point_light_shadows_change_occlusion_on_receivers() -> Result<(), AppCreationError> {
+    let _gpu_test_guard = serialize_gpu_test();
+    fn render(shadows: bool) -> Result<Vec<[u8; 4]>, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(1))
+            .run(move |engine| {
+                engine.workspace.current_camera =
+                    Camera::new(Vec3::new(4.0, 4.0, 6.0), Vec3::new(0.0, 0.0, 0.0), 1.0);
+                engine.lighting.clear_skybox();
+                engine.lighting.brightness = 0.0;
+                engine.lighting.ambient = Color3::BLACK;
+                engine.lighting.outdoor_ambient = Color3::BLACK;
+                engine.lighting.global_shadows = false;
+                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::new(0.0, -0.05, 0.0))
+                        .with_size(Vec3::new(8.0, 0.1, 8.0)),
+                );
+                engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::new(0.0, 0.6, 0.0))
+                        .with_size(Vec3::splat(1.2)),
+                );
+                let mut light_anchor = BasePart::new().with_position(Vec3::new(0.0, 2.5, 1.0));
+                light_anchor.add_child(
+                    PointLight::new()
+                        .with_range(10.0)
+                        .with_brightness(40.0)
+                        .with_shadows(shadows),
+                );
+                engine.add_child(light_anchor);
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+
+        Ok(engine.renderer().read_pixels()?)
+    }
+
+    let unshadowed = render(false)?;
+    let shadowed = render(true)?;
+    let changed_pixels = unshadowed
+        .iter()
+        .zip(&shadowed)
+        .filter(|(unshadowed, shadowed)| {
+            unshadowed[..3]
+                .iter()
+                .zip(&shadowed[..3])
+                .any(|(unshadowed, shadowed)| unshadowed.abs_diff(*shadowed) > 2)
+        })
+        .count();
+
+    assert!(
+        changed_pixels > 0,
+        "enabling point-light shadows should change rendered receiver occlusion"
+    );
     Ok(())
 }

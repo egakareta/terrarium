@@ -101,6 +101,9 @@ name = "gpu"
 required-features = ["meshpart"]
 
 [[test]]
+name = "rendering"
+
+[[test]]
 name = "devtools"
 required-features = ["devtools"]
 
@@ -111,6 +114,7 @@ trinternal = { workspace = true, optional = true }
 [dev-dependencies]
 approx = "0.5"
 bevy_ecs = "0.20"
+paste = "1"
 pollster = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -118,6 +122,11 @@ trdylib = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = ["Window"] }
+wgpu = { version = "30", default-features = false, features = ["std", "webgl", "webgpu", "wgsl"] }
 
 [features]
 default = [

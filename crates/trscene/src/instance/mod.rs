@@ -535,7 +535,7 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// Rust value without building the JSON by hand.
     ///
     /// ```
-    /// use terrarium::{Instance, Part};
+    /// use trscene::{Instance, Part};
     ///
     /// let part = Part::new()
     ///     .with_name("crate")
@@ -771,7 +771,7 @@ fn find_child_mut<'a, T: Instance>(
 /// Import this trait alongside [`Instance`] to use them:
 ///
 /// ```
-/// use terrarium::{Instance, InstanceAttributes, Part};
+/// use trscene::{Instance, InstanceAttributes, Part};
 ///
 /// let part = Part::new()
 ///     .with_typed_attribute("tags", vec!["wood", "breakable"])

@@ -84,7 +84,7 @@ pub trait HasPVInstance {
     /// Use [`Self::with_pivot`] to change only this instance's transform.
     ///
     /// ```
-    /// use terrarium::{HasPVInstance, Instance, Part, glam::{Mat4, Vec3}};
+    /// use trscene::{HasPVInstance, Instance, Part, glam::{Mat4, Vec3}};
     ///
     /// let mut parent = Part::new();
     /// let child = parent.add_child(Part::new().with_position(Vec3::X));

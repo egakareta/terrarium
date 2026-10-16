@@ -1,0 +1,11 @@
+{
+  "goog:chromeOptions": {
+    "args": [
+      "--enable-gpu",
+      "--enable-unsafe-webgpu",
+      "--enable-unsafe-swiftshader",
+      "--use-gl=angle",
+      "--use-angle=swiftshader"
+    ]
+  }
+}

@@ -34,8 +34,16 @@ description = "Lint .rs"
 run = "cargo clippy --all-targets --all-features --workspace -- -D warnings"
 
 [tasks.test]
-description = "Run .rs tests"
+description = "Run .rs tests for native and wasm"
+run = "mise run test:native && mise run test:wasm"
+
+[tasks."test:native"]
+description = "Run .rs tests for native"
 run = "cargo test --workspace --all-targets --all-features"
+
+[tasks."test:wasm"]
+description = "Run .rs tests for wasm"
+run = "WASM_BINDGEN_TEST_WEBDRIVER_JSON=tests/webdriver.json wasm-pack test --headless --chrome"
 
 [tasks."bench:native"]
 description = "Run benchmarks for native"
