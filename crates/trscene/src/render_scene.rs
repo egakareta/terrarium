@@ -4,7 +4,8 @@ use crate::{
     BasePart, Camera, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart,
     HasPointLight, HasSpotLight, HasSurfaceLight, Instance, InstanceId, Outline, Part, PointLight,
     RenderCamera, RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode,
-    RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace, glam,
+    RenderOutline, RenderScene, RenderTransform, Rig, SpotLight, SurfaceLight, Workspace, glam,
+    instance_pivot,
 };
 #[cfg(feature = "meshpart")]
 use crate::{HasMeshPart, MeshPart};
@@ -19,7 +20,7 @@ fn render_node<'a>(
     parent_transform: glam::Mat4,
 ) -> RenderNode<'a> {
     let light = render_light(workspace, instance);
-    let world_transform = instance_world_transform(instance)
+    let world_transform = instance_pivot(instance)
         .or_else(|| light.as_ref().map(|(_, transform)| *transform))
         .unwrap_or(parent_transform);
     let transform = RenderTransform::from_world(parent_transform, world_transform);
@@ -38,23 +39,6 @@ fn render_node<'a>(
         light: light.map(|(light, _)| light),
         children,
     }
-}
-
-fn instance_world_transform(instance: &dyn Instance) -> Option<glam::Mat4> {
-    if let Some(part) = instance.downcast_ref::<Part>() {
-        return Some(part.pivot());
-    }
-    #[cfg(feature = "meshpart")]
-    if let Some(part) = instance.downcast_ref::<MeshPart>() {
-        return Some(part.pivot());
-    }
-    if let Some(part) = instance.downcast_ref::<BasePart>() {
-        return Some(part.pivot());
-    }
-    if let Some(camera) = instance.downcast_ref::<Camera>() {
-        return Some(camera.pivot());
-    }
-    None
 }
 
 fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
@@ -204,6 +188,9 @@ fn render_light_parent(
         }
         if let Some(part) = parent.downcast_ref::<BasePart>() {
             return Some((id, part.pivot()));
+        }
+        if let Some(rig) = parent.downcast_ref::<Rig>() {
+            return Some((id, rig.pivot()));
         }
         parent_id = parent.parent();
     }

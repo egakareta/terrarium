@@ -81,6 +81,7 @@ pub trait HasBasePart {
     ///
     /// The default physics integration creates a fixed body when this is `true`
     /// and a dynamic body when this is `false`.
+    /// Inside a [`crate::Rig`], the rig's anchored state controls the shared body.
     fn anchored(&self) -> bool {
         self.base_part().anchored
     }
@@ -119,6 +120,7 @@ pub trait HasBasePart {
     ///
     /// The default physics integration creates a fixed body when this is `true`
     /// and a dynamic body when this is `false`.
+    /// Inside a [`crate::Rig`], the rig's anchored state controls the shared body.
     fn with_anchored(mut self, anchored: bool) -> Self
     where
         Self: Sized,

@@ -1,8 +1,9 @@
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    BasePart, Color3, HasBasePart, HasPVInstance, InstanceId, Part, Workspace,
+    BasePart, Color3, HasBasePart, InstanceId, Part, Workspace,
     glam::{Vec2, Vec3, Vec4},
+    instance::{InstanceTransformUpdate, update_instance_transform},
 };
 
 /// Interpolates a value between two keyframes.
@@ -389,21 +390,24 @@ impl TweenTrack {
         match self {
             Self::Position { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| {
-                    part.with_position(value);
-                });
+                if let Some(instance) = workspace.instance_mut(*target) {
+                    update_instance_transform(instance, InstanceTransformUpdate::Position(value));
+                }
             }
             Self::Orientation { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| {
-                    part.with_orientation(value);
-                });
+                if let Some(instance) = workspace.instance_mut(*target) {
+                    update_instance_transform(
+                        instance,
+                        InstanceTransformUpdate::Orientation(value),
+                    );
+                }
             }
             Self::Size { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                with_base_part(workspace, *target, |part| {
-                    part.with_size(value);
-                });
+                if let Some(instance) = workspace.instance_mut(*target) {
+                    update_instance_transform(instance, InstanceTransformUpdate::Size(value));
+                }
             }
             Self::Color { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
@@ -454,7 +458,7 @@ impl TweenManager {
         Self::default()
     }
 
-    /// Adds a position tween for a [`Part`] or [`BasePart`].
+    /// Adds a position tween for a part or [`Rig`].
     pub fn add_position(&mut self, target: InstanceId, tween: Tween<Vec3>) -> TweenId {
         self.add_track(|id| TweenTrack::Position { id, target, tween })
     }
@@ -464,7 +468,7 @@ impl TweenManager {
         self.add_track(|id| TweenTrack::Orientation { id, target, tween })
     }
 
-    /// Adds a size tween for a [`Part`] or [`BasePart`].
+    /// Adds a size tween for a part or [`Rig`].
     pub fn add_size(&mut self, target: InstanceId, tween: Tween<Vec3>) -> TweenId {
         self.add_track(|id| TweenTrack::Size { id, target, tween })
     }
