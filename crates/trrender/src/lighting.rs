@@ -1,4 +1,8 @@
+use glam::Vec2;
+
 use super::*;
+
+const SHADOW_SPLIT_UNIFORM_WEIGHT: f32 = 0.5;
 
 impl Renderer {
     pub(super) fn prepare_local_lights(
@@ -448,24 +452,33 @@ pub(super) fn light_view_projections(
 
     for cascade in 0..SHADOW_CASCADE_COUNT {
         let fraction = (cascade + 1) as f32 / SHADOW_CASCADE_COUNT as f32;
-        let cascade_far = near * (far / near).powf(fraction);
+        let logarithmic = near * (far / near).powf(fraction);
+        let uniform = near + (far - near) * fraction;
+        let cascade_far = logarithmic * (1.0 - SHADOW_SPLIT_UNIFORM_WEIGHT)
+            + uniform * SHADOW_SPLIT_UNIFORM_WEIGHT;
         splits[cascade] = cascade_far;
 
         let corners = camera_frustum_slice_corners(camera, cascade_near, cascade_far);
         let center = corners.iter().copied().sum::<Vec3>() / corners.len() as f32;
-        let radius = corners
-            .iter()
-            .map(|corner| corner.distance(center))
-            .fold(0.0, f32::max);
-        let extent = ((radius + 1.0 / 16.0) * 16.0).ceil() / 16.0;
-        let texel_size = 2.0 * extent / shadow_map_size as f32;
+        let (mut extent_x, mut extent_y): (f32, f32) = (0.0, 0.0);
+        for corner in corners {
+            let offset = corner - center;
+            extent_x = extent_x.max(offset.dot(light_right).abs());
+            extent_y = extent_y.max(offset.dot(light_up).abs());
+        }
+        extent_x = ((extent_x + 1.0 / 16.0) * 16.0).ceil() / 16.0;
+        extent_y = ((extent_y + 1.0 / 16.0) * 16.0).ceil() / 16.0;
+        let texel_size_x = 2.0 * extent_x / shadow_map_size as f32;
+        let texel_size_y = 2.0 * extent_y / shadow_map_size as f32;
+        let texel_size = texel_size_x.max(texel_size_y);
         texel_sizes[cascade] = texel_size;
         let center_x = center.dot(light_right);
         let center_y = center.dot(light_up);
         let snapped_center = center
-            + light_right * ((center_x / texel_size).round() * texel_size - center_x)
-            + light_up * ((center_y / texel_size).round() * texel_size - center_y);
-        let light_position = snapped_center + light_direction * (extent + SHADOW_CASTER_MARGIN);
+            + light_right * ((center_x / texel_size_x).round() * texel_size_x - center_x)
+            + light_up * ((center_y / texel_size_y).round() * texel_size_y - center_y);
+        let light_position =
+            snapped_center + light_direction * (extent_x.max(extent_y) + SHADOW_CASTER_MARGIN);
         let view = glam::camera::rh::view::look_at_mat4(light_position, snapped_center, up);
         let (mut min_depth, mut max_depth) = (f32::MAX, f32::MIN);
         for corner in corners {
@@ -476,10 +489,10 @@ pub(super) fn light_view_projections(
         let shadow_near = (min_depth - SHADOW_CASTER_MARGIN).max(0.001);
         let shadow_far = (max_depth + SHADOW_RECEIVER_MARGIN).max(shadow_near + 0.001);
         let projection = glam::camera::rh::proj::directx::orthographic(
-            -extent,
-            extent,
-            -extent,
-            extent,
+            -extent_x,
+            extent_x,
+            -extent_y,
+            extent_y,
             shadow_near,
             shadow_far,
         );
@@ -487,6 +500,214 @@ pub(super) fn light_view_projections(
         cascade_near = cascade_far;
     }
 
+    (matrices, splits, texel_sizes)
+}
+
+struct ShadowReceiverBounds {
+    transform: Mat4,
+    inverse: Mat4,
+    half_extent: f32,
+    corners: [Vec3; 8],
+}
+
+fn clip_shadow_receiver_edge(mut edge: [Vec3; 2], planes: &[Vec4; 6]) -> Option<[Vec3; 2]> {
+    for plane in planes {
+        let a = plane.dot(edge[0].extend(1.0)) + 1e-5;
+        let b = plane.dot(edge[1].extend(1.0)) + 1e-5;
+        if a < 0.0 && b < 0.0 {
+            return None;
+        }
+        if (a < 0.0) != (b < 0.0) {
+            let intersection = edge[0].lerp(edge[1], a / (a - b));
+            edge[usize::from(a >= 0.0)] = intersection;
+        }
+    }
+    Some(edge)
+}
+
+fn shadow_receiver_clip_bounds(
+    receiver: &ShadowReceiverBounds,
+    frustum_corners: [Vec3; 8],
+    frustum_planes: &[Vec4; 6],
+    light_view_projection: Mat4,
+) -> Option<(Vec2, Vec2)> {
+    let mut enclosed = true;
+    for plane in frustum_planes {
+        let (minimum, maximum) = receiver.corners.iter().fold(
+            (f32::INFINITY, f32::NEG_INFINITY),
+            |(minimum, maximum), point| {
+                let distance = plane.dot(point.extend(1.0));
+                (minimum.min(distance), maximum.max(distance))
+            },
+        );
+        if maximum < -1e-5 {
+            return None;
+        }
+        enclosed &= minimum >= -1e-5;
+    }
+    let mut minimum = Vec2::splat(f32::INFINITY);
+    let mut maximum = Vec2::splat(f32::NEG_INFINITY);
+    let mut include = |point: Vec3| {
+        let point = light_view_projection.transform_point3(point).truncate();
+        minimum = minimum.min(point);
+        maximum = maximum.max(point);
+    };
+    if enclosed {
+        for point in receiver.corners {
+            include(point);
+        }
+        return Some((minimum, maximum));
+    }
+    let local_frustum = frustum_corners.map(|point| receiver.inverse.transform_point3(point));
+    let box_planes = [
+        Vec3::X,
+        Vec3::NEG_X,
+        Vec3::Y,
+        Vec3::NEG_Y,
+        Vec3::Z,
+        Vec3::NEG_Z,
+    ]
+    .map(|normal| normal.extend(receiver.half_extent));
+    for corner in 0..8 {
+        for axis in 0..3 {
+            let next = corner ^ (1 << axis);
+            if corner >= next {
+                continue;
+            }
+            if let Some(edge) = clip_shadow_receiver_edge(
+                [receiver.corners[corner], receiver.corners[next]],
+                frustum_planes,
+            ) {
+                for point in edge {
+                    include(point);
+                }
+            }
+            if let Some(edge) =
+                clip_shadow_receiver_edge([local_frustum[corner], local_frustum[next]], &box_planes)
+            {
+                for point in edge {
+                    include(receiver.transform.transform_point3(point));
+                }
+            }
+        }
+    }
+    minimum.is_finite().then_some((minimum, maximum))
+}
+
+/// Fits directional cascade XY coverage to conservative visible receiver bounds.
+pub(super) fn scene_light_view_projections(
+    scene: &RenderScene<'_>,
+    light_direction: Vec3,
+    shadow_map_size: u32,
+) -> (
+    [Mat4; SHADOW_CASCADE_COUNT],
+    [f32; SHADOW_CASCADE_COUNT],
+    [f32; SHADOW_CASCADE_COUNT],
+) {
+    let camera = &scene.camera;
+    let result = light_view_projections(camera, light_direction, shadow_map_size);
+    if !scene.lighting.shadows_enabled() {
+        return result;
+    }
+    let camera_planes = frustum_planes(camera.view_projection);
+    let mut receivers = Vec::new();
+    for (node, transform) in scene.nodes() {
+        let Some(mesh) = &node.mesh else {
+            continue;
+        };
+        if finite_or(mesh.transparency, 0.0) >= 1.0
+            || !sphere_visible(
+                &camera_planes,
+                transform.w_axis.truncate(),
+                scaled_bounding_radius(mesh.bounding_radius, transform),
+            )
+        {
+            continue;
+        }
+        let inverse = transform.inverse();
+        if !inverse.is_finite() {
+            return result;
+        }
+        let half_extent = match mesh.geometry {
+            RenderGeometry::Primitive(_) => 0.5,
+            RenderGeometry::Custom { .. } => mesh.bounding_radius,
+        };
+        receivers.push(ShadowReceiverBounds {
+            transform,
+            inverse,
+            half_extent,
+            corners: std::array::from_fn(|index| {
+                let point = Vec3::new(
+                    if index & 1 == 0 {
+                        -half_extent
+                    } else {
+                        half_extent
+                    },
+                    if index & 2 == 0 {
+                        -half_extent
+                    } else {
+                        half_extent
+                    },
+                    if index & 4 == 0 {
+                        -half_extent
+                    } else {
+                        half_extent
+                    },
+                );
+                transform.transform_point3(point)
+            }),
+        });
+    }
+    let (mut matrices, splits, mut texel_sizes) = result;
+    let forward = camera.forward;
+    let camera_depth = forward.dot(camera.position());
+    let mut cascade_near = camera.znear.max(0.001);
+    for cascade in 0..SHADOW_CASCADE_COUNT {
+        let fit_near = if cascade == 0 {
+            cascade_near
+        } else {
+            (cascade_near - (cascade_near * 0.1).max(0.05)).max(camera.znear)
+        };
+        let corners = camera_frustum_slice_corners(camera, fit_near, splits[cascade]);
+        let mut planes = camera_planes;
+        planes[4] = forward.extend(-camera_depth - fit_near);
+        planes[5] = (-forward).extend(camera_depth + splits[cascade]);
+        let matrix = matrices[cascade];
+        let mut minimum = Vec2::splat(f32::INFINITY);
+        let mut maximum = Vec2::splat(f32::NEG_INFINITY);
+        for receiver in &receivers {
+            if let Some((low, high)) =
+                shadow_receiver_clip_bounds(receiver, corners, &planes, matrix)
+            {
+                minimum = minimum.min(low);
+                maximum = maximum.max(high);
+            }
+        }
+        if minimum.is_finite() {
+            let original_scale = Vec2::new(
+                Vec3::new(matrix.x_axis.x, matrix.y_axis.x, matrix.z_axis.x).length(),
+                Vec3::new(matrix.x_axis.y, matrix.y_axis.y, matrix.z_axis.y).length(),
+            );
+            let original_offset = matrix.w_axis.truncate().truncate();
+            let center = ((minimum + maximum) * 0.5 - original_offset) / original_scale;
+            // Four guard texels cover the filter support and the half-texel center snap.
+            let guard_scale = shadow_map_size as f32 / (shadow_map_size as f32 - 8.0);
+            let extent = ((maximum - minimum) * 0.5 / original_scale * guard_scale * 16.0)
+                .ceil()
+                .max(Vec2::ONE)
+                / 16.0;
+            let texel_step = extent * (2.0 / shadow_map_size as f32);
+            let snapped_center = (center / texel_step).round() * texel_step;
+            let crop_center = snapped_center * original_scale + original_offset;
+            let crop_scale = (extent * original_scale).recip();
+            // Preserve light-depth coverage for off-screen casters whose projections reach a receiver.
+            matrices[cascade] = Mat4::from_scale(Vec3::new(crop_scale.x, crop_scale.y, 1.0))
+                * Mat4::from_translation(Vec3::new(-crop_center.x, -crop_center.y, 0.0))
+                * matrix;
+            texel_sizes[cascade] = texel_step.max_element();
+        }
+        cascade_near = splits[cascade];
+    }
     (matrices, splits, texel_sizes)
 }
 

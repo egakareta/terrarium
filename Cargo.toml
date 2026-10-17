@@ -114,6 +114,7 @@ trinternal = { workspace = true, optional = true }
 [dev-dependencies]
 approx = "0.5"
 bevy_ecs = "0.20"
+image = { version = "0.25", default-features = false, features = ["png"] }
 paste = "1"
 pollster = "1"
 

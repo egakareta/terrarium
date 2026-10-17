@@ -439,6 +439,23 @@ pub(super) fn resize_texture_pixels(texture: &Texture, width: u32, height: u32) 
     pixels
 }
 
+pub(super) fn pack_emissive_pixels(
+    emissive: &Texture,
+    occlusion: &Texture,
+    width: u32,
+    height: u32,
+) -> Vec<u8> {
+    let mut pixels = resize_texture_pixels(emissive, width, height);
+    let occlusion_pixels = resize_texture_pixels(occlusion, width, height);
+    for (emissive_pixel, occlusion_pixel) in pixels
+        .chunks_exact_mut(4)
+        .zip(occlusion_pixels.chunks_exact(4))
+    {
+        emissive_pixel[3] = occlusion_pixel[0];
+    }
+    pixels
+}
+
 pub(super) fn encode_srgb_rgb_in_place(pixels: &mut [u8]) {
     for pixel in pixels.chunks_exact_mut(4) {
         pixel[0] = linear_to_srgb_byte(pixel[0]);
@@ -567,7 +584,7 @@ pub(super) fn directional_shadow_map_size(width: u32, height: u32) -> u32 {
     width
         .max(height)
         .max(1)
-        .saturating_mul(2)
+        .saturating_mul(3)
         .checked_next_power_of_two()
         .unwrap_or(MAX_SHADOW_MAP_SIZE)
         .clamp(MIN_SHADOW_MAP_SIZE, MAX_SHADOW_MAP_SIZE)

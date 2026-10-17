@@ -54,8 +54,6 @@ struct LocalLights {
 override FRAMEBUFFER_IS_SRGB: f32 = 1.0;
 
 const SHADOW_CASCADE_COUNT: u32 = 7u;
-const SHADOW_FILTER_OFFSETS = array<f32, 3>(-1.0, 0.0, 1.0);
-const SHADOW_FILTER_WEIGHTS = array<f32, 3>(1.0, 2.0, 1.0);
 // Keep receiver comparisons a few quantization steps in front of the
 // Depth16Unorm shadow map. The world-space normal offset contributes almost no
 // depth at a low sun angle, so the tiny epsilon alone allows ground receivers
@@ -124,7 +122,8 @@ var material_sampler_5: sampler;
 
 // Per-face PBR factors for every deduplicated part material set. Each set
 // packs six directional slots in MaterialSlot order as three vec4s per slot:
-// base color, then emissive RGB + roughness, then metallic.
+// base color, emissive RGB + roughness, then metallic, projection, occlusion
+// strength, and dielectric reflectance.
 //
 // Stored in a 2D float texture (width = MATERIAL_VEC4S_PER_SET, height =
 // set count) instead of a storage buffer: OpenGL ES / WebGL backends expose
@@ -146,14 +145,6 @@ fn slot_base_color(set_index: u32, slot: u32) -> vec4<f32> {
 
 fn slot_emissive_roughness(set_index: u32, slot: u32) -> vec4<f32> {
     return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 1u);
-}
-
-fn slot_metallic(set_index: u32, slot: u32) -> f32 {
-    return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 2u).x;
-}
-
-fn slot_uses_triplanar(set_index: u32, slot: u32) -> bool {
-    return load_material_vec4(set_index, slot * MATERIAL_VEC4S_PER_SLOT + 2u).y > 0.5;
 }
 
 struct VertexInput {
@@ -232,26 +223,42 @@ fn vs_shadow(vertex: ShadowVertexInput) -> @builtin(position) vec4<f32> {
     return shadow_camera.light_view_projection * model * vec4<f32>(vertex.position, 1.0);
 }
 
-fn distribution_ggx(normal_dot_half: f32, roughness: f32) -> f32 {
-    let a = roughness * roughness;
-    let a2 = a * a;
-    let denominator = normal_dot_half * normal_dot_half * (a2 - 1.0) + 1.0;
-    return a2 / max(3.14159265 * denominator * denominator, 0.0001);
+fn alpha_roughness(perceptual_roughness: f32) -> f32 {
+    let clamped_roughness = clamp(perceptual_roughness, 0.045, 1.0);
+    return clamped_roughness * clamped_roughness;
 }
 
-fn geometry_schlick_ggx(normal_dot_direction: f32, roughness: f32) -> f32 {
-    let k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
-    return normal_dot_direction / max(normal_dot_direction * (1.0 - k) + k, 0.0001);
+fn distribution_ggx(normal_dot_half: f32, alpha: f32) -> f32 {
+    let alpha_squared = alpha * alpha;
+    let one_minus_normal_dot_half_squared = 1.0 - normal_dot_half * normal_dot_half;
+    let scaled_half = normal_dot_half * alpha;
+    let denominator = one_minus_normal_dot_half_squared + scaled_half * scaled_half;
+    return alpha_squared / max(3.14159265 * denominator * denominator, 0.000001);
 }
 
-fn geometry_smith(normal_dot_view: f32, normal_dot_light: f32, roughness: f32) -> f32 {
-    return geometry_schlick_ggx(normal_dot_view, roughness)
-        * geometry_schlick_ggx(normal_dot_light, roughness);
+fn geometry_smith(normal_dot_view: f32, normal_dot_light: f32, alpha: f32) -> f32 {
+    let alpha_squared = alpha * alpha;
+    let view_lambda = normal_dot_light * sqrt(max(
+        normal_dot_view * normal_dot_view * (1.0 - alpha_squared) + alpha_squared,
+        0.0,
+    ));
+    let light_lambda = normal_dot_view * sqrt(max(
+        normal_dot_light * normal_dot_light * (1.0 - alpha_squared) + alpha_squared,
+        0.0,
+    ));
+    return 0.5 / max(view_lambda + light_lambda, 0.000001);
 }
 
 fn fresnel_schlick(view_dot_half: f32, base_reflectance: vec3<f32>) -> vec3<f32> {
+    let reflectance_at_grazing = clamp(dot(base_reflectance, vec3<f32>(16.5)), 0.0, 1.0);
     return base_reflectance
-        + (vec3<f32>(1.0) - base_reflectance) * pow(1.0 - view_dot_half, 5.0);
+        + (vec3<f32>(reflectance_at_grazing) - base_reflectance)
+            * pow5(1.0 - view_dot_half);
+}
+
+fn pow5(value: f32) -> f32 {
+    let squared = value * value;
+    return squared * squared * value;
 }
 
 fn linear_to_srgb(linear_color: vec3<f32>) -> vec3<f32> {
@@ -279,19 +286,43 @@ fn aces_tone_map(color: vec3<f32>) -> vec3<f32> {
     );
 }
 
-// Unreal's analytic environment BRDF approximation: splits the specular
-// image-based term into a Fresnel/roughness response without a LUT texture.
-fn environment_brdf_approx(
-    base_reflectance: vec3<f32>,
-    roughness: f32,
-    normal_dot_view: f32,
-) -> vec3<f32> {
+// Bevy 0.20.0's raster PBR path uses this Unreal DFG polynomial for both
+// environment response and direct-light multiple-scattering compensation.
+fn environment_brdf_f_ab(perceptual_roughness: f32, normal_dot_view: f32) -> vec2<f32> {
     let c0 = vec4<f32>(-1.0, -0.0275, -0.572, 0.022);
     let c1 = vec4<f32>(1.0, 0.0425, 1.04, -0.04);
-    let r = roughness * c0 + c1;
+    let r = perceptual_roughness * c0 + c1;
     let a004 = min(r.x * r.x, exp2(-9.28 * normal_dot_view)) * r.x + r.y;
     let ab = vec2<f32>(-1.04, 1.04) * a004 + r.zw;
-    return base_reflectance * ab.x + ab.y;
+    return max(ab, vec2<f32>(0.00005));
+}
+
+fn environment_brdf_approx(base_reflectance: vec3<f32>, f_ab: vec2<f32>) -> vec3<f32> {
+    return base_reflectance * f_ab.x + f_ab.y;
+}
+
+fn specular_multiscatter(
+    distribution: f32,
+    visibility: f32,
+    fresnel: vec3<f32>,
+    base_reflectance: vec3<f32>,
+    f_ab: vec2<f32>,
+) -> vec3<f32> {
+    let energy_compensation = vec3<f32>(1.0)
+        + base_reflectance * (1.0 / max(f_ab.x + f_ab.y, 0.00005) - 1.0);
+    return distribution * visibility * fresnel * energy_compensation;
+}
+
+fn diffuse_burley(
+    perceptual_roughness: f32,
+    normal_dot_view: f32,
+    normal_dot_light: f32,
+    light_dot_half: f32,
+) -> f32 {
+    let grazing_reflectance = 0.5 + 2.0 * perceptual_roughness * light_dot_half * light_dot_half;
+    let light_scatter = 1.0 + (grazing_reflectance - 1.0) * pow5(1.0 - normal_dot_light);
+    let view_scatter = 1.0 + (grazing_reflectance - 1.0) * pow5(1.0 - normal_dot_view);
+    return light_scatter * view_scatter / 3.14159265;
 }
 
 fn sample_base_color(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>) -> vec4<f32> {
@@ -485,7 +516,144 @@ fn sample_emissive(slot: u32, uv: vec2<f32>, uv_dx: vec2<f32>, uv_dy: vec2<f32>)
     return textureSampleGrad(material_texture_0, material_sampler_0, uv, 2, uv_dx, uv_dy);
 }
 
-fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
+fn sample_shadow_compare(
+    shadow_uv: vec2<f32>,
+    depth: f32,
+    layer: u32,
+    local_map: bool,
+) -> f32 {
+    if local_map {
+        return textureSampleCompareLevel(
+            local_shadow_map,
+            shadow_sampler,
+            shadow_uv,
+            i32(layer),
+            depth,
+        );
+    }
+    return textureSampleCompareLevel(shadow_map, shadow_sampler, shadow_uv, i32(layer), depth);
+}
+
+// Separable bilinear comparison samples reconstruct a 5x5 Gaussian PCF
+// footprint with nine hardware comparisons (Castaño's optimized PCF method).
+fn sample_shadow_map_castano_thirteen(
+    shadow_uv: vec2<f32>,
+    depth: f32,
+    layer: u32,
+    filter_radius: vec2<f32>,
+    local_map: bool,
+) -> f32 {
+    var shadow_map_size = vec2<f32>(textureDimensions(shadow_map));
+    if local_map {
+        shadow_map_size = vec2<f32>(textureDimensions(local_shadow_map));
+    }
+    let inverse_shadow_map_size = 1.0 / shadow_map_size;
+    let uv = shadow_uv * shadow_map_size;
+    let base_texel = floor(uv + vec2<f32>(0.5));
+    let s = uv.x + 0.5 - base_texel.x;
+    let t = uv.y + 0.5 - base_texel.y;
+
+    let uw0 = 4.0 - 3.0 * s;
+    let uw1 = 7.0;
+    let uw2 = 1.0 + 3.0 * s;
+    let u0 = (3.0 - 2.0 * s) / uw0 - 2.0;
+    let u1 = (3.0 + s) / uw1;
+    let u2 = s / uw2 + 2.0;
+
+    let vw0 = 4.0 - 3.0 * t;
+    let vw1 = 7.0;
+    let vw2 = 1.0 + 3.0 * t;
+    let v0 = (3.0 - 2.0 * t) / vw0 - 2.0;
+    let v1 = (3.0 + t) / vw1;
+    let v2 = t / vw2 + 2.0;
+
+    let base_uv = (base_texel - vec2<f32>(0.5)) * inverse_shadow_map_size;
+    let texel_filter = inverse_shadow_map_size * filter_radius;
+    var sum = 0.0;
+    sum += uw0 * vw0 * sample_shadow_compare(
+        base_uv + vec2<f32>(u0, v0) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw1 * vw0 * sample_shadow_compare(
+        base_uv + vec2<f32>(u1, v0) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw2 * vw0 * sample_shadow_compare(
+        base_uv + vec2<f32>(u2, v0) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw0 * vw1 * sample_shadow_compare(
+        base_uv + vec2<f32>(u0, v1) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw1 * vw1 * sample_shadow_compare(
+        base_uv + vec2<f32>(u1, v1) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw2 * vw1 * sample_shadow_compare(
+        base_uv + vec2<f32>(u2, v1) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw0 * vw2 * sample_shadow_compare(
+        base_uv + vec2<f32>(u0, v2) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw1 * vw2 * sample_shadow_compare(
+        base_uv + vec2<f32>(u1, v2) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    sum += uw2 * vw2 * sample_shadow_compare(
+        base_uv + vec2<f32>(u2, v2) * texel_filter,
+        depth,
+        layer,
+        local_map,
+    );
+    return sum / 144.0;
+}
+
+fn shadow_filter_axis(
+    texel_position: f32,
+    inverse_variance: f32,
+    cutoff: f32,
+    ratio_step: f32,
+) -> array<vec2<f32>, 5> {
+    let first_texel = floor(texel_position) - 2.0;
+    let distance = first_texel + 0.5 - texel_position;
+    var gaussian = exp(-distance * distance * inverse_variance);
+    // g(d + 1) / g(d) = exp(-(2d + 1) / (2 sigma^2)); adjacent ratios advance geometrically.
+    var ratio = exp(-(2.0 * distance + 1.0) * inverse_variance);
+    var samples: array<vec2<f32>, 5>;
+    for (var index = 0u; index < 5u; index += 1u) {
+        let center = first_texel + f32(index) + 0.5;
+        let weight = max(gaussian - cutoff, 0.0);
+        samples[index] = vec2<f32>(center, weight);
+        gaussian *= ratio;
+        ratio *= ratio_step;
+    }
+    return samples;
+}
+
+fn sample_shadow(
+    shadow_position: vec4<f32>,
+    cascade: u32,
+    filter_scale: f32,
+) -> f32 {
     let inverse_w = 1.0 / max(shadow_position.w, 0.0001);
     let projected = shadow_position.xyz * inverse_w;
     let shadow_uv = projected.xy * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
@@ -498,28 +666,30 @@ fn sample_shadow(shadow_position: vec4<f32>, cascade: u32) -> f32 {
     }
 
     let softness = clamp(camera.lighting_params.z, 0.0, 1.0);
-    // Map softness 0..1 to a 0.5..2.5 texel filter radius. A radius well
-    // below one texel leaves grazing sun shadows stair-stepped: one shadow
-    // texel then covers many screen pixels along the ground. The 0.5 texel
-    // floor keeps the hard end anti-aliased while preserving its look.
-    let filter_radius = 0.5 + softness * 2.0;
-    let texel_size = filter_radius / f32(textureDimensions(shadow_map).x);
-    var visibility = 0.0;
-    for (var x = 0u; x < 3u; x = x + 1u) {
-        for (var y = 0u; y < 3u; y = y + 1u) {
-            let weight = SHADOW_FILTER_WEIGHTS[x] * SHADOW_FILTER_WEIGHTS[y];
-            let offset = vec2<f32>(SHADOW_FILTER_OFFSETS[x], SHADOW_FILTER_OFFSETS[y])
-                * texel_size;
-            visibility += textureSampleCompareLevel(
-                shadow_map,
-                shadow_sampler,
-                shadow_uv + offset,
-                i32(cascade),
+    let sigma = (0.5 + softness * 2.0) * filter_scale;
+    let inverse_variance = 0.5 / (sigma * sigma);
+    // Zero weight at the support boundary keeps the kernel continuous when its texel window moves.
+    let cutoff = exp(-2.5 * 2.5 * inverse_variance);
+    let ratio_step = exp(-2.0 * inverse_variance);
+    let map_size = vec2<f32>(textureDimensions(shadow_map));
+    let u_samples = shadow_filter_axis(shadow_uv.x * map_size.x, inverse_variance, cutoff, ratio_step);
+    let v_samples = shadow_filter_axis(shadow_uv.y * map_size.y, inverse_variance, cutoff, ratio_step);
+    var sum = 0.0;
+    var total_weight = 0.0;
+    // Texel-center comparisons do not depend on backend-specific comparison filtering.
+    for (var y = 0u; y < 5u; y += 1u) {
+        for (var x = 0u; x < 5u; x += 1u) {
+            let weight = u_samples[x].y * v_samples[y].y;
+            sum += weight * sample_shadow_compare(
+                vec2<f32>(u_samples[x].x, v_samples[y].x) / map_size,
                 projected.z - DIRECTIONAL_SHADOW_DEPTH_BIAS,
-            ) * weight;
+                cascade,
+                false,
+            );
+            total_weight += weight;
         }
     }
-    return visibility / 16.0;
+    return sum / total_weight;
 }
 
 fn point_shadow_face(direction: vec3<f32>) -> u32 {
@@ -558,23 +728,13 @@ fn sample_local_shadow(
         return 1.0;
     }
 
-    var visibility = 0.0;
-    let texel_size = 1.0 / 1024.0;
-    for (var x = 0u; x < 3u; x = x + 1u) {
-        for (var y = 0u; y < 3u; y = y + 1u) {
-            let weight = SHADOW_FILTER_WEIGHTS[x] * SHADOW_FILTER_WEIGHTS[y];
-            let offset = vec2<f32>(SHADOW_FILTER_OFFSETS[x], SHADOW_FILTER_OFFSETS[y])
-                * texel_size;
-            visibility += textureSampleCompareLevel(
-                local_shadow_map,
-                shadow_sampler,
-                shadow_uv + offset,
-                i32(layer),
-                projected.z - 0.0001,
-            ) * weight;
-        }
-    }
-    return visibility / 16.0;
+    return sample_shadow_map_castano_thirteen(
+        shadow_uv,
+        projected.z - 0.0001,
+        layer,
+        vec2<f32>(1.0),
+        true,
+    );
 }
 
 fn evaluate_local_light(
@@ -637,11 +797,20 @@ fn evaluate_local_light(
     let normal_dot_half = max(dot(mapped_normal, half_direction), 0.0);
     let view_dot_half = max(dot(view_direction, half_direction), 0.0);
     let fresnel = fresnel_schlick(view_dot_half, base_reflectance);
-    let normal_distribution = distribution_ggx(normal_dot_half, roughness);
-    let geometry = geometry_smith(normal_dot_view, normal_dot_light, roughness);
-    let specular = normal_distribution * geometry * fresnel
-        / max(4.0 * normal_dot_view * normal_dot_light, 0.0001);
-    let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) / 3.14159265;
+    let alpha = alpha_roughness(roughness);
+    let f_ab = environment_brdf_f_ab(roughness, normal_dot_view);
+    let normal_distribution = distribution_ggx(normal_dot_half, alpha);
+    let visibility = geometry_smith(normal_dot_view, normal_dot_light, alpha);
+    let specular = specular_multiscatter(
+        normal_distribution,
+        visibility,
+        fresnel,
+        base_reflectance,
+        f_ab,
+    );
+    let diffuse = clamp(vec3<f32>(1.0) - fresnel, vec3<f32>(0.0), vec3<f32>(1.0))
+        * (1.0 - metallic)
+        * diffuse_burley(roughness, normal_dot_view, normal_dot_light, view_dot_half);
     let shadow_visibility = sample_local_shadow(world_position, world_normal, light);
     let radiance = light.color_brightness.rgb
         * light.color_brightness.w
@@ -674,9 +843,15 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let slot_factors = slot_base_color(vertex.material_set, vertex.material_slot);
     let slot_emissive_roughness =
         slot_emissive_roughness(vertex.material_set, vertex.material_slot);
-    let slot_metallic = slot_metallic(vertex.material_set, vertex.material_slot);
+    let slot_material = load_material_vec4(
+        vertex.material_set,
+        vertex.material_slot * MATERIAL_VEC4S_PER_SLOT + 2u,
+    );
+    let slot_metallic = slot_material.x;
+    let uses_triplanar = slot_material.y > 0.5;
+    let material_occlusion_strength = slot_material.z;
+    let slot_reflectance = slot_material.w;
     let world_normal = normalize(vertex.normal);
-    let uses_triplanar = slot_uses_triplanar(vertex.material_set, vertex.material_slot);
     var base_color_sample = vec4<f32>(0.0);
     var surface_sample = vec4<f32>(0.0);
     var emissive_sample = vec4<f32>(0.0);
@@ -730,6 +905,11 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         );
     }
     let base_color = base_color_sample * vertex.vertex_color * vertex.tint * slot_factors;
+    let ambient_occlusion = mix(
+        1.0,
+        clamp(emissive_sample.a, 0.0, 1.0),
+        clamp(material_occlusion_strength, 0.0, 1.0),
+    );
     // The normal (RG) and metallic-roughness (B=metallic, A=roughness) share
     // the surface layer, so each projection sample supplies both.
     let metallic_roughness_sample = vec4<f32>(0.0, surface_sample.a, surface_sample.b, 1.0);
@@ -754,10 +934,17 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let normal_dot_half = max(dot(mapped_normal, half_direction), 0.0);
     let view_dot_half = max(dot(view_direction, half_direction), 0.0);
 
-    let base_reflectance = mix(vec3<f32>(0.04), base_color.rgb, metallic);
+    let dielectric_reflectance = clamp(slot_reflectance, 0.0, 1.0);
+    let base_reflectance = mix(
+        vec3<f32>(0.16 * dielectric_reflectance * dielectric_reflectance),
+        base_color.rgb,
+        metallic,
+    );
     let fresnel = fresnel_schlick(view_dot_half, base_reflectance);
-    let normal_distribution = distribution_ggx(normal_dot_half, roughness);
-    let geometry = geometry_smith(normal_dot_view, normal_dot_light, roughness);
+    let alpha = alpha_roughness(roughness);
+    let f_ab = environment_brdf_f_ab(roughness, normal_dot_view);
+    let normal_distribution = distribution_ggx(normal_dot_half, alpha);
+    let visibility = geometry_smith(normal_dot_view, normal_dot_light, alpha);
     let view_depth = max(
         dot(vertex.world_position - camera.camera_position.xyz, camera.camera_forward.xyz),
         0.0,
@@ -769,17 +956,19 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             break;
         }
     }
-    // Scale the normal offset to the selected cascade's texel footprint. It is
-    // zero on light-facing planes and capped at two texels at grazing angles.
+    // Preserve the normal-bias depth correction without shifting the receiver's
+    // shadow-map UV by moving it along the light ray.
     let normal_slope = sqrt(max(1.0 - geometric_normal_dot_light * geometric_normal_dot_light, 0.0))
         / max(geometric_normal_dot_light, 0.2);
     let normal_bias = shadow_texel_size(cascade) * min(normal_slope, 2.0);
-    let biased_world = vertex.world_position + world_normal * normal_bias;
+    let biased_world =
+        vertex.world_position + light_direction * (normal_bias * geometric_normal_dot_light);
     let light_view_projection = camera.light_view_projections[cascade];
     let biased_shadow_position = light_view_projection * vec4<f32>(biased_world, 1.0);
     var shadow_visibility = 1.0;
     if camera.lighting_params.y > 0.5 {
-        let cascade_visibility = sample_shadow(biased_shadow_position, cascade);
+        let filter_scale = 1.0 + 0.25 * min(normal_slope, 2.0);
+        let cascade_visibility = sample_shadow(biased_shadow_position, cascade, filter_scale);
         shadow_visibility = cascade_visibility;
         if view_depth > shadow_cascade_split(SHADOW_CASCADE_COUNT - 1u) {
             shadow_visibility = 1.0;
@@ -794,17 +983,31 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
                 let next_cascade = cascade + 1u;
                 let next_normal_bias = shadow_texel_size(next_cascade) * min(normal_slope, 2.0);
                 let next_light_view_projection = camera.light_view_projections[next_cascade];
-                let next_biased_shadow_position = next_light_view_projection
-                    * vec4<f32>(vertex.world_position + world_normal * next_normal_bias, 1.0);
-                let next_visibility = sample_shadow(next_biased_shadow_position, next_cascade);
+                let next_biased_world = vertex.world_position
+                    + light_direction * (next_normal_bias * geometric_normal_dot_light);
+                let next_biased_shadow_position =
+                    next_light_view_projection * vec4<f32>(next_biased_world, 1.0);
+                let next_visibility =
+                    sample_shadow(
+                        next_biased_shadow_position,
+                        next_cascade,
+                        filter_scale,
+                    );
                 let blend_amount = smoothstep(blend_start, split, view_depth);
                 shadow_visibility = mix(cascade_visibility, next_visibility, blend_amount);
             }
         }
     }
-    let specular = normal_distribution * geometry * fresnel
-        / max(4.0 * normal_dot_view * normal_dot_light, 0.0001);
-    let diffuse = (vec3<f32>(1.0) - fresnel) * (1.0 - metallic) / 3.14159265;
+    let specular = specular_multiscatter(
+        normal_distribution,
+        visibility,
+        fresnel,
+        base_reflectance,
+        f_ab,
+    );
+    let diffuse = clamp(vec3<f32>(1.0) - fresnel, vec3<f32>(0.0), vec3<f32>(1.0))
+        * (1.0 - metallic)
+        * diffuse_burley(roughness, normal_dot_view, normal_dot_light, view_dot_half);
     let direct = (diffuse * base_color.rgb + specular)
         * camera.light_color.rgb
         * normal_dot_light
@@ -840,15 +1043,19 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     ).rgb;
     let diffuse_ibl = irradiance * base_color.rgb * (1.0 - metallic) * environment_diffuse_scale;
     let specular_ibl = prefiltered
-        * environment_brdf_approx(base_reflectance, roughness, normal_dot_view);
+        * environment_brdf_approx(base_reflectance, f_ab);
     let environment_day_factor = 0.08 + camera.lighting_params.x * 0.92;
     let image_based = (diffuse_ibl + specular_ibl * environment_specular_scale)
         * environment_day_factor
-        * has_environment;
+        * has_environment
+        * ambient_occlusion;
     let outdoor_ambient = camera.outdoor_ambient_color.rgb * camera.lighting_params.x;
-    let ambient = base_color.rgb * (camera.ambient_color.rgb + outdoor_ambient) * (1.0 - metallic);
-    let top_shift = max(mapped_normal.y, 0.0) * camera.color_shift_top.rgb;
-    let bottom_shift = max(-mapped_normal.y, 0.0) * camera.color_shift_bottom.rgb;
+    let ambient = base_color.rgb * (camera.ambient_color.rgb + outdoor_ambient)
+        * (1.0 - metallic)
+        * ambient_occlusion;
+    let top_shift = max(mapped_normal.y, 0.0) * camera.color_shift_top.rgb * ambient_occlusion;
+    let bottom_shift = max(-mapped_normal.y, 0.0) * camera.color_shift_bottom.rgb
+        * ambient_occlusion;
     var local_direct = vec3<f32>(0.0);
     for (var light_index = 0u; light_index < local_lights.params.x; light_index += 1u) {
         local_direct += evaluate_local_light(

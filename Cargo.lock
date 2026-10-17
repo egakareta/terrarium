@@ -4474,6 +4474,7 @@ dependencies = [
  "approx",
  "bevy_ecs",
  "getrandom 0.4.3",
+ "image",
  "js-sys",
  "paste",
  "pollster 1.0.1",

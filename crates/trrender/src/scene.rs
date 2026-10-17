@@ -109,7 +109,7 @@ impl Renderer {
         let lighting = scene.lighting;
         let light_direction = lighting.sun_direction();
         let (light_vps, shadow_cascade_splits, shadow_texel_sizes) =
-            light_view_projections(camera, light_direction, self.shadow_map_size);
+            scene_light_view_projections(scene, light_direction, self.shadow_map_size);
         let daylight = lighting.daylight_factor();
         let direct_scale = lighting.render_direct_scale();
         let exposure = lighting.render_exposure();

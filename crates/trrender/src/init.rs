@@ -433,6 +433,7 @@ impl Renderer {
             normal: [GpuTextureHandle(1); MATERIAL_SLOT_COUNT],
             metallic_roughness: [GpuTextureHandle(2); MATERIAL_SLOT_COUNT],
             emissive: [GpuTextureHandle(3); MATERIAL_SLOT_COUNT],
+            occlusion: [GpuTextureHandle(0); MATERIAL_SLOT_COUNT],
         };
         let shader = shaders.mesh;
         let shader_constants = [(
@@ -544,7 +545,7 @@ impl Renderer {
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState {
                     constant: 1,
-                    slope_scale: 1.0,
+                    slope_scale: 4.0,
                     clamp: 0.0,
                 },
             }),

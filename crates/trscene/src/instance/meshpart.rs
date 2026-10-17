@@ -757,6 +757,27 @@ fn import_material(
             material = material.with_filter(import_filter(info.texture().sampler()));
         }
     }
+    if let Some(info) = source
+        .occlusion_texture()
+        .filter(|info| info.tex_coord() == 0)
+    {
+        material = material
+            .with_occlusion_texture(import_texture(
+                info.texture().source().index(),
+                TextureColorSpace::Linear,
+                images,
+                workspace,
+                texture_cache,
+            )?)
+            .with_occlusion_strength(info.strength());
+        if pbr.base_color_texture().is_none()
+            && source.normal_texture().is_none()
+            && pbr.metallic_roughness_texture().is_none()
+            && source.emissive_texture().is_none()
+        {
+            material = material.with_filter(import_filter(info.texture().sampler()));
+        }
+    }
     Ok(material)
 }
 

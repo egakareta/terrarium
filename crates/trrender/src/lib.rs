@@ -322,6 +322,7 @@ struct MaterialTextures {
     normal: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
     metallic_roughness: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
     emissive: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
+    occlusion: [GpuTextureHandle; MATERIAL_SLOT_COUNT],
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -334,7 +335,7 @@ struct PackedTextureHandle(usize);
 
 /// Packed `vec4` count for one deduplicated per-face PBR factor set: six
 /// directional slots times three `vec4`s per slot (base color, emissive RGB +
-/// roughness, metallic + projection mode).
+/// roughness, metallic, projection mode, occlusion strength, and reflectance).
 const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 3;
 
 /// Width of the material-factor data texture: one texel per packed `vec4`,
@@ -347,13 +348,14 @@ const MATERIAL_FACTOR_TEXTURE_WIDTH: u32 = MATERIAL_VEC4S_PER_SET as u32;
 const MATERIAL_FACTOR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 
 /// Hashable per-face PBR factors for one part: bit patterns of base color
-/// RGBA, metallic, roughness, emissive RGB, and projection mode for each
-/// directional slot, with unset slots resolved to the default material.
+/// RGBA, metallic, roughness, emissive RGB, projection mode, occlusion strength,
+/// and reflectance for each directional slot, with unset slots resolved to the
+/// default material.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct MaterialSetKey([[u32; 10]; MATERIAL_SLOT_COUNT]);
+struct MaterialSetKey([[u32; 12]; MATERIAL_SLOT_COUNT]);
 
 impl MaterialSetKey {
-    fn base_bits(material: &Material) -> [u32; 10] {
+    fn base_bits(material: &Material) -> [u32; 12] {
         let base_color = material.base_color();
         let emissive = material.emissive();
         [
@@ -371,12 +373,14 @@ impl MaterialSetKey {
             } else {
                 0.0f32.to_bits()
             },
+            material.occlusion_strength().to_bits(),
+            material.reflectance().to_bits(),
         ]
     }
 
     /// A uniform set where every face uses the default material: the common
     /// case for parts without slot overrides.
-    fn uniform(material: [u32; 10]) -> Self {
+    fn uniform(material: [u32; 12]) -> Self {
         Self([material; MATERIAL_SLOT_COUNT])
     }
 
@@ -384,7 +388,7 @@ impl MaterialSetKey {
         if material_slots.slots.is_empty() {
             return Self::uniform(Self::base_bits(&DEFAULT_MATERIAL));
         }
-        let mut slots = [[0u32; 10]; MATERIAL_SLOT_COUNT];
+        let mut slots = [[0u32; 12]; MATERIAL_SLOT_COUNT];
         for (index, slot) in Face::ALL.into_iter().enumerate() {
             let material = material_slots.get(slot).unwrap_or(&DEFAULT_MATERIAL);
             slots[index] = Self::base_bits(material);
@@ -394,7 +398,7 @@ impl MaterialSetKey {
 
     /// Expands the key back into the GPU `vec4` sequence consumed by
     /// `shader.wgsl`: per slot, base color, then emissive RGB + roughness,
-    /// then metallic and projection mode.
+    /// then metallic, projection mode, occlusion strength, and reflectance.
     fn vec4s(&self) -> [[f32; 4]; MATERIAL_VEC4S_PER_SET] {
         let mut vec4s = [[0.0; 4]; MATERIAL_VEC4S_PER_SET];
         for (index, bits) in self.0.iter().enumerate() {
@@ -410,7 +414,12 @@ impl MaterialSetKey {
                 f32::from_bits(bits[8]),
                 f32::from_bits(bits[5]),
             ];
-            vec4s[index * 3 + 2] = [f32::from_bits(bits[4]), f32::from_bits(bits[9]), 0.0, 0.0];
+            vec4s[index * 3 + 2] = [
+                f32::from_bits(bits[4]),
+                f32::from_bits(bits[9]),
+                f32::from_bits(bits[10]),
+                f32::from_bits(bits[11]),
+            ];
         }
         vec4s
     }
@@ -568,9 +577,9 @@ pub struct Renderer {
     material_factors_dirty: bool,
     /// Hot cache for consecutive parts sharing one material set.
     material_factor_last: Option<(MaterialSetKey, u32)>,
-    /// Hot cache for the override-free case, comparing only the 10
+    /// Hot cache for the override-free case, comparing only the 12
     /// base-material words instead of the full material-set key.
-    material_factor_last_uniform: Option<([u32; 10], u32)>,
+    material_factor_last_uniform: Option<([u32; 12], u32)>,
     textures: Vec<GpuTexture>,
     workspace_texture_handles: HashMap<(u64, TextureHandle), (GpuTextureHandle, u64)>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,

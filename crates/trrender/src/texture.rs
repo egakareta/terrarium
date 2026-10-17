@@ -24,6 +24,7 @@ impl Renderer {
             normal: [normal; MATERIAL_SLOT_COUNT],
             metallic_roughness: [metallic_roughness; MATERIAL_SLOT_COUNT],
             emissive: [emissive; MATERIAL_SLOT_COUNT],
+            occlusion: [base_color; MATERIAL_SLOT_COUNT],
         };
         for (index, material) in material_slots
             .slots
@@ -67,6 +68,7 @@ impl Renderer {
                 material_maps.emissive,
                 builtin.map_or(emissive, |maps| maps.emissive[slot]),
             )?;
+            textures.occlusion[slot] = resolve(self, material.occlusion_texture(), base_color)?;
         }
         Ok(textures)
     }
@@ -98,6 +100,7 @@ impl Renderer {
             normal: [normal; MATERIAL_SLOT_COUNT],
             metallic_roughness: [metallic_roughness; MATERIAL_SLOT_COUNT],
             emissive: [emissive; MATERIAL_SLOT_COUNT],
+            occlusion: [self.default_material_textures.base_color[0]; MATERIAL_SLOT_COUNT],
         };
         self.builtin_material_textures.insert(builtin, textures);
         Ok(textures)
@@ -325,6 +328,7 @@ impl Renderer {
                     || textures.normal.contains(&changed)
                     || textures.metallic_roughness.contains(&changed)
                     || textures.emissive.contains(&changed)
+                    || textures.occlusion.contains(&changed)
             })
             .copied()
             .collect();
@@ -350,8 +354,9 @@ impl Renderer {
                 let emissive_texture = Texture::new(
                     base_texture.width,
                     base_texture.height,
-                    resize_texture_pixels(
+                    pack_emissive_pixels(
                         &self.textures[textures.emissive[slot].0].source,
+                        &self.textures[textures.occlusion[slot].0].source,
                         base_texture.width,
                         base_texture.height,
                     ),
@@ -492,6 +497,7 @@ impl Renderer {
                 textures.normal[slot],
                 textures.metallic_roughness[slot],
                 textures.emissive[slot],
+                textures.occlusion[slot],
             );
             if let Some(&packed) = packed_slots.get(&slot_textures) {
                 *packed_texture = packed;
@@ -511,8 +517,9 @@ impl Renderer {
             let emissive_texture = Texture::new(
                 base_texture.width,
                 base_texture.height,
-                resize_texture_pixels(
+                pack_emissive_pixels(
                     &self.textures[textures.emissive[slot].0].source,
+                    &self.textures[textures.occlusion[slot].0].source,
                     base_texture.width,
                     base_texture.height,
                 ),

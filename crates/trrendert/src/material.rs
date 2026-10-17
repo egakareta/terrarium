@@ -44,6 +44,10 @@ pub struct Material {
     base_color: [f32; 4],
     metallic: f32,
     roughness: f32,
+    occlusion_strength: f32,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
+    occlusion_texture: Option<TextureHandle>,
+    reflectance: f32,
     emissive: [f32; 3],
     #[cfg_attr(feature = "devtools", inspect(readonly))]
     textures: TextureSet,
@@ -65,6 +69,9 @@ pub const DEFAULT_MATERIAL: Material = Material {
     base_color: [1.0, 1.0, 1.0, 1.0],
     metallic: 0.0,
     roughness: 0.5,
+    occlusion_strength: 1.0,
+    occlusion_texture: None,
+    reflectance: 0.5,
     emissive: [0.0, 0.0, 0.0],
     textures: TextureSet {
         base_color: None,
@@ -118,6 +125,7 @@ impl Material {
             || self.textures.normal.is_some()
             || self.textures.metallic_roughness.is_some()
             || self.textures.emissive.is_some()
+            || self.occlusion_texture.is_some()
     }
 
     /// RGBA multiplier for the base color. Values are not clamped on assignment.
@@ -133,6 +141,23 @@ impl Material {
     /// Roughness factor, clamped to `0.04..=1.0` during rendering.
     pub fn roughness(&self) -> f32 {
         self.roughness
+    }
+
+    /// Ambient visibility multiplier, clamped to `0.0..=1.0` during rendering.
+    pub fn occlusion_strength(&self) -> f32 {
+        self.occlusion_strength
+    }
+
+    /// Returns the optional linear ambient-occlusion map.
+    pub fn occlusion_texture(&self) -> Option<TextureHandle> {
+        self.occlusion_texture
+    }
+
+    /// Dielectric reflectance, clamped to `0.0..=1.0` during rendering.
+    ///
+    /// A value of `0.5` produces 4% reflectance at normal incidence.
+    pub fn reflectance(&self) -> f32 {
+        self.reflectance
     }
 
     /// RGB emissive contribution added after direct and ambient lighting.
@@ -173,6 +198,18 @@ impl Material {
         self
     }
 
+    /// Sets the ambient visibility multiplier, clamped to `0.0..=1.0` during rendering.
+    pub fn with_occlusion_strength(mut self, strength: f32) -> Self {
+        self.occlusion_strength = strength;
+        self
+    }
+
+    /// Sets dielectric reflectance, clamped to `0.0..=1.0` during rendering.
+    pub fn with_reflectance(mut self, reflectance: f32) -> Self {
+        self.reflectance = reflectance;
+        self
+    }
+
     /// Sets the RGB emissive contribution added after direct and ambient lighting.
     pub fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
         self.emissive = emissive;
@@ -185,6 +222,7 @@ impl Material {
     /// to override one map while retaining the other built-in maps.
     pub fn with_textures(mut self, textures: TextureSet) -> Self {
         self.textures = textures;
+        self.occlusion_texture = None;
         self.clear_builtin_source();
         self
     }
@@ -223,6 +261,12 @@ impl Material {
     /// Returns a copy of this material with an emissive map assigned.
     pub fn with_emissive_texture(mut self, texture: TextureHandle) -> Self {
         self.textures.emissive = Some(texture);
+        self
+    }
+
+    /// Returns a copy of this material with a linear ambient-occlusion map assigned.
+    pub fn with_occlusion_texture(mut self, texture: TextureHandle) -> Self {
+        self.occlusion_texture = Some(texture);
         self
     }
 
@@ -1008,11 +1052,14 @@ mod tests {
         assert_eq!(material.base_color(), [1.0, 1.0, 1.0, 1.0]);
         assert_eq!(material.metallic(), 0.0);
         assert_eq!(material.roughness(), 0.5);
+        assert_eq!(material.occlusion_strength(), 1.0);
+        assert_eq!(material.reflectance(), 0.5);
         assert_eq!(material.projection(), TextureProjection::Uv);
         assert!(material.textures().base_color.is_none());
         assert!(material.textures().normal.is_none());
         assert!(material.textures().metallic_roughness.is_none());
         assert!(material.textures().emissive.is_none());
+        assert!(material.occlusion_texture().is_none());
     }
 
     #[test]
@@ -1027,14 +1074,20 @@ mod tests {
             .with_base_color([0.1, 0.2, 0.3, 0.4])
             .with_metallic(0.6)
             .with_roughness(0.7)
+            .with_occlusion_strength(0.3)
+            .with_reflectance(0.75)
             .with_emissive([0.8, 0.9, 1.0])
             .with_textures(textures)
+            .with_occlusion_texture(TextureHandle(5))
             .with_filter(TextureFilter::Nearest)
             .with_projection(TextureProjection::Triplanar);
 
         assert_eq!(material.base_color(), [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(material.metallic(), 0.6);
         assert_eq!(material.roughness(), 0.7);
+        assert_eq!(material.occlusion_strength(), 0.3);
+        assert_eq!(material.occlusion_texture(), Some(TextureHandle(5)));
+        assert_eq!(material.reflectance(), 0.75);
         assert_eq!(material.emissive(), [0.8, 0.9, 1.0]);
         assert_eq!(material.textures(), textures);
         assert_eq!(material.filter(), TextureFilter::Nearest);
@@ -1047,7 +1100,8 @@ mod tests {
         let material = Material::textured(texture)
             .with_normal_texture(TextureHandle(8))
             .with_metallic_roughness_texture(TextureHandle(9))
-            .with_emissive_texture(TextureHandle(10));
+            .with_emissive_texture(TextureHandle(10))
+            .with_occlusion_texture(TextureHandle(11));
 
         assert_eq!(
             material.textures(),
@@ -1058,6 +1112,7 @@ mod tests {
                 emissive: Some(TextureHandle(10)),
             }
         );
+        assert_eq!(material.occlusion_texture(), Some(TextureHandle(11)));
     }
 
     #[test]
