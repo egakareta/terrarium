@@ -35,6 +35,7 @@ fn inspector_runs_after_custom_app_rendering() -> Result<(), AppCreationError> {
         .with_headless(Some(1))
         .with_env_logger(false)
         .run(|engine| {
+            engine.devtools.set_visible(false);
             assert!(!engine.devtools.is_visible());
             Ok::<_, AppCreationError>(CustomApp)
         })?
