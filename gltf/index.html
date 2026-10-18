@@ -6,8 +6,8 @@
     <title>this is terrarium</title>
     
 <script type="module">
-import init, * as bindings from '/terrarium/gltf/terrarium-3e25b3f4a057ff61.js';
-const wasm = await init({ module_or_path: '/terrarium/gltf/terrarium-3e25b3f4a057ff61_bg.wasm' });
+import init, * as bindings from '/terrarium/gltf/terrarium-cfab1a3dbcccaed7.js';
+const wasm = await init({ module_or_path: '/terrarium/gltf/terrarium-cfab1a3dbcccaed7_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/gltf/terrarium-3e25b3f4a057ff61.js" crossorigin="anonymous" integrity="sha384-ljQQM6+cZaOnTFazSfLF6nDyAkUgunUfWb9lyLp7n6lMrplIHLiNy630OH4hyhMt"><link rel="modulepreload" href="/terrarium/gltf/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/gltf/terrarium-3e25b3f4a057ff61_bg.wasm" crossorigin="anonymous" integrity="sha384-c017xQKP5Y/NzPiWpsUA1AuxWKZTFOOXmyYyxBIVaAn7YrHRlZFPHnk8WL86FOqs" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/gltf/terrarium-cfab1a3dbcccaed7.js" crossorigin="anonymous" integrity="sha384-XB6auaBbD+EXosvKHBnz21ZyFRYkEx28cvFsKBe+5iBLPQ288QMXZmCxYEF7eivP"><link rel="modulepreload" href="/terrarium/gltf/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/gltf/terrarium-cfab1a3dbcccaed7_bg.wasm" crossorigin="anonymous" integrity="sha384-GEBqiDrBaAqOXtgOjUTL0OUuyUjg+SIFxYTpCr7LNXC/6Chj/C8ZPiS4+T9d6sTX" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
