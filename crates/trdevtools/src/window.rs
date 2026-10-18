@@ -388,10 +388,7 @@ impl DevtoolsTabViewer<'_> {
                             if ui
                                 .add_enabled(
                                     can_delete,
-                                    egui::Button::new(format!(
-                                        "{} Delete selection",
-                                        regular::TRASH
-                                    )),
+                                    egui::Button::new(format!("{} Delete", regular::TRASH)),
                                 )
                                 .clicked()
                             {
