@@ -178,11 +178,7 @@ impl Devtools {
     /// [`Self::show_docked`] also calls this for standalone integrations.
     pub fn focus_scene_on_camera_input(&mut self, context: &egui::Context, workspace: &Workspace) {
         if context.text_edit_focused()
-            || !context.input(|input| {
-                workspace
-                    .camera_controller()
-                    .has_eframe_movement_input(input)
-            })
+            || !context.input(|input| workspace.has_eframe_movement_input(input))
         {
             return;
         }

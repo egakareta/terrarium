@@ -1,7 +1,7 @@
 use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
 use trscene::{
     BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance,
-    InstanceId, Part, PartShape, PointLight, Workspace,
+    InstanceId, Part, PartShape, PlayerController, PointLight, Rig, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
     winit::keyboard::KeyCode,
@@ -73,9 +73,7 @@ fn frame(
         },
         |ui| {
             devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
-            host.workspace
-                .camera_controller_mut()
-                .process_eframe_context(ui.ctx());
+            host.workspace.process_eframe_context(ui.ctx());
             host.workspace.update(0.1);
             devtools.show_docked(ui, host);
         },
@@ -223,30 +221,48 @@ fn camera_movement_resumes_after_focusing_the_explorer() {
 }
 
 #[test]
-fn camera_focus_uses_custom_movement_bindings() {
-    let mut devtools = Devtools::default();
-    devtools.set_visible(true);
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
-    host.workspace.camera_controller_mut().key_bindings.forward = vec![KeyCode::ArrowUp];
-    let context = egui::Context::default();
-    frame(&context, &mut devtools, &mut host, Vec::new());
-    frame(&context, &mut devtools, &mut host, Vec::new());
-    click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
-    assert!(context.egui_wants_keyboard_input());
-    let initial_position = host.workspace.current_camera.position();
+fn controller_focus_uses_custom_movement_bindings() {
+    for player_controlled in [false, true] {
+        let mut devtools = Devtools::default();
+        devtools.set_visible(true);
+        let mut host = TestDevtoolsHost {
+            workspace: Workspace::new(),
+        };
+        let rig = if player_controlled {
+            host.workspace.camera_controller_mut().set_enabled(false);
+            let rig = host.workspace.add_child(Rig::new());
+            let mut player = PlayerController::new(rig);
+            player.key_bindings.forward = vec![KeyCode::ArrowUp];
+            host.workspace.controllers.add(player);
+            Some(rig)
+        } else {
+            host.workspace.camera_controller_mut().key_bindings.forward = vec![KeyCode::ArrowUp];
+            None
+        };
+        let position = |host: &TestDevtoolsHost| {
+            rig.map_or_else(
+                || host.workspace.current_camera.position(),
+                |id| host.workspace.get::<Rig>(id).unwrap().position(),
+            )
+        };
+        let context = egui::Context::default();
+        frame(&context, &mut devtools, &mut host, Vec::new());
+        frame(&context, &mut devtools, &mut host, Vec::new());
+        click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
+        assert!(context.egui_wants_keyboard_input());
+        let initial_position = position(&host);
 
-    frame(&context, &mut devtools, &mut host, vec![key(Key::W, false)]);
-    assert!(context.egui_wants_keyboard_input());
-    assert_eq!(host.workspace.current_camera.position(), initial_position);
-    frame(
-        &context,
-        &mut devtools,
-        &mut host,
-        vec![release(Key::W), key(Key::ArrowUp, false)],
-    );
-    assert!(host.workspace.current_camera.position().z < initial_position.z);
+        frame(&context, &mut devtools, &mut host, vec![key(Key::W, false)]);
+        assert!(context.egui_wants_keyboard_input());
+        assert_eq!(position(&host), initial_position);
+        frame(
+            &context,
+            &mut devtools,
+            &mut host,
+            vec![release(Key::W), key(Key::ArrowUp, false)],
+        );
+        assert!(position(&host).z < initial_position.z);
+    }
 }
 
 #[test]

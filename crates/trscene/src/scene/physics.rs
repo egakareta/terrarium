@@ -27,6 +27,12 @@ pub struct PhysicsWorld {
     body_instances: HashMap<InstanceId, InstanceId>,
     collider_instances: HashMap<ColliderHandle, InstanceId>,
     last_transforms: HashMap<InstanceId, Mat4>,
+    player_motions: HashMap<InstanceId, PlayerMotion>,
+}
+
+struct PlayerMotion {
+    velocity: Vec3,
+    rotation: Option<Quat>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -71,6 +77,7 @@ impl PhysicsWorld {
             body_instances: HashMap::new(),
             collider_instances: HashMap::new(),
             last_transforms: HashMap::new(),
+            player_motions: HashMap::new(),
         }
     }
 
@@ -124,6 +131,16 @@ impl PhysicsWorld {
         self.world.bodies.get_mut(handle)
     }
 
+    pub(crate) fn queue_player_motion(
+        &mut self,
+        rig: InstanceId,
+        velocity: Vec3,
+        rotation: Option<Quat>,
+    ) {
+        self.player_motions
+            .insert(rig, PlayerMotion { velocity, rotation });
+    }
+
     pub(crate) fn get_part_bounds_in_box(&self, query: &BoxOverlapQuery) -> Vec<InstanceId> {
         if !query
             .transform
@@ -166,6 +183,37 @@ impl PhysicsWorld {
         delta_seconds: f32,
     ) -> Vec<(InstanceId, Mat4)> {
         self.sync_instances(instances);
+
+        // Apply controls after synchronization, which may create bodies or reset teleported ones.
+        for (id, motion) in self.player_motions.drain() {
+            let Some(entry) = self.bodies.get(&id) else {
+                continue;
+            };
+            let Some(body) = self.world.bodies.get_mut(entry.handle) else {
+                continue;
+            };
+            if !body.is_dynamic() {
+                continue;
+            }
+            body.lock_rotations(true, false);
+            body.enable_ccd(true);
+            if let Some(rotation) = motion.rotation {
+                body.set_rotation(
+                    rapier3d::math::Rotation::from_scaled_axis(rapier_vector(
+                        rotation.to_scaled_axis(),
+                    )),
+                    true,
+                );
+            }
+            body.set_linvel(
+                rapier_vector(Vec3::new(
+                    motion.velocity.x,
+                    body.linvel().y,
+                    motion.velocity.z,
+                )),
+                true,
+            );
+        }
 
         if delta_seconds.is_finite() && delta_seconds > 0.0 {
             self.world.integration_parameters.dt = delta_seconds.min(0.1);

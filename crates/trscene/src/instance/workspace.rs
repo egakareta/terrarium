@@ -5,9 +5,9 @@ use crate::scene::audio::AudioRuntime;
 #[cfg(feature = "default-materials")]
 use crate::{BuiltinMaterial, Material};
 use crate::{
-    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
-    InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Rig, Texture, TextureError,
-    TextureHandle, TweenManager, glam::*,
+    Camera, CameraController, Color3, Controllers, HasBasePart, HasPVInstance, Instance,
+    InstanceData, InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Rig, Texture,
+    TextureError, TextureHandle, TweenManager, glam::*,
 };
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
@@ -70,6 +70,9 @@ pub struct Workspace {
     pub current_camera: Camera,
     #[cfg_attr(feature = "devtools", inspect(skip))]
     camera_controller: CameraController,
+    /// Additional controllers, updated in registration order before physics and the camera.
+    #[cfg_attr(feature = "devtools", inspect(skip))]
+    pub controllers: Controllers,
     #[cfg_attr(feature = "devtools", inspect(skip))]
     tween_manager: TweenManager,
     #[cfg(feature = "physics")]
@@ -118,6 +121,7 @@ impl Workspace {
             instance,
             current_camera: Camera::default(),
             camera_controller: CameraController::default(),
+            controllers: Controllers::default(),
             tween_manager: TweenManager::default(),
             #[cfg(feature = "physics")]
             physics: PhysicsWorld::default(),
@@ -302,10 +306,10 @@ impl Workspace {
         Some(unsafe { instance.as_mut() })
     }
 
-    /// Applies the controller's accumulated input to the active camera.
+    /// Applies pending input to the active camera.
     ///
-    /// When the camera has a spatial subject, it orbits and follows that
-    /// instance. A missing or non-spatial subject uses free-moving controls.
+    /// A spatial subject is followed at the configured offset and orbit distance.
+    /// Without a valid subject, input moves the camera freely.
     pub fn update_camera(&mut self, delta: f32) {
         let subject = self.current_camera.subject().and_then(|id| {
             self.instance(id)
@@ -320,6 +324,7 @@ impl Workspace {
     pub fn update(&mut self, delta_seconds: f32) {
         self.update_tweens(delta_seconds);
         self.update_animations(delta_seconds);
+        self.update_controllers(delta_seconds);
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
         self.update_camera(delta_seconds);
@@ -399,6 +404,52 @@ impl Workspace {
     pub fn camera_controller_mut(&mut self) -> &mut CameraController {
         &mut self.camera_controller
     }
+
+    /// Feeds the current egui frame to the camera and registered controllers.
+    ///
+    /// Call once per frame before [`Self::update`]. Each controller receives the
+    /// same input and applies its own enabled-device and UI-capture settings.
+    pub fn process_eframe_context(&mut self, context: &crate::egui::Context) {
+        self.camera_controller.process_eframe_context(context);
+        self.controllers.process_eframe_context(context);
+    }
+
+    /// Sends a winit window event to the camera and registered controllers.
+    ///
+    /// Returns `true` if at least one controller reports using the event.
+    pub fn process_window_event(&mut self, event: &crate::winit::event::WindowEvent) -> bool {
+        let camera_used = self.camera_controller.process_window_event(event);
+        self.controllers.process_window_event(event) || camera_used
+    }
+
+    /// Sends an unfiltered device event to the camera and registered controllers.
+    pub fn process_device_event(&mut self, event: &crate::winit::event::DeviceEvent) {
+        self.camera_controller.process_device_event(event);
+        self.controllers.process_device_event(event);
+    }
+
+    /// Reports whether a bound movement key is down for any input-capable controller.
+    ///
+    /// The result ignores egui keyboard capture, allowing integrations to move
+    /// focus to the scene before processing the same key event.
+    pub fn has_eframe_movement_input(&self, input: &crate::egui::InputState) -> bool {
+        self.camera_controller.has_eframe_movement_input(input)
+            || self.controllers.iter().any(|(_, controller)| {
+                controller
+                    .input()
+                    .is_some_and(|controls| controls.has_eframe_movement_input(input))
+            })
+    }
+
+    /// Runs registered controllers without advancing physics or the camera.
+    ///
+    /// Controllers run in registration order. The frame delta is clamped to
+    /// `0..=0.1` seconds. Controllers added during this call begin on the next
+    /// call; removed controllers are skipped. The active controller cannot be
+    /// retrieved by handle until its update returns.
+    pub fn update_controllers(&mut self, delta_seconds: f32) {
+        Controllers::update(self, crate::controller::frame_delta(delta_seconds));
+    }
 }
 
 impl Clone for Workspace {
@@ -419,6 +470,7 @@ impl Clone for Workspace {
             instance,
             current_camera,
             camera_controller: self.camera_controller.clone(),
+            controllers: self.controllers.clone(),
             tween_manager: self.tween_manager.clone(),
             #[cfg(feature = "physics")]
             physics: self.physics.clone_configuration(),
@@ -437,6 +489,9 @@ impl Clone for Workspace {
         for child in workspace.instance.children_mut() {
             child.set_instance_lookup(Some(lookup.clone()));
         }
+        workspace.controllers.remap_instances(&|id| {
+            cloned_instance_id(self.instance.children(), workspace.instance.children(), id)
+        });
         workspace
     }
 }

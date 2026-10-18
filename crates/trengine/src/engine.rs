@@ -285,7 +285,7 @@ impl Engine {
         self.renderer.borrow_mut()
     }
 
-    /// Processes camera input, advances the workspace, and requests the next frame.
+    /// Processes controller input, advances the workspace, and requests the next frame.
     pub fn update(&mut self, context: &egui::Context) {
         #[cfg(feature = "devtools")]
         self.devtools
@@ -459,9 +459,7 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     } else {
         0.0
     };
-    workspace
-        .camera_controller_mut()
-        .process_eframe_context(context);
+    workspace.process_eframe_context(context);
     delta
 }
 
