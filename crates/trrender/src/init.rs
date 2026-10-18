@@ -594,10 +594,10 @@ impl Renderer {
                 bind_group_layouts: &[Some(&camera_bind_group_layout)],
                 immediate_size: 0,
             });
-        let mask_depth_stencil = || wgpu::DepthStencilState {
+        let mask_depth_stencil = |depth_compare| wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(depth_compare),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         };
@@ -612,105 +612,101 @@ impl Renderer {
             blend: Some(wgpu::BlendState::REPLACE),
             write_mask: wgpu::ColorWrites::GREEN,
         })];
-        let toon_mask_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("toon outline mask pipeline"),
-            layout: Some(&outline_mask_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &outline_shader,
-                entry_point: Some("vs_mask"),
-                compilation_options: Default::default(),
-                buffers: &mask_vertex_buffers,
-            },
-            primitive: wgpu::PrimitiveState {
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            depth_stencil: Some(mask_depth_stencil()),
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &outline_shader,
-                entry_point: Some("fs_mask"),
-                compilation_options: Default::default(),
-                targets: &toon_mask_targets,
-            }),
-            multiview_mask: None,
-            cache: pipeline_cache.as_ref(),
-        });
-        let silhouette_mask_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("silhouette outline mask pipeline"),
-                layout: Some(&outline_mask_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &outline_shader,
-                    entry_point: Some("vs_mask"),
-                    compilation_options: Default::default(),
-                    buffers: &mask_vertex_buffers,
-                },
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: Some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: Some(mask_depth_stencil()),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &outline_shader,
-                    entry_point: Some("fs_mask"),
-                    compilation_options: Default::default(),
-                    targets: &silhouette_mask_targets,
-                }),
-                multiview_mask: None,
-                cache: pipeline_cache.as_ref(),
-            });
-        let stencil_mask_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("stencil outline mask pipeline"),
-                layout: Some(&outline_mask_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &outline_shader,
-                    entry_point: Some("vs_mask"),
-                    compilation_options: Default::default(),
-                    buffers: &mask_vertex_buffers,
-                },
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: Some(wgpu::Face::Back),
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: wgpu::StencilState {
-                        front: wgpu::StencilFaceState {
-                            compare: wgpu::CompareFunction::Always,
-                            fail_op: wgpu::StencilOperation::Keep,
-                            depth_fail_op: wgpu::StencilOperation::Keep,
-                            pass_op: wgpu::StencilOperation::Replace,
-                        },
-                        back: wgpu::StencilFaceState {
-                            compare: wgpu::CompareFunction::Always,
-                            fail_op: wgpu::StencilOperation::Keep,
-                            depth_fail_op: wgpu::StencilOperation::Keep,
-                            pass_op: wgpu::StencilOperation::Replace,
-                        },
-                        read_mask: 0xff,
-                        write_mask: 0xff,
+        let create_mask_pipeline =
+            |label: &'static str,
+             targets: &[Option<wgpu::ColorTargetState>],
+             depth_compare: wgpu::CompareFunction| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&outline_mask_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &outline_shader,
+                        entry_point: Some("vs_mask"),
+                        compilation_options: Default::default(),
+                        buffers: &mask_vertex_buffers,
                     },
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &outline_shader,
-                    entry_point: Some("fs_mask"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::empty(),
-                    })],
-                }),
-                multiview_mask: None,
-                cache: pipeline_cache.as_ref(),
-            });
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: Some(wgpu::Face::Back),
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(mask_depth_stencil(depth_compare)),
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &outline_shader,
+                        entry_point: Some("fs_mask"),
+                        compilation_options: Default::default(),
+                        targets,
+                    }),
+                    multiview_mask: None,
+                    cache: pipeline_cache.as_ref(),
+                })
+            };
+        let toon_mask_pipeline = create_mask_pipeline(
+            "toon outline mask pipeline",
+            &toon_mask_targets,
+            wgpu::CompareFunction::LessEqual,
+        );
+        let silhouette_mask_pipeline = create_mask_pipeline(
+            "silhouette outline mask pipeline",
+            &silhouette_mask_targets,
+            wgpu::CompareFunction::LessEqual,
+        );
+        let create_stencil_mask_pipeline =
+            |label: &'static str, depth_compare: wgpu::CompareFunction| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&outline_mask_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &outline_shader,
+                        entry_point: Some("vs_mask"),
+                        compilation_options: Default::default(),
+                        buffers: &mask_vertex_buffers,
+                    },
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: Some(wgpu::Face::Back),
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH_FORMAT,
+                        depth_write_enabled: Some(false),
+                        depth_compare: Some(depth_compare),
+                        stencil: wgpu::StencilState {
+                            front: wgpu::StencilFaceState {
+                                compare: wgpu::CompareFunction::Always,
+                                fail_op: wgpu::StencilOperation::Keep,
+                                depth_fail_op: wgpu::StencilOperation::Keep,
+                                pass_op: wgpu::StencilOperation::Replace,
+                            },
+                            back: wgpu::StencilFaceState {
+                                compare: wgpu::CompareFunction::Always,
+                                fail_op: wgpu::StencilOperation::Keep,
+                                depth_fail_op: wgpu::StencilOperation::Keep,
+                                pass_op: wgpu::StencilOperation::Replace,
+                            },
+                            read_mask: 0xff,
+                            write_mask: 0xff,
+                        },
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &outline_shader,
+                        entry_point: Some("fs_mask"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            write_mask: wgpu::ColorWrites::empty(),
+                        })],
+                    }),
+                    multiview_mask: None,
+                    cache: pipeline_cache.as_ref(),
+                })
+            };
+        let stencil_mask_pipeline = create_stencil_mask_pipeline(
+            "stencil outline mask pipeline",
+            wgpu::CompareFunction::LessEqual,
+        );
         let stencil_outline_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("stencil outline pipeline layout"),
@@ -720,56 +716,62 @@ impl Renderer {
                 ],
                 immediate_size: 0,
             });
-        let stencil_outline_pipeline =
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("stencil outline pipeline"),
-                layout: Some(&stencil_outline_pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &outline_shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[Some(mesh_vertex_layout()), Some(InstanceRaw::layout())],
-                },
-                primitive: wgpu::PrimitiveState {
-                    cull_mode: Some(wgpu::Face::Front),
-                    ..Default::default()
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
-                    stencil: wgpu::StencilState {
-                        front: wgpu::StencilFaceState {
-                            compare: wgpu::CompareFunction::NotEqual,
-                            fail_op: wgpu::StencilOperation::Keep,
-                            depth_fail_op: wgpu::StencilOperation::Keep,
-                            pass_op: wgpu::StencilOperation::Keep,
-                        },
-                        back: wgpu::StencilFaceState {
-                            compare: wgpu::CompareFunction::NotEqual,
-                            fail_op: wgpu::StencilOperation::Keep,
-                            depth_fail_op: wgpu::StencilOperation::Keep,
-                            pass_op: wgpu::StencilOperation::Keep,
-                        },
-                        read_mask: 0xff,
-                        write_mask: 0,
+        let create_stencil_outline_pipeline =
+            |label: &'static str, depth_compare: wgpu::CompareFunction| {
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some(label),
+                    layout: Some(&stencil_outline_pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: &outline_shader,
+                        entry_point: Some("vs_main"),
+                        compilation_options: Default::default(),
+                        buffers: &[Some(mesh_vertex_layout()), Some(InstanceRaw::layout())],
                     },
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &outline_shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::REPLACE),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: pipeline_cache.as_ref(),
-            });
+                    primitive: wgpu::PrimitiveState {
+                        cull_mode: Some(wgpu::Face::Front),
+                        ..Default::default()
+                    },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH_FORMAT,
+                        depth_write_enabled: Some(false),
+                        depth_compare: Some(depth_compare),
+                        stencil: wgpu::StencilState {
+                            front: wgpu::StencilFaceState {
+                                compare: wgpu::CompareFunction::NotEqual,
+                                fail_op: wgpu::StencilOperation::Keep,
+                                depth_fail_op: wgpu::StencilOperation::Keep,
+                                pass_op: wgpu::StencilOperation::Keep,
+                            },
+                            back: wgpu::StencilFaceState {
+                                compare: wgpu::CompareFunction::NotEqual,
+                                fail_op: wgpu::StencilOperation::Keep,
+                                depth_fail_op: wgpu::StencilOperation::Keep,
+                                pass_op: wgpu::StencilOperation::Keep,
+                            },
+                            read_mask: 0xff,
+                            write_mask: 0,
+                        },
+                        bias: wgpu::DepthBiasState::default(),
+                    }),
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: Some(wgpu::FragmentState {
+                        module: &outline_shader,
+                        entry_point: Some("fs_main"),
+                        compilation_options: Default::default(),
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format,
+                            blend: Some(wgpu::BlendState::REPLACE),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    multiview_mask: None,
+                    cache: pipeline_cache.as_ref(),
+                })
+            };
+        let stencil_outline_pipeline = create_stencil_outline_pipeline(
+            "stencil outline pipeline",
+            wgpu::CompareFunction::LessEqual,
+        );
         let skybox_shader = shaders.skybox;
         let skybox_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

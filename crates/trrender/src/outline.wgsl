@@ -25,6 +25,7 @@ struct VertexInput {
     @location(8) model_2: vec3<f32>,
     @location(9) model_3: vec3<f32>,
     @location(10) normal_scales: vec3<f32>,
+    @location(13) outline_always_on_top: u32,
 };
 
 struct VertexOutput {
@@ -49,8 +50,12 @@ fn vs_main(vertex: VertexInput) -> VertexOutput {
     let clip_position = camera.view_projection * world_position;
     let expansion = outline.stencil_params.x * 0.0015 * max(clip_position.w, 1.0);
     var output: VertexOutput;
-    output.position = camera.view_projection
+    var outline_position = camera.view_projection
         * vec4<f32>(world_position.xyz + world_normal * expansion, 1.0);
+    if (vertex.outline_always_on_top != 0u) {
+        outline_position.z = 0.0;
+    }
+    output.position = outline_position;
     return output;
 }
 
@@ -63,7 +68,11 @@ fn vs_mask(vertex: VertexInput) -> VertexOutput {
         vec4<f32>(vertex.model_3, 1.0),
     );
     var output: VertexOutput;
-    output.position = camera.view_projection * model * vec4<f32>(vertex.position, 1.0);
+    var mask_position = camera.view_projection * model * vec4<f32>(vertex.position, 1.0);
+    if (vertex.outline_always_on_top != 0u) {
+        mask_position.z = 0.0;
+    }
+    output.position = mask_position;
     return output;
 }
 

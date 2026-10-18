@@ -166,6 +166,7 @@ fn render_outline(workspace: &Workspace, outline: &Outline) -> Option<RenderOutl
         color: outline.color(),
         width: outline.width(),
         threshold: outline.threshold(),
+        always_on_top: outline.always_on_top(),
     })
 }
 
@@ -208,4 +209,23 @@ fn render_light_parent(
         parent_id = parent.parent();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Instance, Outline, Part, Workspace};
+
+    #[test]
+    fn render_scene_preserves_outline_always_on_top() {
+        let mut workspace = Workspace::new();
+        let part_id = workspace.add_child(Part::new());
+        workspace
+            .get_mut::<Part>(part_id)
+            .unwrap()
+            .add_child(Outline::stencil().with_always_on_top(true));
+
+        let scene = workspace.render_scene();
+
+        assert!(scene.outlines[0].always_on_top);
+    }
 }

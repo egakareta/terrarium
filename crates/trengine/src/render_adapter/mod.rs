@@ -88,6 +88,7 @@ impl RenderAdapter {
                     color: Color3::new(0.1, 0.45, 1.0),
                     width: 1.0,
                     threshold: 0.08,
+                    always_on_top: true,
                 },
             );
         }

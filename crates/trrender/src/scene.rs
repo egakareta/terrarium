@@ -11,6 +11,7 @@ fn collect_outline_targets(
             color: outline.color,
             width: outline.width,
             threshold: outline.threshold,
+            always_on_top: outline.always_on_top,
         };
         specs[mode].get_or_insert(spec);
         for &target in &outline.targets {
@@ -48,9 +49,11 @@ fn append_outline_instance(
     instance: InstanceRaw,
 ) {
     for mode in 0..3 {
-        if !targets[mode].contains_key(&id) {
+        let Some(spec) = targets[mode].get(&id) else {
             continue;
-        }
+        };
+        let mut instance = instance;
+        instance.outline_always_on_top = u32::from(spec.always_on_top);
         if let Some(batch) = batches[mode].iter_mut().find(|batch| batch.mesh == mesh) {
             batch.instances.push(instance);
         } else {
@@ -323,6 +326,7 @@ impl Renderer {
                 normal_scales,
                 tint,
                 material_set,
+                outline_always_on_top: 0,
             };
             batches[batch_index].instances.push(instance);
             if visibility_mask & 1 != 0 {

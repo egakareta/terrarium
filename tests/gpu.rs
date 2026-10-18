@@ -197,6 +197,60 @@ fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
 }
 
 #[test]
+fn always_on_top_outline_renders_through_occluding_geometry() -> Result<(), AppCreationError> {
+    let _gpu_test_guard = serialize_gpu_test();
+
+    fn red_pixels(always_on_top: bool) -> Result<usize, AppCreationError> {
+        let engine = Terrarium::new()
+            .with_size([128, 128])
+            .with_headless(Some(0))
+            .run(move |engine| {
+                engine.lighting.clear_skybox();
+                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.workspace.current_camera =
+                    Camera::new(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO, 1.0);
+                engine.add_child(
+                    Part::new()
+                        .with_size(Vec3::splat(2.0))
+                        .with_color(Color3::BLUE),
+                );
+                engine.add_child(
+                    Part::new()
+                        .with_position(Vec3::new(0.0, 0.0, 1.5))
+                        .with_size(Vec3::splat(3.0))
+                        .with_color(Color3::GREEN),
+                );
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+
+        let mut scene = engine.workspace.render_scene();
+        let target = scene.nodes[0].id;
+        scene.outlines.push(RenderOutline {
+            mode: OutlineMode::Stencil,
+            targets: vec![target],
+            color: Color3::RED,
+            width: 3.0,
+            threshold: 0.08,
+            always_on_top,
+        });
+        let mut renderer = engine.renderer();
+        renderer.prepare(&scene, [128, 128])?;
+        Ok(renderer
+            .read_pixels()?
+            .iter()
+            .filter(|pixel| pixel[0] > 180 && pixel[1] < 80 && pixel[2] < 80)
+            .count())
+    }
+
+    let depth_tested_pixels = red_pixels(false)?;
+    let always_on_top_pixels = red_pixels(true)?;
+    assert!(depth_tested_pixels < always_on_top_pixels);
+    assert!(always_on_top_pixels > 0);
+    Ok(())
+}
+
+#[test]
 fn material_triplanar_projection_samples_world_space_coordinates()
 -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _gpu_test_guard = serialize_gpu_test();

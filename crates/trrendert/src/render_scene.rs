@@ -236,6 +236,8 @@ pub struct RenderOutline {
     pub width: f32,
     /// Edge threshold used by toon and silhouette detection.
     pub threshold: f32,
+    /// Whether the outline renders through occluding geometry.
+    pub always_on_top: bool,
 }
 
 /// A workspace-owned texture and its mutation revision.

@@ -193,6 +193,7 @@ struct InstanceRaw {
     normal_scales: [f32; 3],
     tint: [f32; 4],
     material_set: u32,
+    outline_always_on_top: u32,
 }
 
 impl InstanceRaw {
@@ -205,6 +206,7 @@ impl InstanceRaw {
             10 => Float32x3,
             11 => Float32x4,
             12 => Uint32,
+            13 => Uint32,
         ];
 
         wgpu::VertexBufferLayout {
@@ -268,6 +270,7 @@ struct OutlineSpec {
     color: Color3,
     width: f32,
     threshold: f32,
+    always_on_top: bool,
 }
 
 struct OutlineRenderBatch {

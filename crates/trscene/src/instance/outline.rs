@@ -15,6 +15,7 @@ pub struct Outline {
     color: Color3,
     width: f32,
     threshold: f32,
+    always_on_top: bool,
 }
 
 impl Outline {
@@ -26,6 +27,7 @@ impl Outline {
             color: Color3::BLACK,
             width: 1.0,
             threshold: 0.08,
+            always_on_top: false,
         }
     }
 
@@ -64,6 +66,11 @@ impl Outline {
         self.threshold
     }
 
+    /// Returns whether the outline renders through occluding geometry.
+    pub fn always_on_top(&self) -> bool {
+        self.always_on_top
+    }
+
     /// Sets the outline technique.
     pub fn with_mode(mut self, mode: OutlineMode) -> Self {
         self.mode = mode;
@@ -85,6 +92,12 @@ impl Outline {
     /// Sets the edge threshold used by toon and silhouette detection.
     pub fn with_threshold(mut self, threshold: f32) -> Self {
         self.threshold = threshold;
+        self
+    }
+
+    /// Sets whether the outline renders through occluding geometry.
+    pub fn with_always_on_top(mut self, always_on_top: bool) -> Self {
+        self.always_on_top = always_on_top;
         self
     }
 }
@@ -114,11 +127,13 @@ mod tests {
             .with_name("marker")
             .with_color(Color3::new(1.0, 0.25, 0.0))
             .with_width(3.0)
-            .with_threshold(0.2);
+            .with_threshold(0.2)
+            .with_always_on_top(true);
         assert_eq!(outline.name(), "marker");
         assert_eq!(outline.color(), Color3::new(1.0, 0.25, 0.0));
         assert_eq!(outline.width(), 3.0);
         assert_eq!(outline.threshold(), 0.2);
+        assert!(outline.always_on_top());
         assert!(outline.id() != outline.clone().id());
     }
 }
