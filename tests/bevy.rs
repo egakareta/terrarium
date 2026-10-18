@@ -194,7 +194,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
         let engine = Terrarium::preset(WorkspacePreset::Baseplate)
             .with_bevy(app)
             .with_title("Bevy adapter test")
-            .with_size([32, 32])
+            .with_size([640, 480])
             .with_env_logger(false)
             .with_headless(Some(10))
             .run(move |engine| {

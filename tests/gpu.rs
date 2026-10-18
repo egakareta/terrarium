@@ -9,6 +9,13 @@ fn serialize_gpu_test() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+macro_rules! hide_devtools {
+    ($engine:ident) => {
+        #[cfg(feature = "devtools")]
+        $engine.devtools.set_visible(false);
+    };
+}
+
 #[test]
 fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
@@ -62,6 +69,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
+            hide_devtools!(engine);
             engine.lighting.clear_skybox();
             engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
             let lantern = engine.add_texture(Texture::from_bytes(
@@ -124,6 +132,7 @@ fn basepart_transparency_blends_front_geometry_with_background()
         .with_size([128, 128])
         .with_headless(Some(1))
         .run(|engine| {
+            hide_devtools!(engine);
             engine.lighting.clear_skybox();
             engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
             engine.workspace.current_camera =
@@ -165,6 +174,7 @@ fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
             .with_size([128, 128])
             .with_headless(Some(1))
             .run(move |engine| {
+                hide_devtools!(engine);
                 engine.lighting.clear_skybox();
                 engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
                 let part_id = engine.add_child(
@@ -273,6 +283,7 @@ fn material_triplanar_projection_samples_world_space_coordinates()
             .with_size([128, 128])
             .with_headless(Some(1))
             .run(move |engine| {
+                hide_devtools!(engine);
                 engine.lighting.clear_skybox();
                 engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
                 engine.workspace.current_camera =
@@ -545,6 +556,7 @@ fn directional_shadow_long_shadow_has_clean_edges_and_lit_floor() -> Result<(), 
             .with_size([WIDTH, HEIGHT])
             .with_headless(Some(1))
             .run(move |engine| {
+                hide_devtools!(engine);
                 engine.workspace.current_camera =
                     diagnostic_camera(camera_offset, clock_time, caster_height);
                 engine.lighting.with_clock_time(clock_time);

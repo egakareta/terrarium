@@ -486,6 +486,25 @@ impl CameraController {
         }
     }
 
+    /// Returns whether an enabled movement binding is held in a focused eframe window.
+    ///
+    /// Ignores UI keyboard capture so integrations can route focus to the scene.
+    /// Sprint bindings alone do not request movement.
+    pub fn has_eframe_movement_input(&self, input: &crate::egui::InputState) -> bool {
+        self.keyboard_enabled
+            && input.focused
+            && [
+                &self.key_bindings.forward,
+                &self.key_bindings.backward,
+                &self.key_bindings.left,
+                &self.key_bindings.right,
+                &self.key_bindings.up,
+                &self.key_bindings.down,
+            ]
+            .into_iter()
+            .any(|binding| eframe_key_down(input, binding))
+    }
+
     /// Feeds eframe's normalized input state into the controller.
     pub fn process_eframe_input(&mut self, input: &crate::egui::InputState) {
         self.process_eframe_input_with_capture(input, false, false);
@@ -583,12 +602,7 @@ impl CameraController {
         if !self.keyboard_enabled || egui_wants_keyboard_input {
             self.clear_keyboard_input();
         } else {
-            let key_down = |binding: &[KeyCode]| {
-                binding
-                    .iter()
-                    .copied()
-                    .any(|key| eframe_key(key).is_some_and(|key| input.key_down(key)))
-            };
+            let key_down = |binding: &[KeyCode]| eframe_key_down(input, binding);
             self.forward = key_down(&self.key_bindings.forward);
             self.backward = key_down(&self.key_bindings.backward);
             self.left = key_down(&self.key_bindings.left);
@@ -887,6 +901,13 @@ impl HasCamera for Camera {
 fn set_key(key: &mut bool, pressed: bool) -> bool {
     *key = pressed;
     true
+}
+
+fn eframe_key_down(input: &crate::egui::InputState, binding: &[KeyCode]) -> bool {
+    binding
+        .iter()
+        .copied()
+        .any(|key| eframe_key(key).is_some_and(|key| input.key_down(key)))
 }
 
 fn eframe_key(key: KeyCode) -> Option<crate::egui::Key> {

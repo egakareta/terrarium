@@ -4,6 +4,7 @@ use trscene::{
     InstanceId, Part, PartShape, PointLight, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
+    winit::keyboard::KeyCode,
 };
 
 #[derive(Clone, Debug, Inspect)]
@@ -70,7 +71,14 @@ fn frame(
             events,
             ..Default::default()
         },
-        |ui| devtools.show_docked(ui, host),
+        |ui| {
+            devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
+            host.workspace
+                .camera_controller_mut()
+                .process_eframe_context(ui.ctx());
+            host.workspace.update(0.1);
+            devtools.show_docked(ui, host);
+        },
     );
     output.textures_delta.clear();
 }
@@ -177,6 +185,146 @@ fn full_dock_uses_the_application_title_for_the_scene_tab() {
     output.textures_delta.clear();
     assert!(title_is_visible);
     assert!(scene_is_visible);
+}
+
+#[test]
+fn camera_movement_resumes_after_focusing_the_explorer() {
+    for (movement_key, direction) in [
+        (Key::W, Vec3::NEG_Z),
+        (Key::S, Vec3::Z),
+        (Key::A, Vec3::NEG_X),
+        (Key::D, Vec3::X),
+        (Key::Space, Vec3::Y),
+        (Key::ControlLeft, Vec3::NEG_Y),
+        (Key::ControlRight, Vec3::NEG_Y),
+    ] {
+        let mut devtools = Devtools::default();
+        devtools.set_visible(true);
+        let mut host = TestDevtoolsHost {
+            workspace: Workspace::new(),
+        };
+        let context = egui::Context::default();
+        frame(&context, &mut devtools, &mut host, Vec::new());
+        frame(&context, &mut devtools, &mut host, Vec::new());
+        click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
+        assert!(context.egui_wants_keyboard_input());
+        let initial_position = host.workspace.current_camera.position();
+
+        frame(
+            &context,
+            &mut devtools,
+            &mut host,
+            vec![key(movement_key, false)],
+        );
+
+        let movement = host.workspace.current_camera.position() - initial_position;
+        assert!(movement.dot(direction) > 0.0, "{movement_key:?}");
+    }
+}
+
+#[test]
+fn camera_focus_uses_custom_movement_bindings() {
+    let mut devtools = Devtools::default();
+    devtools.set_visible(true);
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
+    host.workspace.camera_controller_mut().key_bindings.forward = vec![KeyCode::ArrowUp];
+    let context = egui::Context::default();
+    frame(&context, &mut devtools, &mut host, Vec::new());
+    frame(&context, &mut devtools, &mut host, Vec::new());
+    click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
+    assert!(context.egui_wants_keyboard_input());
+    let initial_position = host.workspace.current_camera.position();
+
+    frame(&context, &mut devtools, &mut host, vec![key(Key::W, false)]);
+    assert!(context.egui_wants_keyboard_input());
+    assert_eq!(host.workspace.current_camera.position(), initial_position);
+    frame(
+        &context,
+        &mut devtools,
+        &mut host,
+        vec![release(Key::W), key(Key::ArrowUp, false)],
+    );
+    assert!(host.workspace.current_camera.position().z < initial_position.z);
+}
+
+#[test]
+fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
+    for (keyboard_enabled, movement_key) in [(false, Key::W), (true, Key::ShiftLeft)] {
+        let mut devtools = Devtools::default();
+        devtools.set_visible(true);
+        let mut host = TestDevtoolsHost {
+            workspace: Workspace::new(),
+        };
+        host.workspace
+            .camera_controller_mut()
+            .set_keyboard_enabled(keyboard_enabled);
+        let context = egui::Context::default();
+        frame(&context, &mut devtools, &mut host, Vec::new());
+        frame(&context, &mut devtools, &mut host, Vec::new());
+        click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
+        assert!(context.egui_wants_keyboard_input());
+        let initial_position = host.workspace.current_camera.position();
+
+        frame(
+            &context,
+            &mut devtools,
+            &mut host,
+            vec![key(movement_key, false)],
+        );
+
+        assert!(context.egui_wants_keyboard_input());
+        assert_eq!(host.workspace.current_camera.position(), initial_position);
+    }
+}
+
+#[test]
+fn camera_movement_keys_do_not_interrupt_text_editing() {
+    let mut devtools = Devtools::default();
+    devtools.set_visible(true);
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
+    let context = egui::Context::default();
+    let initial_position = host.workspace.current_camera.position();
+    let mut text = String::new();
+    let mut text_has_focus = false;
+
+    for (request_focus, events) in [
+        (true, Vec::new()),
+        (false, vec![key(Key::W, false), Event::Text("w".into())]),
+    ] {
+        let mut output = context.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 720.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
+                host.workspace
+                    .camera_controller_mut()
+                    .process_eframe_context(ui.ctx());
+                host.workspace.update(0.1);
+                let response = ui.text_edit_singleline(&mut text);
+                if request_focus {
+                    response.request_focus();
+                }
+                text_has_focus = response.has_focus();
+                devtools.show_docked(ui, &mut host);
+            },
+        );
+        output.textures_delta.clear();
+        assert!(context.text_edit_focused());
+    }
+
+    assert_eq!(text, "w");
+    assert!(text_has_focus);
+    assert_eq!(host.workspace.current_camera.position(), initial_position);
 }
 
 #[test]

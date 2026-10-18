@@ -172,6 +172,34 @@ impl Devtools {
         self.error = None;
     }
 
+    /// Activates the scene tab for camera movement unless a text editor has focus.
+    ///
+    /// Call before processing camera input to release keyboard capture in the same frame.
+    /// [`Self::show_docked`] also calls this for standalone integrations.
+    pub fn focus_scene_on_camera_input(&mut self, context: &egui::Context, workspace: &Workspace) {
+        if context.text_edit_focused()
+            || !context.input(|input| {
+                workspace
+                    .camera_controller()
+                    .has_eframe_movement_input(input)
+            })
+        {
+            return;
+        }
+        context.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        if let Some(path) = self.dock_state.find_tab(&DevtoolsTab::Scene) {
+            self.dock_state
+                .set_active_tab(path)
+                .expect("scene tab path is valid");
+            self.dock_state
+                .set_focused_node_and_surface(path.node_path());
+        }
+    }
+
     /// Shows the application scene and inspector panes in a full-window dock.
     pub fn show_docked(&mut self, ui: &mut egui::Ui, host: &mut dyn DevtoolsHost) {
         let context = ui.ctx().clone();
@@ -186,6 +214,7 @@ impl Devtools {
         let scene_title = host.scene_title().to_owned();
         let workspace_id = host.workspace().id();
         self.prune(host.workspace());
+        self.focus_scene_on_camera_input(&context, host.workspace());
 
         if !self.visible {
             host.render_scene(ui, &self.selected);

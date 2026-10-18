@@ -287,6 +287,9 @@ impl Engine {
 
     /// Processes camera input, advances the workspace, and requests the next frame.
     pub fn update(&mut self, context: &egui::Context) {
+        #[cfg(feature = "devtools")]
+        self.devtools
+            .focus_scene_on_camera_input(context, &self.workspace);
         let delta = process_workspace_input(&mut self.workspace, context);
         #[cfg(feature = "bevy")]
         if let Some(app) = self.bevy_app.as_mut() {
