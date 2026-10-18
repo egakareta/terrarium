@@ -194,31 +194,12 @@ impl Devtools {
             return;
         }
 
-        ui.horizontal(|ui| {
-            ui.menu_button(format!("{} Panels", regular::SLIDERS_HORIZONTAL), |ui| {
-                for tab in [
-                    DevtoolsTab::Explorer,
-                    DevtoolsTab::Properties,
-                    DevtoolsTab::FontMarket,
-                ] {
-                    show_panel_toggle(ui, &mut self.dock_state, &scene_title, tab);
-                }
-            });
-            if ui
-                .button(format!("{} Reset layout", regular::ARROW_COUNTER_CLOCKWISE))
-                .clicked()
-            {
-                self.dock_state = default_dock_state();
-            }
-        });
-        ui.separator();
-
         let mut selection_changed = false;
         let mut panel_layers = Vec::new();
         let mut context_delete_selection = None;
         let mut viewer = DevtoolsTabViewer {
             host,
-            scene_title,
+            scene_title: scene_title.clone(),
             selected: &mut self.selected,
             anchor: &mut self.anchor,
             tree_state: &mut self.tree_state,
@@ -231,10 +212,42 @@ impl Devtools {
             panel_layers: &mut panel_layers,
             context_delete_selection: &mut context_delete_selection,
         };
-        DockArea::new(&mut self.dock_state)
-            .id(egui::Id::new(("terrarium_app_dock", workspace_id)))
-            .style(Style::from_egui(ui.style().as_ref()))
-            .show_inside(ui, &mut viewer);
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            egui::Frame::new()
+                .inner_margin(egui::Margin {
+                    left: 8,
+                    right: 8,
+                    top: 4,
+                    bottom: 8,
+                })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.menu_button(format!("{} Panels", regular::SLIDERS_HORIZONTAL), |ui| {
+                            for tab in [
+                                DevtoolsTab::Scene,
+                                DevtoolsTab::Explorer,
+                                DevtoolsTab::Properties,
+                                DevtoolsTab::FontMarket,
+                            ] {
+                                show_panel_toggle(ui, &mut self.dock_state, &scene_title, tab);
+                            }
+                        });
+                        if ui
+                            .button(format!("{} Reset layout", regular::ARROW_COUNTER_CLOCKWISE))
+                            .clicked()
+                        {
+                            self.dock_state = default_dock_state();
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(concat!("terrarium@", env!("CARGO_PKG_VERSION")));
+                        });
+                    });
+                });
+            DockArea::new(&mut self.dock_state)
+                .id(egui::Id::new(("terrarium_app_dock", workspace_id)))
+                .style(Style::from_egui(ui.style().as_ref()))
+                .show_inside(ui, &mut viewer);
+        });
 
         if context.input(|input| input.pointer.any_pressed()) {
             self.active = selection_changed
