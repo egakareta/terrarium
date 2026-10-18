@@ -1,4 +1,4 @@
-use trdevtools::{Devtools, Inspect, PropertyError, PropertyValue};
+use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
 use trscene::{
     BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance, Part,
     PartShape, PointLight, Workspace,
@@ -15,6 +15,24 @@ struct CustomInstance {
     source: &'static str,
     #[inspect(skip)]
     runtime_counter: usize,
+}
+
+struct TestDevtoolsHost {
+    workspace: Workspace,
+}
+
+impl DevtoolsHost for TestDevtoolsHost {
+    fn scene_title(&self) -> &str {
+        "Sample Application"
+    }
+
+    fn workspace(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+
+    fn render_scene(&mut self, ui: &mut egui::Ui) {
+        ui.label("Rendered scene content");
+    }
 }
 
 fn key(key: Key, repeat: bool) -> Event {
@@ -83,7 +101,7 @@ fn click(
 
 fn contains_text(shape: &egui::Shape, target: &str) -> bool {
     match shape {
-        egui::Shape::Text(text) => text.galley.text() == target,
+        egui::Shape::Text(text) => text.galley.text().contains(target),
         egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains_text(shape, target)),
         _ => false,
     }
@@ -115,6 +133,42 @@ fn hidden_inspector_shows_the_development_notice() {
         .any(|clipped| contains_text(&clipped.shape, "Development build"));
     output.textures_delta.clear();
     assert!(visible);
+}
+
+#[test]
+fn full_dock_uses_the_application_title_for_the_scene_tab() {
+    let mut devtools = Devtools::default();
+    devtools.set_visible(true);
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
+    let context = egui::Context::default();
+    let raw_input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 720.0),
+        )),
+        ..Default::default()
+    };
+    let mut output = context.run_ui(raw_input(), |ui| {
+        devtools.show_docked(ui, &mut host);
+    });
+    output.textures_delta.clear();
+    let mut output = context.run_ui(raw_input(), |ui| {
+        devtools.show_docked(ui, &mut host);
+    });
+
+    let title_is_visible = output
+        .shapes
+        .iter()
+        .any(|clipped| contains_text(&clipped.shape, "Sample Application"));
+    let scene_is_visible = output
+        .shapes
+        .iter()
+        .any(|clipped| contains_text(&clipped.shape, "Rendered scene content"));
+    output.textures_delta.clear();
+    assert!(title_is_visible);
+    assert!(scene_is_visible);
 }
 
 #[test]

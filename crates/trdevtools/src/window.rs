@@ -20,6 +20,18 @@ pub struct SelectionProperty {
     pub mixed: bool,
 }
 
+/// Application integration used by the full-window DevTools dock.
+pub trait DevtoolsHost {
+    /// Returns the title used for the scene tab.
+    fn scene_title(&self) -> &str;
+
+    /// Returns mutable access to the workspace being inspected.
+    fn workspace(&mut self) -> &mut Workspace;
+
+    /// Renders the application's scene content into the scene tab.
+    fn render_scene(&mut self, ui: &mut egui::Ui);
+}
+
 /// A dockable workspace inspector with a persistent selection.
 ///
 /// Engines create one automatically with the `devtools` feature enabled. The
@@ -38,6 +50,7 @@ pub struct Devtools {
     font_market: FontMarket,
     base_font_definitions: Option<egui::FontDefinitions>,
     dock_state: DockState<DevtoolsTab>,
+    app_dock_state: DockState<DevtoolsTab>,
     tree_state: TreeViewState<InstanceId>,
 }
 
@@ -54,6 +67,7 @@ impl Default for Devtools {
             font_market: FontMarket::default(),
             base_font_definitions: None,
             dock_state: default_dock_state(),
+            app_dock_state: default_app_dock_state(),
             tree_state: TreeViewState::default(),
         }
     }
@@ -159,8 +173,103 @@ impl Devtools {
         self.error = None;
     }
 
-    /// Processes F12 and draws the inspector into the current egui frame.
-    pub fn show(&mut self, context: &egui::Context, workspace: &mut Workspace) {
+    /// Shows the application scene and inspector panes in a full-window dock.
+    pub fn show_docked(&mut self, ui: &mut egui::Ui, host: &mut dyn DevtoolsHost) {
+        let context = ui.ctx().clone();
+        let process_input = self.process_f12(&context);
+        let scene_title = host.scene_title().to_owned();
+        let workspace_id = host.workspace().id();
+        self.prune(host.workspace());
+
+        if !self.visible {
+            host.render_scene(ui);
+            self.show_toggle_button(&context, workspace_id);
+            show_development_notice(&context);
+            return;
+        }
+
+        let mut delete_clicked = false;
+        let mut tree_selection_changed = false;
+        let mut panel_layers = Vec::new();
+        ui.horizontal(|ui| {
+            ui.menu_button(format!("{} Panels", regular::SLIDERS_HORIZONTAL), |ui| {
+                show_panel_toggle(
+                    ui,
+                    &mut self.app_dock_state,
+                    &scene_title,
+                    DevtoolsTab::Explorer,
+                );
+                show_panel_toggle(
+                    ui,
+                    &mut self.app_dock_state,
+                    &scene_title,
+                    DevtoolsTab::Properties,
+                );
+                show_panel_toggle(
+                    ui,
+                    &mut self.app_dock_state,
+                    &scene_title,
+                    DevtoolsTab::FontMarket,
+                );
+            });
+            if ui
+                .button(format!("{} Reset layout", regular::ARROW_COUNTER_CLOCKWISE))
+                .clicked()
+            {
+                self.app_dock_state = default_app_dock_state();
+            }
+            ui.separator();
+            ui.label(format!("{} selected", self.selected.len()));
+            delete_clicked = ui
+                .add_enabled(
+                    self.selected.iter().any(|&id| id != workspace_id),
+                    egui::Button::new(format!("{} Delete selection", regular::TRASH)),
+                )
+                .clicked();
+        });
+        ui.separator();
+
+        let mut viewer = DevtoolsTabViewer {
+            host,
+            scene_title,
+            selected: &mut self.selected,
+            anchor: &mut self.anchor,
+            tree_state: &mut self.tree_state,
+            selection_changed: &mut tree_selection_changed,
+            error: &mut self.error,
+            json_drafts: &mut self.json_drafts,
+            font_market: &mut self.font_market,
+            base_font_definitions: self.base_font_definitions.as_ref(),
+            context: &context,
+            panel_layers: &mut panel_layers,
+        };
+        DockArea::new(&mut self.app_dock_state)
+            .id(egui::Id::new(("terrarium_app_dock", workspace_id)))
+            .style(Style::from_egui(ui.style().as_ref()))
+            .show_inside(ui, &mut viewer);
+
+        if context.input(|input| input.pointer.any_pressed()) {
+            self.active = tree_selection_changed
+                || context
+                    .input(|input| input.pointer.interact_pos())
+                    .is_some_and(|position| {
+                        context
+                            .layer_id_at(position)
+                            .is_some_and(|layer| panel_layers.contains(&layer))
+                    });
+        }
+        if delete_clicked
+            || (process_input
+                && self.active
+                && !context.text_edit_focused()
+                && pressed(&context, egui::Key::Delete))
+        {
+            context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
+            self.destroy_selection(host.workspace());
+        }
+    }
+
+    fn process_f12(&mut self, context: &egui::Context) -> bool {
         let frame = context.cumulative_frame_nr();
         let process_input = self.last_input_frame != Some(frame);
         if process_input {
@@ -170,8 +279,11 @@ impl Devtools {
                 self.set_visible(!self.visible);
             }
         }
-        self.prune(workspace);
-        egui::Area::new(egui::Id::new(("terrarium_devtools_toggle", workspace.id())))
+        process_input
+    }
+
+    fn show_toggle_button(&mut self, context: &egui::Context, workspace_id: InstanceId) {
+        egui::Area::new(egui::Id::new(("terrarium_devtools_toggle", workspace_id)))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0))
             .show(context, |ui| {
@@ -190,12 +302,21 @@ impl Devtools {
                     self.set_visible(!self.visible);
                 }
             });
+    }
+
+    /// Processes F12 and draws the inspector into the current egui frame.
+    pub fn show(&mut self, context: &egui::Context, workspace: &mut Workspace) {
+        let process_input = self.process_f12(context);
+        let mut host = WorkspaceDevtoolsHost { workspace };
+        self.prune(host.workspace());
+        let workspace_id = host.workspace().id();
+        self.show_toggle_button(context, workspace_id);
         if !self.visible {
             show_development_notice(context);
             return;
         }
-        let id = egui::Id::new(("terrarium_devtools", workspace.id()));
-        let dock_id = egui::Id::new(("terrarium_devtools_dock", workspace.id()));
+        let id = egui::Id::new(("terrarium_devtools", workspace_id));
+        let dock_id = egui::Id::new(("terrarium_devtools_dock", workspace_id));
         let mut open = true;
         let mut delete_clicked = false;
         let mut tree_selection_changed = false;
@@ -208,9 +329,24 @@ impl Devtools {
             .show(context, |ui| {
                 ui.horizontal(|ui| {
                     ui.menu_button(format!("{} Panels", regular::SLIDERS_HORIZONTAL), |ui| {
-                        self.show_panel_toggle(ui, DevtoolsTab::Explorer);
-                        self.show_panel_toggle(ui, DevtoolsTab::Properties);
-                        self.show_panel_toggle(ui, DevtoolsTab::FontMarket);
+                        show_panel_toggle(
+                            ui,
+                            &mut self.dock_state,
+                            "Terrarium",
+                            DevtoolsTab::Explorer,
+                        );
+                        show_panel_toggle(
+                            ui,
+                            &mut self.dock_state,
+                            "Terrarium",
+                            DevtoolsTab::Properties,
+                        );
+                        show_panel_toggle(
+                            ui,
+                            &mut self.dock_state,
+                            "Terrarium",
+                            DevtoolsTab::FontMarket,
+                        );
                     });
                     if ui
                         .button(format!("{} Reset layout", regular::ARROW_COUNTER_CLOCKWISE))
@@ -222,14 +358,16 @@ impl Devtools {
                     ui.label(format!("{} selected", self.selected.len()));
                     delete_clicked = ui
                         .add_enabled(
-                            self.selected.iter().any(|&id| id != workspace.id()),
+                            self.selected.iter().any(|&id| id != workspace_id),
                             egui::Button::new(format!("{} Delete selection", regular::TRASH)),
                         )
                         .clicked();
                 });
                 ui.separator();
+                let scene_title = host.scene_title().to_owned();
                 let mut viewer = DevtoolsTabViewer {
-                    workspace,
+                    host: &mut host,
+                    scene_title,
                     selected: &mut self.selected,
                     anchor: &mut self.anchor,
                     tree_state: &mut self.tree_state,
@@ -265,21 +403,10 @@ impl Devtools {
                 && pressed(context, egui::Key::Delete))
         {
             context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
-            self.destroy_selection(workspace);
+            self.destroy_selection(host.workspace());
         }
         self.set_visible(open);
         show_development_notice(context);
-    }
-
-    fn show_panel_toggle(&mut self, ui: &mut egui::Ui, tab: DevtoolsTab) {
-        let mut is_open = self.dock_state.find_tab(&tab).is_some();
-        if ui.checkbox(&mut is_open, tab.title()).changed() {
-            if is_open {
-                self.dock_state.main_surface_mut().push_to_focused_leaf(tab);
-            } else if let Some(path) = self.dock_state.find_tab(&tab) {
-                self.dock_state.remove_tab(path);
-            }
-        }
     }
 
     fn prune(&mut self, workspace: &Workspace) {
@@ -295,14 +422,16 @@ impl Devtools {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum DevtoolsTab {
+    Scene,
     Explorer,
     Properties,
     FontMarket,
 }
 
 impl DevtoolsTab {
-    fn title(self) -> String {
+    fn title(self, scene_title: &str) -> String {
         match self {
+            Self::Scene => format!("{} {scene_title}", regular::CUBE),
             Self::Explorer => format!("{} Explorer", regular::TREE_STRUCTURE),
             Self::Properties => format!("{} Properties", regular::GEAR),
             Self::FontMarket => format!("{} Font Market", regular::TEXT_T),
@@ -311,7 +440,8 @@ impl DevtoolsTab {
 }
 
 struct DevtoolsTabViewer<'a> {
-    workspace: &'a mut Workspace,
+    host: &'a mut dyn DevtoolsHost,
+    scene_title: String,
     selected: &'a mut Vec<InstanceId>,
     anchor: &'a mut Option<InstanceId>,
     tree_state: &'a mut TreeViewState<InstanceId>,
@@ -332,12 +462,17 @@ impl TabViewer for DevtoolsTabViewer<'_> {
     }
 
     fn title(&mut self, tab: &mut Self::Tab) -> egui::WidgetText {
-        tab.title().into()
+        tab.title(&self.scene_title).into()
+    }
+
+    fn closeable(&mut self, _tab: &mut Self::Tab) -> bool {
+        false
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         self.panel_layers.push(ui.layer_id());
         match tab {
+            DevtoolsTab::Scene => self.host.render_scene(ui),
             DevtoolsTab::Explorer => self.show_explorer(ui),
             DevtoolsTab::Properties => self.show_properties(ui),
             DevtoolsTab::FontMarket => {
@@ -348,8 +483,25 @@ impl TabViewer for DevtoolsTabViewer<'_> {
     }
 }
 
+struct WorkspaceDevtoolsHost<'a> {
+    workspace: &'a mut Workspace,
+}
+
+impl DevtoolsHost for WorkspaceDevtoolsHost<'_> {
+    fn scene_title(&self) -> &str {
+        "Terrarium"
+    }
+
+    fn workspace(&mut self) -> &mut Workspace {
+        self.workspace
+    }
+
+    fn render_scene(&mut self, _ui: &mut egui::Ui) {}
+}
+
 impl DevtoolsTabViewer<'_> {
     fn show_explorer(&mut self, ui: &mut egui::Ui) {
+        let workspace = self.host.workspace();
         if self.tree_state.selected().as_slice() != self.selected.as_slice() {
             self.tree_state.set_selected(self.selected.clone());
         }
@@ -358,13 +510,13 @@ impl DevtoolsTabViewer<'_> {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let (_, actions) =
-                    TreeView::new(ui.make_persistent_id(("workspace_tree", self.workspace.id())))
+                    TreeView::new(ui.make_persistent_id(("workspace_tree", workspace.id())))
                         .allow_multi_selection(true)
                         .range_selection_modifier(egui::Modifiers::SHIFT)
                         .set_selection_modifier(egui::Modifiers::COMMAND)
                         .allow_drag_and_drop(false)
                         .show_state(ui, self.tree_state, |builder| {
-                            build_tree(builder, self.workspace, true);
+                            build_tree(builder, workspace, true);
                         });
                 for action in actions {
                     if let Action::SetSelected(selection) = action {
@@ -395,6 +547,7 @@ impl DevtoolsTabViewer<'_> {
     }
 
     fn show_properties(&mut self, ui: &mut egui::Ui) {
+        let workspace = self.host.workspace();
         if self.selected.is_empty() {
             ui.label("Select an instance to inspect its properties.");
         }
@@ -405,7 +558,7 @@ impl DevtoolsTabViewer<'_> {
             .id_salt("properties")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for field in properties_for_selection(self.selected, self.workspace) {
+                for field in properties_for_selection(self.selected, workspace) {
                     let mut value = field.property.value.clone();
                     if let PropertyValue::Json(json) = &mut value
                         && let Some(draft) = self.json_drafts.get(&field.property.path)
@@ -435,7 +588,7 @@ impl DevtoolsTabViewer<'_> {
                             self.json_drafts.insert(path.clone(), json.clone());
                         }
                         *self.error =
-                            edit_selection_property(self.workspace, self.selected, &path, value)
+                            edit_selection_property(workspace, self.selected, &path, value)
                                 .err()
                                 .map(|error| error.to_string());
                         if self.error.is_none() {
@@ -447,11 +600,40 @@ impl DevtoolsTabViewer<'_> {
     }
 }
 
+fn show_panel_toggle(
+    ui: &mut egui::Ui,
+    dock_state: &mut DockState<DevtoolsTab>,
+    scene_title: &str,
+    tab: DevtoolsTab,
+) {
+    let mut is_open = dock_state.find_tab(&tab).is_some();
+    if ui.checkbox(&mut is_open, tab.title(scene_title)).changed() {
+        if is_open {
+            dock_state.main_surface_mut().push_to_focused_leaf(tab);
+        } else if let Some(path) = dock_state.find_tab(&tab) {
+            dock_state.remove_tab(path);
+        }
+    }
+}
+
 fn default_dock_state() -> DockState<DevtoolsTab> {
     let mut state = DockState::new(vec![DevtoolsTab::Explorer, DevtoolsTab::FontMarket]);
     state
         .main_surface_mut()
         .split_below(NodeIndex::root(), 0.55, vec![DevtoolsTab::Properties]);
+    state
+}
+
+fn default_app_dock_state() -> DockState<DevtoolsTab> {
+    let mut state = DockState::new(vec![DevtoolsTab::Scene]);
+    let [_, right] = state.main_surface_mut().split_right(
+        NodeIndex::root(),
+        0.8,
+        vec![DevtoolsTab::Explorer, DevtoolsTab::FontMarket],
+    );
+    state
+        .main_surface_mut()
+        .split_below(right, 0.5, vec![DevtoolsTab::Properties]);
     state
 }
 

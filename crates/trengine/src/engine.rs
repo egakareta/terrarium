@@ -149,9 +149,11 @@ pub struct Engine {
     renderer: RendererHandle,
     /// The [`Workspace`] rendered by this engine.
     pub workspace: Workspace,
-    /// The F12 workspace inspector, initially hidden.
+    /// The docked workspace inspector.
     #[cfg(feature = "devtools")]
     pub devtools: trdevtools::Devtools,
+    #[cfg(feature = "devtools")]
+    title: String,
     creation_context: eframe::CreationContext<'static>,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
@@ -203,7 +205,13 @@ impl Engine {
             renderer,
             workspace,
             #[cfg(feature = "devtools")]
-            devtools: trdevtools::Devtools::default(),
+            devtools: {
+                let mut devtools = trdevtools::Devtools::default();
+                devtools.set_visible(true);
+                devtools
+            },
+            #[cfg(feature = "devtools")]
+            title: "Terrarium".to_owned(),
             creation_context: Self::owned_creation_context(creation_context),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
@@ -381,9 +389,7 @@ impl Engine {
 
             let native_options = eframe::NativeOptions {
                 renderer: eframe::Renderer::Wgpu,
-                viewport: egui::ViewportBuilder::default()
-                    .with_title(config.title)
-                    .with_inner_size([config.size[0] as f32, config.size[1] as f32]),
+                viewport: native_viewport(config.title, config.size, config.size_explicit),
                 wgpu_options,
                 ..Default::default()
             };
@@ -587,6 +593,52 @@ fn prepare_workspace(
     renderer.prepare_eframe_scene(workspace, size)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn native_viewport(title: &str, size: [u32; 2], size_explicit: bool) -> egui::ViewportBuilder {
+    let viewport = egui::ViewportBuilder::default().with_title(title);
+    if size_explicit {
+        viewport.with_inner_size([size[0] as f32, size[1] as f32])
+    } else {
+        viewport.with_maximized(true)
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_window_defaults_to_maximized_unless_sized() {
+        let default = Terrarium::default();
+        let default_viewport = native_viewport(default.title, default.size, default.size_explicit);
+        assert_eq!(default_viewport.maximized, Some(true));
+        assert_eq!(default_viewport.fullscreen, None);
+        assert_eq!(default_viewport.inner_size, None);
+
+        let sized = Terrarium::default().with_size([960, 540]);
+        let sized_viewport = native_viewport(sized.title, sized.size, sized.size_explicit);
+        assert_eq!(sized_viewport.fullscreen, None);
+        assert_eq!(sized_viewport.inner_size, Some(egui::vec2(960.0, 540.0)));
+    }
+}
+
+#[cfg(feature = "devtools")]
+impl trdevtools::DevtoolsHost for Engine {
+    fn scene_title(&self) -> &str {
+        &self.title
+    }
+
+    fn workspace(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+
+    fn render_scene(&mut self, ui: &mut egui::Ui) {
+        if let Err(error) = self.render(ui) {
+            log::error!("scene preparation failed: {error}");
+        }
+    }
+}
+
 impl eframe::App for Engine {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         Engine::clear_color(self)
@@ -597,11 +649,16 @@ impl eframe::App for Engine {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(feature = "devtools")]
+        {
+            let mut devtools = std::mem::take(&mut self.devtools);
+            devtools.show_docked(ui, self);
+            self.devtools = devtools;
+        }
+        #[cfg(not(feature = "devtools"))]
         if let Err(error) = self.render(ui) {
             log::error!("scene preparation failed: {error}");
         }
-        #[cfg(feature = "devtools")]
-        self.devtools.show(ui.ctx(), &mut self.workspace);
     }
 }
 
@@ -665,6 +722,28 @@ pub trait App: 'static {
 
 impl App for () {}
 
+#[cfg(feature = "devtools")]
+struct AppAdapterDevtoolsHost<'a, A> {
+    engine: &'a mut Engine,
+    app: &'a mut A,
+    frame: &'a mut eframe::Frame,
+}
+
+#[cfg(feature = "devtools")]
+impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
+    fn scene_title(&self) -> &str {
+        &self.engine.title
+    }
+
+    fn workspace(&mut self) -> &mut Workspace {
+        &mut self.engine.workspace
+    }
+
+    fn render_scene(&mut self, ui: &mut egui::Ui) {
+        self.app.render(self.engine, ui, self.frame);
+    }
+}
+
 struct AppAdapter<A> {
     engine: EngineSlot,
     app: A,
@@ -694,9 +773,21 @@ impl<A: App> eframe::App for AppAdapter<A> {
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         with_engine(&self.engine, |engine| {
-            self.app.render(engine, ui, frame);
             #[cfg(feature = "devtools")]
-            engine.devtools.show(ui.ctx(), &mut engine.workspace);
+            {
+                let mut devtools = std::mem::take(&mut engine.devtools);
+                {
+                    let mut host = AppAdapterDevtoolsHost {
+                        engine,
+                        app: &mut self.app,
+                        frame,
+                    };
+                    devtools.show_docked(ui, &mut host);
+                }
+                engine.devtools = devtools;
+            }
+            #[cfg(not(feature = "devtools"))]
+            self.app.render(engine, ui, frame);
         });
     }
 
@@ -753,6 +844,8 @@ pub struct Terrarium<'a> {
     bevy_app: Option<bevy_app::App>,
     title: &'a str,
     size: [u32; 2],
+    #[cfg(not(target_arch = "wasm32"))]
+    size_explicit: bool,
     #[cfg(target_arch = "wasm32")]
     canvas_id: &'a str,
     wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
@@ -771,8 +864,10 @@ impl<'a> Default for Terrarium<'a> {
             workspace_preset: WorkspacePreset::default(),
             #[cfg(feature = "bevy")]
             bevy_app: None,
-            title: "app",
+            title: "App",
             size: [1280, 720],
+            #[cfg(not(target_arch = "wasm32"))]
+            size_explicit: false,
             #[cfg(target_arch = "wasm32")]
             canvas_id: "app",
             wgpu_options: Box::new(|_| {}),
@@ -847,6 +942,8 @@ impl<'a> Terrarium<'a> {
 
         let size = launcher.size;
         let preset = launcher.workspace_preset;
+        #[cfg(feature = "devtools")]
+        let title = launcher.title.to_owned();
         #[cfg(feature = "default-fonts")]
         let is_bundled_fonts = launcher.bundle_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
@@ -877,6 +974,10 @@ impl<'a> Terrarium<'a> {
             let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
             #[cfg(any(feature = "bevy", feature = "devtools"))]
             let mut engine = engine;
+            #[cfg(feature = "devtools")]
+            {
+                engine.title = title;
+            }
             #[cfg(feature = "devtools")]
             engine
                 .devtools
@@ -944,6 +1045,10 @@ impl<'a> Terrarium<'a> {
     /// The window size on native platforms.
     pub fn with_size(mut self, size: [u32; 2]) -> Self {
         self.size = size;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.size_explicit = true;
+        }
         self
     }
 

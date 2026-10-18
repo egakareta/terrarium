@@ -7,4 +7,4 @@ mod font_market;
 mod window;
 
 pub use trscene::devtools::*;
-pub use window::{Devtools, SelectionProperty};
+pub use window::{Devtools, DevtoolsHost, SelectionProperty};
