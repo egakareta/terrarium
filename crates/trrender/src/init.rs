@@ -992,8 +992,6 @@ impl Renderer {
             batch_scratch: Vec::new(),
             batch_indices_scratch: HashMap::default(),
             material_bind_groups: HashMap::default(),
-            outline_revision: u64::MAX,
-            outline_had_any: true,
             light_revision: u64::MAX,
             light_had_any: true,
             transparent_sort_depths: Vec::new(),

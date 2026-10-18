@@ -28,8 +28,8 @@ pub trait DevtoolsHost {
     /// Returns mutable access to the workspace being inspected.
     fn workspace(&mut self) -> &mut Workspace;
 
-    /// Renders the application's scene content into the scene tab.
-    fn render_scene(&mut self, ui: &mut egui::Ui);
+    /// Renders the application's scene content with the current DevTools selection.
+    fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]);
 }
 
 /// A full-window workspace inspector dock with a persistent selection.
@@ -188,18 +188,20 @@ impl Devtools {
         self.prune(host.workspace());
 
         if !self.visible {
-            host.render_scene(ui);
+            host.render_scene(ui, &self.selected);
             self.show_toggle_button(&context, workspace_id);
             show_development_notice(&context);
             return;
         }
 
+        let scene_selection = self.selected.clone();
         let mut selection_changed = false;
         let mut panel_layers = Vec::new();
         let mut context_delete_selection = None;
         let mut viewer = DevtoolsTabViewer {
             host,
             scene_title: scene_title.clone(),
+            scene_selection: &scene_selection,
             selected: &mut self.selected,
             anchor: &mut self.anchor,
             tree_state: &mut self.tree_state,
@@ -324,6 +326,7 @@ impl DevtoolsTab {
 struct DevtoolsTabViewer<'a> {
     host: &'a mut dyn DevtoolsHost,
     scene_title: String,
+    scene_selection: &'a [InstanceId],
     selected: &'a mut Vec<InstanceId>,
     anchor: &'a mut Option<InstanceId>,
     tree_state: &'a mut TreeViewState<InstanceId>,
@@ -355,7 +358,7 @@ impl TabViewer for DevtoolsTabViewer<'_> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab) {
         self.panel_layers.push(ui.layer_id());
         match tab {
-            DevtoolsTab::Scene => self.host.render_scene(ui),
+            DevtoolsTab::Scene => self.host.render_scene(ui, self.scene_selection),
             DevtoolsTab::Explorer => self.show_explorer(ui),
             DevtoolsTab::Properties => self.show_properties(ui),
             DevtoolsTab::FontMarket => {

@@ -67,26 +67,19 @@ impl Renderer {
     pub(super) fn prepare_scene(&mut self, scene: &RenderScene<'_>) -> Result<(), RendererError> {
         self.prepared_batches.clear();
         let structural_rev = scene.structure_revision;
-        let outline_targets = if !self.outline_had_any && self.outline_revision == structural_rev {
-            std::array::from_fn(|_| HashMap::default())
-        } else {
-            let (targets, specs) = collect_outline_targets(scene);
-            self.outline_had_any = specs.iter().any(Option::is_some);
-            self.outline_revision = structural_rev;
-            self.queue.write_buffer(
-                &self.outline_uniform_buffer,
-                0,
-                bytemuck::bytes_of(&OutlineUniform {
-                    toon_params: outline_params(specs[0]),
-                    toon_color: specs[0].map_or([0.0; 4], |spec| outline_color(spec.color)),
-                    silhouette_params: outline_params(specs[1]),
-                    silhouette_color: specs[1].map_or([0.0; 4], |spec| outline_color(spec.color)),
-                    stencil_params: outline_params(specs[2]),
-                    stencil_color: specs[2].map_or([0.0; 4], |spec| outline_color(spec.color)),
-                }),
-            );
-            targets
-        };
+        let (outline_targets, specs) = collect_outline_targets(scene);
+        self.queue.write_buffer(
+            &self.outline_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&OutlineUniform {
+                toon_params: outline_params(specs[0]),
+                toon_color: specs[0].map_or([0.0; 4], |spec| outline_color(spec.color)),
+                silhouette_params: outline_params(specs[1]),
+                silhouette_color: specs[1].map_or([0.0; 4], |spec| outline_color(spec.color)),
+                stencil_params: outline_params(specs[2]),
+                stencil_color: specs[2].map_or([0.0; 4], |spec| outline_color(spec.color)),
+            }),
+        );
 
         let mut outline_batches = std::mem::take(&mut self.outline_batches);
         for batches in &mut outline_batches {

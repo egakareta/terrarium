@@ -1,7 +1,7 @@
 use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
 use trscene::{
-    BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance, Part,
-    PartShape, PointLight, Workspace,
+    BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance,
+    InstanceId, Part, PartShape, PointLight, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
 };
@@ -30,7 +30,7 @@ impl DevtoolsHost for TestDevtoolsHost {
         &mut self.workspace
     }
 
-    fn render_scene(&mut self, ui: &mut egui::Ui) {
+    fn render_scene(&mut self, ui: &mut egui::Ui, _selected: &[InstanceId]) {
         ui.label("Rendered scene content");
     }
 }

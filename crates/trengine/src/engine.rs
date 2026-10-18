@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    trscene::{Workspace, WorkspacePreset},
+    trscene::{InstanceId, Workspace, WorkspacePreset},
     *,
 };
 
@@ -154,6 +154,8 @@ pub struct Engine {
     pub devtools: trdevtools::Devtools,
     #[cfg(feature = "devtools")]
     title: String,
+    #[cfg(feature = "devtools")]
+    devtools_render_selection: Option<Vec<InstanceId>>,
     creation_context: eframe::CreationContext<'static>,
     #[cfg(target_arch = "wasm32")]
     renderer_id: usize,
@@ -212,6 +214,8 @@ impl Engine {
             },
             #[cfg(feature = "devtools")]
             title: "Terrarium".to_owned(),
+            #[cfg(feature = "devtools")]
+            devtools_render_selection: None,
             creation_context: Self::owned_creation_context(creation_context),
             #[cfg(target_arch = "wasm32")]
             renderer_id,
@@ -296,7 +300,15 @@ impl Engine {
 
     /// Prepares the workspace for the available eframe UI region.
     pub fn prepare(&mut self, ui: &mut egui::Ui) -> Result<(), RendererError> {
-        prepare_workspace(&self.renderer, &mut self.workspace, ui)
+        #[cfg(feature = "devtools")]
+        let selected = self
+            .devtools_render_selection
+            .as_deref()
+            .unwrap_or_else(|| self.devtools.selected())
+            .to_vec();
+        #[cfg(not(feature = "devtools"))]
+        let selected: Vec<InstanceId> = Vec::new();
+        prepare_workspace(&self.renderer, &mut self.workspace, ui, &selected)
     }
 
     /// Registers the paint callback for the workspace prepared with [`Self::prepare`].
@@ -578,6 +590,7 @@ fn prepare_workspace(
     renderer: &RendererHandle,
     workspace: &mut Workspace,
     ui: &mut egui::Ui,
+    selected: &[InstanceId],
 ) -> Result<(), RendererError> {
     let rect = ui.max_rect();
     let pixels_per_point = ui.pixels_per_point();
@@ -590,7 +603,7 @@ fn prepare_workspace(
     let mut renderer = renderer.lock().expect("engine renderer lock poisoned");
     #[cfg(target_arch = "wasm32")]
     let mut renderer = renderer.borrow_mut();
-    renderer.prepare_eframe_scene(workspace, size)
+    renderer.prepare_eframe_scene(workspace, size, selected)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -632,10 +645,12 @@ impl trdevtools::DevtoolsHost for Engine {
         &mut self.workspace
     }
 
-    fn render_scene(&mut self, ui: &mut egui::Ui) {
+    fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
+        let previous = self.devtools_render_selection.replace(selected.to_vec());
         if let Err(error) = self.render(ui) {
             log::error!("scene preparation failed: {error}");
         }
+        self.devtools_render_selection = previous;
     }
 }
 
@@ -739,8 +754,13 @@ impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
         &mut self.engine.workspace
     }
 
-    fn render_scene(&mut self, ui: &mut egui::Ui) {
+    fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
+        let previous = self
+            .engine
+            .devtools_render_selection
+            .replace(selected.to_vec());
         self.app.render(self.engine, ui, self.frame);
+        self.engine.devtools_render_selection = previous;
     }
 }
 

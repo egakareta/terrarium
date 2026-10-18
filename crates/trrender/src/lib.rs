@@ -618,8 +618,6 @@ pub struct Renderer {
     >,
     material_bind_groups:
         HashMap<(PackedMaterialTextures, [TextureFilter; MATERIAL_SLOT_COUNT]), wgpu::BindGroup>,
-    outline_revision: u64,
-    outline_had_any: bool,
     light_revision: u64,
     light_had_any: bool,
     transparent_sort_depths: Vec<f32>,

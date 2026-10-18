@@ -4,10 +4,12 @@ use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::{Mutex, OnceLock};
 
-#[cfg(feature = "meshpart")]
 use slotmap::Key;
 
-use crate::{egui_wgpu, trscene::Workspace};
+use crate::{
+    egui_wgpu,
+    trscene::{Color3, InstanceId, OutlineMode, RenderOutline, Workspace},
+};
 
 #[cfg(feature = "meshpart")]
 mod viewport;
@@ -62,13 +64,33 @@ impl RenderAdapter {
         })
     }
 
-    /// Builds a borrowed render snapshot from a workspace and submits it.
+    /// Builds a render snapshot, adds stencil outlines for selected instances, and submits it.
     pub fn prepare_eframe_scene(
         &mut self,
         workspace: &Workspace,
         size: [u32; 2],
+        selected: &[InstanceId],
     ) -> Result<(), RendererError> {
         let scene = workspace.render_scene();
+        let targets: Vec<_> = selected
+            .iter()
+            .copied()
+            .filter(|&id| workspace.instance(id).is_some())
+            .map(|id| id.data().as_ffi())
+            .collect();
+        let mut scene = scene;
+        if !targets.is_empty() {
+            scene.outlines.insert(
+                0,
+                RenderOutline {
+                    mode: OutlineMode::Silhouette,
+                    targets,
+                    color: Color3::new(0.1, 0.45, 1.0),
+                    width: 1.0,
+                    threshold: 0.08,
+                },
+            );
+        }
         self.backend.prepare(&scene, size)
     }
 
