@@ -58,7 +58,7 @@ fn release(key: Key) -> Event {
 fn frame(
     context: &egui::Context,
     devtools: &mut Devtools,
-    workspace: &mut Workspace,
+    host: &mut TestDevtoolsHost,
     events: Vec<Event>,
 ) {
     let mut output = context.run_ui(
@@ -70,7 +70,7 @@ fn frame(
             events,
             ..Default::default()
         },
-        |ui| devtools.show(ui.ctx(), workspace),
+        |ui| devtools.show_docked(ui, host),
     );
     output.textures_delta.clear();
 }
@@ -78,14 +78,14 @@ fn frame(
 fn click(
     context: &egui::Context,
     devtools: &mut Devtools,
-    workspace: &mut Workspace,
+    host: &mut TestDevtoolsHost,
     position: egui::Pos2,
 ) {
     for pressed in [true, false] {
         frame(
             context,
             devtools,
-            workspace,
+            host,
             vec![
                 Event::PointerMoved(position),
                 Event::PointerButton {
@@ -108,8 +108,10 @@ fn contains_text(shape: &egui::Shape, target: &str) -> bool {
 }
 
 #[test]
-fn hidden_inspector_shows_the_development_notice() {
-    let mut workspace = Workspace::new();
+fn hidden_inspector_renders_the_scene_and_development_notice() {
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
     let mut devtools = Devtools::default();
     let context = egui::Context::default();
     let raw_input = || egui::RawInput {
@@ -120,19 +122,25 @@ fn hidden_inspector_shows_the_development_notice() {
         ..Default::default()
     };
     let mut first_output = context.run_ui(raw_input(), |ui| {
-        devtools.show(ui.ctx(), &mut workspace);
+        devtools.show_docked(ui, &mut host);
     });
     first_output.textures_delta.clear();
     let mut output = context.run_ui(raw_input(), |ui| {
-        devtools.show(ui.ctx(), &mut workspace);
+        devtools.show_docked(ui, &mut host);
     });
 
-    let visible = output
+    let scene_is_visible = output
+        .shapes
+        .iter()
+        .any(|clipped| contains_text(&clipped.shape, "Rendered scene content"));
+    let notice_is_visible = output
         .shapes
         .iter()
         .any(|clipped| contains_text(&clipped.shape, "Development build"));
     output.textures_delta.clear();
-    assert!(visible);
+    assert!(scene_is_visible);
+    assert!(notice_is_visible);
+    assert!(!devtools.is_visible());
 }
 
 #[test]
@@ -172,55 +180,81 @@ fn full_dock_uses_the_application_title_for_the_scene_tab() {
 }
 
 #[test]
-fn f12_toggles_the_inspector_once_per_key_press() {
+fn full_dock_deletes_the_selected_instance_on_delete_key() {
     let mut workspace = Workspace::new();
+    let part = workspace.add_child(Part::new());
     let mut devtools = Devtools::default();
+    devtools.set_visible(true);
+    devtools.select(part, Modifiers::NONE, &[part]);
+    let mut host = TestDevtoolsHost { workspace };
+    let context = egui::Context::default();
+    let mut output = context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 720.0),
+            )),
+            events: vec![key(Key::Delete, false)],
+            ..Default::default()
+        },
+        |ui| devtools.show_docked(ui, &mut host),
+    );
+    output.textures_delta.clear();
+
+    assert!(host.workspace.instance(part).is_none());
+}
+
+#[test]
+fn f12_toggles_the_inspector_once_per_key_press() {
+    let mut devtools = Devtools::default();
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
     let context = egui::Context::default();
 
     assert!(!devtools.is_visible());
     frame(
         &context,
         &mut devtools,
-        &mut workspace,
+        &mut host,
         vec![key(Key::F12, false)],
     );
     assert!(devtools.is_visible());
     frame(
         &context,
         &mut devtools,
-        &mut workspace,
+        &mut host,
         vec![key(Key::F12, true)],
     );
     assert!(devtools.is_visible());
+    frame(&context, &mut devtools, &mut host, vec![release(Key::F12)]);
     frame(
         &context,
         &mut devtools,
-        &mut workspace,
-        vec![release(Key::F12)],
-    );
-    frame(
-        &context,
-        &mut devtools,
-        &mut workspace,
+        &mut host,
         vec![key(Key::F12, false)],
     );
     assert!(!devtools.is_visible());
 }
 
 #[test]
-fn bottom_right_button_toggles_the_inspector() {
-    let mut workspace = Workspace::new();
+fn bottom_right_button_shows_the_inspector() {
     let mut devtools = Devtools::default();
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
     let context = egui::Context::default();
-    frame(&context, &mut devtools, &mut workspace, Vec::new());
-    frame(&context, &mut devtools, &mut workspace, Vec::new());
-    let button_center = egui::pos2(1252.0, 692.0);
+    frame(&context, &mut devtools, &mut host, Vec::new());
+    frame(&context, &mut devtools, &mut host, Vec::new());
 
-    click(&context, &mut devtools, &mut workspace, button_center);
+    click(
+        &context,
+        &mut devtools,
+        &mut host,
+        egui::pos2(1252.0, 692.0),
+    );
+
     assert!(devtools.is_visible());
-
-    click(&context, &mut devtools, &mut workspace, button_center);
-    assert!(!devtools.is_visible());
 }
 
 #[test]
@@ -406,12 +440,14 @@ fn setters_preserve_field_invariants_and_root_edits_are_reflected() {
 
 #[test]
 fn deleting_nested_selection_preserves_root_and_unselected_siblings() {
-    let mut workspace = Workspace::new();
+    let mut host = TestDevtoolsHost {
+        workspace: Workspace::new(),
+    };
     let mut parent = Part::new();
     let child = parent.add_child(Part::new());
-    let parent = workspace.add_child(parent);
-    let sibling = workspace.add_child(Part::new());
-    let root = workspace.id();
+    let parent = host.workspace.add_child(parent);
+    let sibling = host.workspace.add_child(Part::new());
+    let root = host.workspace.id();
     let order = [root, parent, child, sibling];
     let mut devtools = Devtools::default();
     let context = egui::Context::default();
@@ -423,14 +459,14 @@ fn deleting_nested_selection_preserves_root_and_unselected_siblings() {
     frame(
         &context,
         &mut devtools,
-        &mut workspace,
+        &mut host,
         vec![key(Key::Delete, false)],
     );
 
-    assert!(workspace.instance(parent).is_none());
-    assert!(workspace.instance(child).is_none());
-    assert!(workspace.instance(sibling).is_some());
-    assert_eq!(workspace.id(), root);
+    assert!(host.workspace.instance(parent).is_none());
+    assert!(host.workspace.instance(child).is_none());
+    assert!(host.workspace.instance(sibling).is_some());
+    assert_eq!(host.workspace.id(), root);
     assert_eq!(devtools.selected(), &[root]);
 }
 
