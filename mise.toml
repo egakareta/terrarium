@@ -43,7 +43,8 @@ run = "cargo test --workspace --all-targets --all-features"
 
 [tasks."test:wasm"]
 description = "Run .rs tests for wasm"
-run = "WASM_BINDGEN_TEST_WEBDRIVER_JSON=tests/webdriver.json wasm-pack test --headless --chrome"
+run = "wasm-pack test --headless --chrome"
+env = { WASM_BINDGEN_TEST_WEBDRIVER_JSON = "tests/webdriver.json" }
 
 [tasks."bench:native"]
 description = "Run benchmarks for native"
