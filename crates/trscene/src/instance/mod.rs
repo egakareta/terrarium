@@ -21,6 +21,7 @@ mod meshpart;
 mod outline;
 mod part;
 mod pv;
+mod rig;
 #[cfg(feature = "sound")]
 mod sound;
 mod workspace;
@@ -31,6 +32,8 @@ pub use meshpart::*;
 pub use outline::*;
 pub use part::*;
 pub use pv::*;
+pub(crate) use pv::{InstanceTransformUpdate, update_instance_transform};
+pub use rig::*;
 #[cfg(feature = "sound")]
 pub use sound::*;
 pub use workspace::*;
@@ -136,6 +139,8 @@ impl InstanceLookup {
 /// Implements the common [`Instance`] plumbing for a type backed by
 /// [`InstanceData`]. The field paths provide the type-specific name and
 /// storage locations.
+///
+/// Types implementing [`Spatial`] automatically expose their spatial capability.
 #[macro_export]
 macro_rules! impl_instance {
     (
@@ -147,6 +152,19 @@ macro_rules! impl_instance {
             $(
                 $crate::__impl_instance_inspection!($inspect);
             )?
+
+            fn spatial(&self) -> Option<&dyn $crate::Spatial> {
+                use $crate::__DetectSpatial as _;
+
+                (&&$crate::__SpatialProbe::<Self>(::std::marker::PhantomData)).get(self)
+            }
+
+            fn spatial_mut(&mut self) -> Option<&mut dyn $crate::Spatial> {
+                use $crate::__DetectSpatial as _;
+
+                (&&$crate::__SpatialProbe::<Self>(::std::marker::PhantomData)).get_mut(self)
+            }
+
             fn class_name(&self) -> &'static str {
                 $class_name
             }
@@ -258,6 +276,47 @@ macro_rules! impl_instance {
             }
         }
     };
+}
+
+/// Concrete type marker for spatial capability detection in [`impl_instance!`].
+#[doc(hidden)]
+pub struct __SpatialProbe<T>(
+    /// Carries the concrete instance type without storing an instance.
+    pub std::marker::PhantomData<T>,
+);
+
+/// Compile-time spatial capability selection for [`impl_instance!`].
+///
+/// Method resolution on `&&__SpatialProbe<T>` selects the spatial implementation
+/// when its bound holds, otherwise dereferencing to the fallback. These calls
+/// must remain in the concrete macro expansion rather than a generic helper.
+#[doc(hidden)]
+pub trait __DetectSpatial<T> {
+    /// Returns shared spatial access when supported by the concrete type.
+    fn get(self, instance: &T) -> Option<&dyn Spatial>;
+
+    /// Returns mutable spatial access when supported by the concrete type.
+    fn get_mut(self, instance: &mut T) -> Option<&mut dyn Spatial>;
+}
+
+impl<T> __DetectSpatial<T> for &__SpatialProbe<T> {
+    fn get(self, _instance: &T) -> Option<&dyn Spatial> {
+        None
+    }
+
+    fn get_mut(self, _instance: &mut T) -> Option<&mut dyn Spatial> {
+        None
+    }
+}
+
+impl<T: Spatial> __DetectSpatial<T> for &&__SpatialProbe<T> {
+    fn get(self, instance: &T) -> Option<&dyn Spatial> {
+        Some(instance)
+    }
+
+    fn get_mut(self, instance: &mut T) -> Option<&mut dyn Spatial> {
+        Some(instance)
+    }
 }
 
 /// Implements the feature-dependent portion of [`impl_instance!`].
@@ -466,6 +525,16 @@ impl Clone for InstanceData {
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
 pub trait Instance: Any + Debug + InstanceClone {
+    /// Returns this instance's spatial capability, when it has a world-space pivot.
+    fn spatial(&self) -> Option<&dyn Spatial> {
+        None
+    }
+
+    /// Returns mutable access to this instance's spatial capability, when present.
+    fn spatial_mut(&mut self) -> Option<&mut dyn Spatial> {
+        None
+    }
+
     /// Returns fields exposed to the devtools inspector.
     ///
     /// Custom instances expose their name by default. Derive

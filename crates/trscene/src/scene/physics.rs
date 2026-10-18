@@ -9,7 +9,7 @@ use rapier3d::prelude::{
 use crate::MeshPart;
 use crate::{
     BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId,
-    PVInstance, Part, PartShape,
+    PVInstance, Part, PartShape, Rig,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -18,34 +18,48 @@ use crate::{
 /// [`Workspace`](crate::Workspace) creates one automatically when the `physics` feature is
 /// enabled. Parts with [`HasBasePart::anchored`](crate::HasBasePart::anchored) set to `false`
 /// are simulated as dynamic rigid bodies; anchored parts are fixed rigid bodies.
+/// A [`Rig`] shares one body among all its descendant parts, using the rig's
+/// anchored state and each part's collision shape and flag.
 /// Use [`Self::rapier_mut`] for forces, impulses, joints, and other advanced Rapier operations.
 pub struct PhysicsWorld {
     world: RapierPhysicsWorld,
     bodies: HashMap<InstanceId, BodyEntry>,
+    body_instances: HashMap<InstanceId, InstanceId>,
     collider_instances: HashMap<ColliderHandle, InstanceId>,
     last_transforms: HashMap<InstanceId, Mat4>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct BodyDescriptor {
-    anchored: bool,
-    can_collide: bool,
+#[derive(Clone, Copy, Debug)]
+struct ColliderEntry {
+    handle: ColliderHandle,
     shape: PartShape,
+    size: Vec3,
+    local_pose: Mat4,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 struct BodyEntry {
     handle: RigidBodyHandle,
-    collider: Option<ColliderHandle>,
-    descriptor: BodyDescriptor,
-    transform: Mat4,
+    anchored: bool,
+    colliders: HashMap<InstanceId, ColliderEntry>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub(crate) struct PhysicsInstance {
     id: InstanceId,
     transform: Mat4,
-    descriptor: BodyDescriptor,
+    anchored: bool,
+    members: Vec<InstanceId>,
+    parts: Vec<PhysicsPart>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PhysicsPart {
+    id: InstanceId,
+    transform: Mat4,
+    anchored: bool,
+    can_collide: bool,
+    shape: PartShape,
 }
 
 impl PhysicsWorld {
@@ -54,6 +68,7 @@ impl PhysicsWorld {
         Self {
             world: RapierPhysicsWorld::new(),
             bodies: HashMap::new(),
+            body_instances: HashMap::new(),
             collider_instances: HashMap::new(),
             last_transforms: HashMap::new(),
         }
@@ -91,9 +106,10 @@ impl PhysicsWorld {
         &mut self.world
     }
 
-    /// Returns the Rapier body handle associated with a workspace instance.
+    /// Returns the body handle for a part or rig, including members of a rig.
     pub fn body_handle(&self, instance: InstanceId) -> Option<RigidBodyHandle> {
-        self.bodies.get(&instance).map(|entry| entry.handle)
+        let owner = self.body_instances.get(&instance)?;
+        self.bodies.get(owner).map(|entry| entry.handle)
     }
 
     /// Returns the Rapier body associated with a workspace instance.
@@ -161,7 +177,7 @@ impl PhysicsWorld {
             let Some(entry) = self.bodies.get(&instance.id) else {
                 continue;
             };
-            if instance.descriptor.anchored {
+            if instance.anchored {
                 continue;
             }
             let Some(body) = self.world.bodies.get(entry.handle) else {
@@ -192,66 +208,55 @@ impl PhysicsWorld {
         for id in stale {
             if let Some(entry) = self.bodies.remove(&id) {
                 self.world.remove_body(entry.handle);
-                if let Some(collider) = entry.collider {
-                    self.collider_instances.remove(&collider);
+                for collider in entry.colliders.values() {
+                    self.collider_instances.remove(&collider.handle);
                 }
             }
             self.last_transforms.remove(&id);
         }
 
+        self.body_instances.clear();
         for instance in instances {
-            let existing = self.bodies.get(&instance.id).copied();
-            if let Some(entry) =
-                existing.filter(|entry| self.world.bodies.get(entry.handle).is_some())
-            {
-                self.update_instance(instance, entry);
-            } else {
-                self.bodies.remove(&instance.id);
-                self.last_transforms.remove(&instance.id);
-                self.insert_instance(instance);
+            self.body_instances.insert(instance.id, instance.id);
+            for member in &instance.members {
+                self.body_instances.insert(*member, instance.id);
             }
+            let mut entry = self
+                .bodies
+                .remove(&instance.id)
+                .filter(|entry| {
+                    if self.world.bodies.get(entry.handle).is_some() {
+                        return true;
+                    }
+                    for collider in entry.colliders.values() {
+                        self.collider_instances.remove(&collider.handle);
+                    }
+                    false
+                })
+                .unwrap_or_else(|| {
+                    self.last_transforms.remove(&instance.id);
+                    BodyEntry {
+                        handle: self.world.insert_body(body_builder(instance)),
+                        anchored: instance.anchored,
+                        colliders: HashMap::new(),
+                    }
+                });
+            self.update_instance(instance, &mut entry);
+            self.bodies.insert(instance.id, entry);
         }
     }
 
-    fn insert_instance(&mut self, instance: &PhysicsInstance) {
-        let builder = body_builder(instance);
-        let handle = self.world.insert_body(builder);
-        let collider = if instance.descriptor.can_collide {
-            let collider = self.world.insert_collider(
-                collider_builder(instance.descriptor, instance.transform),
-                Some(handle),
-            );
-            self.collider_instances.insert(collider, instance.id);
-            Some(collider)
-        } else {
-            None
-        };
-        self.bodies.insert(
-            instance.id,
-            BodyEntry {
-                handle,
-                collider,
-                descriptor: instance.descriptor,
-                transform: instance.transform,
-            },
-        );
-        self.last_transforms.insert(
-            instance.id,
-            PVInstance::pose_from_transform(instance.transform),
-        );
-    }
-
-    fn update_instance(&mut self, instance: &PhysicsInstance, mut entry: BodyEntry) {
-        let Some(body) = self.world.bodies.get_mut(entry.handle) else {
-            return;
-        };
+    fn update_instance(&mut self, instance: &PhysicsInstance, entry: &mut BodyEntry) {
+        let body = self
+            .world
+            .bodies
+            .get_mut(entry.handle)
+            .expect("synchronized body");
         let pose = PVInstance::pose_from_transform(instance.transform);
-
-        if entry.descriptor.anchored != instance.descriptor.anchored {
-            body.set_body_type(body_type(instance.descriptor.anchored), true);
+        if entry.anchored != instance.anchored {
+            body.set_body_type(body_type(instance.anchored), true);
         }
-
-        if instance.descriptor.anchored {
+        if instance.anchored {
             body.set_position(rapier_pose(pose), true);
             self.last_transforms.insert(instance.id, pose);
         } else if self
@@ -263,43 +268,70 @@ impl PhysicsWorld {
             body.set_linvel(rapier_vector(Vec3::ZERO), true);
             body.set_angvel(rapier_vector(Vec3::ZERO), true);
         }
+        entry.anchored = instance.anchored;
 
-        let current_size = instance.transform.to_scale_rotation_translation().0;
-        let previous_size = entry.transform.to_scale_rotation_translation().0;
-        let collider_changed = entry.descriptor.can_collide != instance.descriptor.can_collide
-            || !vectors_approximately_equal(previous_size, current_size)
-            || entry.descriptor.shape != instance.descriptor.shape;
-        if collider_changed {
-            if let Some(collider) = entry.collider.take() {
-                self.world.remove_collider(collider);
-                self.collider_instances.remove(&collider);
+        let active: HashMap<_, _> = instance
+            .parts
+            .iter()
+            .filter(|part| part.can_collide)
+            .map(|part| (part.id, ()))
+            .collect();
+        let stale: Vec<_> = entry
+            .colliders
+            .keys()
+            .copied()
+            .filter(|id| !active.contains_key(id))
+            .collect();
+        for id in stale {
+            if let Some(collider) = entry.colliders.remove(&id) {
+                self.world.remove_collider(collider.handle);
+                self.collider_instances.remove(&collider.handle);
             }
-            if instance.descriptor.can_collide {
-                let collider = self.world.insert_collider(
-                    collider_builder(instance.descriptor, instance.transform),
-                    Some(entry.handle),
-                );
-                self.collider_instances.insert(collider, instance.id);
-                entry.collider = Some(collider);
+        }
+
+        let inverse_pose = pose.inverse();
+        for part in instance.parts.iter().filter(|part| part.can_collide) {
+            let size = part.transform.to_scale_rotation_translation().0.abs();
+            let local_pose = inverse_pose * PVInstance::pose_from_transform(part.transform);
+            let existing = entry.colliders.get(&part.id).copied();
+            if let Some(collider) = existing.filter(|collider| {
+                collider.shape == part.shape
+                    && vectors_approximately_equal(collider.size, size)
+                    && self.world.colliders.get(collider.handle).is_some()
+            }) {
+                if !matrices_approximately_equal(collider.local_pose, local_pose) {
+                    self.world
+                        .colliders
+                        .get_mut(collider.handle)
+                        .expect("existing collider")
+                        .set_position_wrt_parent(rapier_pose(local_pose));
+                    entry
+                        .colliders
+                        .get_mut(&part.id)
+                        .expect("existing collider")
+                        .local_pose = local_pose;
+                }
+                continue;
             }
-        } else if instance.descriptor.can_collide
-            && entry
-                .collider
-                .is_none_or(|collider| self.world.colliders.get(collider).is_none())
-        {
-            if let Some(collider) = entry.collider.take() {
-                self.collider_instances.remove(&collider);
+            if let Some(collider) = entry.colliders.remove(&part.id) {
+                self.world.remove_collider(collider.handle);
+                self.collider_instances.remove(&collider.handle);
             }
-            let collider = self.world.insert_collider(
-                collider_builder(instance.descriptor, instance.transform),
+            let handle = self.world.insert_collider(
+                collider_builder(part.shape, part.transform).position(rapier_pose(local_pose)),
                 Some(entry.handle),
             );
-            self.collider_instances.insert(collider, instance.id);
-            entry.collider = Some(collider);
+            self.collider_instances.insert(handle, part.id);
+            entry.colliders.insert(
+                part.id,
+                ColliderEntry {
+                    handle,
+                    shape: part.shape,
+                    size,
+                    local_pose,
+                },
+            );
         }
-        entry.descriptor = instance.descriptor;
-        entry.transform = instance.transform;
-        self.bodies.insert(instance.id, entry);
     }
 }
 
@@ -321,7 +353,44 @@ impl fmt::Debug for PhysicsWorld {
 }
 
 impl PhysicsInstance {
-    pub(crate) fn from_instance(instance: &dyn Instance) -> Option<Self> {
+    pub(crate) fn collect(instance: &dyn Instance, instances: &mut Vec<Self>) {
+        if let Some(rig) = instance.downcast_ref::<Rig>() {
+            let mut body = Self {
+                id: rig.id(),
+                transform: rig.pivot(),
+                anchored: rig.anchored(),
+                members: Vec::new(),
+                parts: Vec::new(),
+            };
+            for child in rig.descendants() {
+                if child.is::<Rig>() {
+                    body.members.push(child.id());
+                }
+                if let Some(part) = PhysicsPart::from_instance(child) {
+                    body.members.push(part.id);
+                    body.parts.push(part);
+                }
+            }
+            instances.push(body);
+            return;
+        }
+        if let Some(part) = PhysicsPart::from_instance(instance) {
+            instances.push(Self {
+                id: part.id,
+                transform: part.transform,
+                anchored: part.anchored,
+                members: Vec::new(),
+                parts: vec![part],
+            });
+        }
+        for child in instance.children() {
+            Self::collect(child.as_ref(), instances);
+        }
+    }
+}
+
+impl PhysicsPart {
+    fn from_instance(instance: &dyn Instance) -> Option<Self> {
         if let Some(part) = instance.downcast_ref::<Part>() {
             return Some(Self::from_traits(part.id(), part, part.shape()));
         }
@@ -342,32 +411,21 @@ impl PhysicsInstance {
         Self {
             id,
             transform: part.pivot(),
-            descriptor: BodyDescriptor {
-                anchored: part.anchored(),
-                can_collide: part.can_collide(),
-                shape,
-            },
+            anchored: part.anchored(),
+            can_collide: part.can_collide(),
+            shape,
         }
     }
 }
 
 pub(crate) fn apply_transform(instance: &mut dyn Instance, transform: Mat4) {
-    if let Some(part) = instance.downcast_mut::<Part>() {
-        part.with_pose(transform);
-        return;
-    }
-    #[cfg(feature = "meshpart")]
-    if let Some(part) = instance.downcast_mut::<MeshPart>() {
-        part.with_pose(transform);
-        return;
-    }
-    if let Some(part) = instance.downcast_mut::<BasePart>() {
-        part.with_pose(transform);
+    if let Some(spatial) = instance.spatial_mut() {
+        spatial.set_rigid_pose(transform);
     }
 }
 
 fn body_builder(instance: &PhysicsInstance) -> RigidBodyBuilder {
-    let mut builder = if instance.descriptor.anchored {
+    let mut builder = if instance.anchored {
         RigidBodyBuilder::fixed()
     } else {
         RigidBodyBuilder::dynamic()
@@ -387,13 +445,10 @@ fn body_type(anchored: bool) -> RigidBodyType {
     }
 }
 
-fn collider_builder(
-    descriptor: BodyDescriptor,
-    transform: Mat4,
-) -> rapier3d::prelude::ColliderBuilder {
+fn collider_builder(shape: PartShape, transform: Mat4) -> rapier3d::prelude::ColliderBuilder {
     let half_size =
         (transform.to_scale_rotation_translation().0.abs() * 0.5).max(Vec3::splat(0.001));
-    match descriptor.shape {
+    match shape {
         PartShape::Ball => ColliderBuilder::ball(half_size.max_element()),
         PartShape::Cylinder => ColliderBuilder::cylinder(half_size.y, half_size.x.max(half_size.z)),
         PartShape::Block | PartShape::Wedge | PartShape::CornerWedge => {

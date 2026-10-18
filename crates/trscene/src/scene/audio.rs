@@ -6,11 +6,8 @@ use euphorium::{
 };
 use thiserror::Error;
 
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
 use crate::{
-    BasePart, Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Part, Sound,
-    Workspace, glam::Vec3,
+    Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Sound, Workspace, glam::Vec3,
 };
 
 /// A failure discovered while updating the workspace's audio scene.
@@ -129,20 +126,7 @@ fn emitter(workspace: &Workspace, sound: &Sound) -> Option<(InstanceId, Vec3)> {
     let mut parent = sound.parent();
     while let Some(id) = parent {
         let instance = workspace.instance(id)?;
-        let pivot = instance
-            .downcast_ref::<Part>()
-            .map(HasPVInstance::pivot)
-            .or_else(|| {
-                instance
-                    .downcast_ref::<BasePart>()
-                    .map(HasPVInstance::pivot)
-            });
-        #[cfg(feature = "meshpart")]
-        let pivot = pivot.or_else(|| {
-            instance
-                .downcast_ref::<MeshPart>()
-                .map(HasPVInstance::pivot)
-        });
+        let pivot = instance.spatial().map(|spatial| spatial.world_pivot());
         if let Some(pivot) = pivot {
             return Some((
                 id,
@@ -236,7 +220,7 @@ mod tests {
 
     use super::*;
     #[cfg(feature = "physics")]
-    use crate::HasBasePart;
+    use crate::{BasePart, HasBasePart, HasPVInstance, Part};
 
     fn assert_vector(actual: [f32; 3], expected: Vec3) {
         for (actual, expected) in actual.into_iter().zip(expected.to_array()) {

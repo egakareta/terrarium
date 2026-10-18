@@ -2,14 +2,13 @@ use std::rc::Rc;
 
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
-use crate::{
-    BasePart, Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
-    InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Texture, TextureError,
-    TextureHandle, TweenManager,
-    glam::{Mat4, Vec3},
-};
 #[cfg(feature = "default-materials")]
 use crate::{BuiltinMaterial, Material};
+use crate::{
+    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
+    InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Rig, Texture, TextureError,
+    TextureHandle, TweenManager, glam::*,
+};
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
 #[cfg(feature = "physics")]
@@ -310,7 +309,7 @@ impl Workspace {
     pub fn update_camera(&mut self, delta: f32) {
         let subject = self.current_camera.subject().and_then(|id| {
             self.instance(id)
-                .and_then(pv_instance_pose)
+                .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
                 .map(|pose| (id, pose))
         });
         self.camera_controller
@@ -320,6 +319,7 @@ impl Workspace {
     /// Advances the simulation when enabled.
     pub fn update(&mut self, delta_seconds: f32) {
         self.update_tweens(delta_seconds);
+        self.update_animations(delta_seconds);
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
         self.update_camera(delta_seconds);
@@ -343,10 +343,10 @@ impl Workspace {
 
     #[cfg(feature = "physics")]
     fn update_physics(&mut self, delta_seconds: f32) {
-        let instances: Vec<_> = self
-            .instances()
-            .filter_map(PhysicsInstance::from_instance)
-            .collect();
+        let mut instances = Vec::new();
+        for child in self.children() {
+            PhysicsInstance::collect(child.as_ref(), &mut instances);
+        }
         let transforms = self.physics.step(&instances, delta_seconds);
         for (id, transform) in transforms {
             if let Some(instance) = self.instance_mut(id) {
@@ -372,6 +372,24 @@ impl Workspace {
         &mut self.tween_manager
     }
 
+    /// Advances all rig animations without updating physics or the camera.
+    ///
+    /// Outer rigs animate before nested rigs, so inner animations use the
+    /// updated parent transforms. This is called automatically by [`Self::update`].
+    pub fn update_animations(&mut self, delta_seconds: f32) {
+        fn update(instance: &mut dyn Instance, delta_seconds: f32) {
+            if let Some(rig) = instance.downcast_mut::<Rig>() {
+                rig.update_animation(delta_seconds);
+            }
+            for child in instance.children_mut() {
+                update(child, delta_seconds);
+            }
+        }
+        for child in self.children_mut() {
+            update(child, delta_seconds);
+        }
+    }
+
     /// Returns the active camera controller.
     pub fn camera_controller(&self) -> &CameraController {
         &self.camera_controller
@@ -381,17 +399,6 @@ impl Workspace {
     pub fn camera_controller_mut(&mut self) -> &mut CameraController {
         &mut self.camera_controller
     }
-}
-
-fn pv_instance_pose(instance: &dyn Instance) -> Option<Mat4> {
-    let pose = instance
-        .downcast_ref::<Camera>()
-        .map(HasPVInstance::pose)
-        .or_else(|| instance.downcast_ref::<BasePart>().map(HasPVInstance::pose))
-        .or_else(|| instance.downcast_ref::<Part>().map(HasPVInstance::pose));
-    #[cfg(feature = "meshpart")]
-    let pose = pose.or_else(|| instance.downcast_ref::<MeshPart>().map(HasPVInstance::pose));
-    pose
 }
 
 impl Clone for Workspace {

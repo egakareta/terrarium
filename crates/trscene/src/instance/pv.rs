@@ -1,7 +1,5 @@
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
 use crate::{
-    BasePart, Camera, Instance, Part,
+    Instance,
     glam::{EulerRot, Mat4, Quat, Vec3},
 };
 
@@ -38,6 +36,33 @@ impl PVInstance {
     }
 }
 
+fn pivot_with_pose(pivot: Mat4, pose: Mat4) -> Mat4 {
+    let size = pivot.to_scale_rotation_translation().0;
+    PVInstance::pose_from_transform(pose) * Mat4::from_scale(size)
+}
+
+fn pivot_with_size(pivot: Mat4, size: Vec3) -> Mat4 {
+    PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size)
+}
+
+fn pivot_with_position(pivot: Mat4, position: Vec3) -> Mat4 {
+    let (size, rotation, _) = pivot.to_scale_rotation_translation();
+    Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size)
+}
+
+fn pivot_with_orientation(pivot: Mat4, orientation: Vec3) -> Mat4 {
+    let size = pivot.to_scale_rotation_translation().0;
+    Mat4::from_rotation_translation(
+        Quat::from_euler(
+            EulerRot::XYZ,
+            orientation.x.to_radians(),
+            orientation.y.to_radians(),
+            orientation.z.to_radians(),
+        ),
+        pivot.w_axis.truncate(),
+    ) * Mat4::from_scale(size)
+}
+
 /// Access to the underlying [`PVInstance`].
 pub trait HasPVInstance {
     /// Returns shared access to the underlying [`PVInstance`].
@@ -45,6 +70,20 @@ pub trait HasPVInstance {
 
     /// Returns mutable access to the underlying [`PVInstance`].
     fn pv_mut(&mut self) -> &mut PVInstance;
+
+    /// Sets the world-space pivot in place.
+    ///
+    /// The default implementation changes only this instance. [`Rig`] also
+    /// moves its descendants, preserving their relative transforms.
+    fn set_pivot(&mut self, pivot: Mat4) {
+        self.pv_mut().pivot = pivot;
+    }
+
+    /// Reports whether this instance accepts the supplied pivot.
+    #[doc(hidden)]
+    fn accepts_pivot(&self, _pivot: Mat4) -> bool {
+        true
+    }
 
     /// The world-space transform of the instance's pivot.
     fn pivot(&self) -> Mat4 {
@@ -76,12 +115,13 @@ pub trait HasPVInstance {
             .normalize_or_zero()
     }
 
-    /// Moves this instance and all built-in spatial descendants to a world-space pivot.
+    /// Moves this instance and all spatial descendants to a world-space pivot.
     ///
     /// Descendants receive the same transform delta, preserving their transforms
     /// relative to this instance, including scale. Non-spatial descendants are
     /// traversed so their spatial children also move.
-    /// Use [`Self::with_pivot`] to change only this instance's transform.
+    /// For instances other than [`Rig`], [`Self::with_pivot`] changes only the
+    /// instance's own transform.
     ///
     /// ```
     /// use trscene::{HasPVInstance, Instance, Part, glam::{Mat4, Vec3}};
@@ -104,30 +144,19 @@ pub trait HasPVInstance {
     where
         Self: Instance,
     {
-        let current = self.pivot();
-        if current == pivot {
-            return;
-        }
-        let transform = pivot * current.inverse();
-        assert!(
-            transform.is_finite(),
-            "pivot_to requires an invertible current pivot and a finite transform delta"
-        );
-        self.pv_mut().pivot = pivot;
-        for child in self.children_mut() {
-            transform_subtree(child, transform);
-        }
+        pivot_hierarchy_to(self, pivot);
     }
 
-    /// Replaces only this instance's position, orientation and scale.
+    /// Replaces this instance's position, orientation and scale.
     ///
-    /// Descendants keep their world-space transforms. Use [`Self::pivot_to`]
-    /// to move an instance hierarchy together.
+    /// Descendants keep their world-space transforms by default. [`Rig`]
+    /// moves its descendants with it. Use [`Self::pivot_to`] to move any
+    /// instance hierarchy together.
     fn with_pivot(mut self, pivot: Mat4) -> Self
     where
         Self: Sized,
     {
-        self.pv_mut().pivot = pivot;
+        self.set_pivot(pivot);
         self
     }
 
@@ -136,9 +165,7 @@ pub trait HasPVInstance {
     where
         Self: Sized,
     {
-        let pivot = self.pivot();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pose) * Mat4::from_scale(size);
+        self.set_pivot(pivot_with_pose(self.pivot(), pose));
         self
     }
 
@@ -147,8 +174,7 @@ pub trait HasPVInstance {
     where
         Self: Sized,
     {
-        let pivot = self.pivot();
-        self.pv_mut().pivot = PVInstance::pose_from_transform(pivot) * Mat4::from_scale(size);
+        self.set_pivot(pivot_with_size(self.pivot(), size));
         self
     }
 
@@ -157,11 +183,7 @@ pub trait HasPVInstance {
     where
         Self: Sized,
     {
-        let pivot = self.pivot();
-        let (_, rotation, _) = pivot.to_scale_rotation_translation();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot =
-            Mat4::from_rotation_translation(rotation, position) * Mat4::from_scale(size);
+        self.set_pivot(pivot_with_position(self.pivot(), position));
         self
     }
 
@@ -170,19 +192,118 @@ pub trait HasPVInstance {
     where
         Self: Sized,
     {
-        let pivot = self.pivot();
-        let position = self.position();
-        let size = pivot.to_scale_rotation_translation().0;
-        self.pv_mut().pivot = Mat4::from_rotation_translation(
-            Quat::from_euler(
-                EulerRot::XYZ,
-                orientation.x.to_radians(),
-                orientation.y.to_radians(),
-                orientation.z.to_radians(),
-            ),
-            position,
-        ) * Mat4::from_scale(size);
+        self.set_pivot(pivot_with_orientation(self.pivot(), orientation));
         self
+    }
+}
+
+/// An instance with a world-space pivot and hierarchy-aware transform operations.
+///
+/// Spatial instances are exposed through [`Instance::spatial`] so systems can
+/// work with transforms without knowing the concrete instance type.
+pub trait Spatial: Instance {
+    /// Returns the instance's world-space pivot.
+    fn world_pivot(&self) -> Mat4;
+
+    /// Replaces the pivot using this instance's transform semantics.
+    fn set_world_pivot(&mut self, pivot: Mat4);
+
+    /// Moves this instance and its spatial descendants to a world-space pivot.
+    fn move_to_world_pivot(&mut self, pivot: Mat4);
+
+    /// Returns the rigid pose, ignoring the pivot's scale.
+    fn rigid_pose(&self) -> Mat4;
+
+    /// Returns the translation component of the pivot.
+    fn world_position(&self) -> Vec3;
+
+    /// Returns XYZ Euler orientation angles in degrees.
+    fn world_orientation(&self) -> Vec3;
+
+    /// Returns the normalized world-space direction of local `-Z`.
+    fn world_forward(&self) -> Vec3;
+
+    /// Reports whether this instance accepts the supplied pivot.
+    #[doc(hidden)]
+    fn accepts_world_pivot(&self, pivot: Mat4) -> bool;
+
+    /// Replaces the position while preserving orientation and scale.
+    ///
+    /// Returns `false` if this instance rejects the resulting transform.
+    fn set_world_position(&mut self, position: Vec3) -> bool {
+        self.try_set_world_pivot(pivot_with_position(self.world_pivot(), position))
+    }
+
+    /// Replaces the XYZ Euler orientation in degrees while preserving position and scale.
+    ///
+    /// Returns `false` if this instance rejects the resulting transform.
+    fn set_world_orientation(&mut self, orientation: Vec3) -> bool {
+        self.try_set_world_pivot(pivot_with_orientation(self.world_pivot(), orientation))
+    }
+
+    /// Replaces the scale while preserving position and orientation.
+    ///
+    /// Returns `false` if this instance rejects the resulting transform.
+    fn set_world_size(&mut self, size: Vec3) -> bool {
+        self.try_set_world_pivot(pivot_with_size(self.world_pivot(), size))
+    }
+
+    /// Replaces position and orientation while preserving the current scale.
+    ///
+    /// Returns `false` if this instance rejects the resulting transform.
+    fn set_rigid_pose(&mut self, pose: Mat4) -> bool {
+        self.try_set_world_pivot(pivot_with_pose(self.world_pivot(), pose))
+    }
+
+    /// Replaces the pivot if this instance accepts it.
+    fn try_set_world_pivot(&mut self, pivot: Mat4) -> bool {
+        if !self.accepts_world_pivot(pivot) {
+            return false;
+        }
+        self.set_world_pivot(pivot);
+        true
+    }
+
+    /// Sets only this node's stored pivot, without applying rig-specific propagation.
+    #[doc(hidden)]
+    fn set_pivot_direct(&mut self, pivot: Mat4);
+}
+
+impl<T: HasPVInstance + Instance> Spatial for T {
+    fn world_pivot(&self) -> Mat4 {
+        HasPVInstance::pivot(self)
+    }
+
+    fn set_world_pivot(&mut self, pivot: Mat4) {
+        HasPVInstance::set_pivot(self, pivot);
+    }
+
+    fn move_to_world_pivot(&mut self, pivot: Mat4) {
+        HasPVInstance::pivot_to(self, pivot);
+    }
+
+    fn rigid_pose(&self) -> Mat4 {
+        HasPVInstance::pose(self)
+    }
+
+    fn world_position(&self) -> Vec3 {
+        HasPVInstance::position(self)
+    }
+
+    fn world_orientation(&self) -> Vec3 {
+        HasPVInstance::orientation(self)
+    }
+
+    fn world_forward(&self) -> Vec3 {
+        HasPVInstance::forward(self)
+    }
+
+    fn accepts_world_pivot(&self, pivot: Mat4) -> bool {
+        HasPVInstance::accepts_pivot(self, pivot)
+    }
+
+    fn set_pivot_direct(&mut self, pivot: Mat4) {
+        self.pv_mut().pivot = pivot;
     }
 }
 
@@ -204,35 +325,67 @@ impl<T: HasPVInstance + ?Sized> HasPVInstance for &mut T {
     fn pv_mut(&mut self) -> &mut PVInstance {
         (**self).pv_mut()
     }
+
+    fn set_pivot(&mut self, pivot: Mat4) {
+        (**self).set_pivot(pivot);
+    }
 }
 
-fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
-    if let Some(part) = instance.downcast_mut::<Part>() {
-        transform_pivot(part, transform);
-    } else if let Some(part) = instance.downcast_mut::<BasePart>() {
-        transform_pivot(part, transform);
-    } else if let Some(camera) = instance.downcast_mut::<Camera>() {
-        transform_pivot(camera, transform);
+/// Updates a spatial instance through its common transform interface.
+/// Returns false for non-spatial instances or singular resulting transforms.
+pub(crate) fn update_instance_transform(
+    instance: &mut dyn Instance,
+    update: InstanceTransformUpdate,
+) -> bool {
+    let Some(spatial) = instance.spatial_mut() else {
+        return false;
+    };
+    match update {
+        InstanceTransformUpdate::Position(value) => spatial.set_world_position(value),
+        InstanceTransformUpdate::Orientation(value) => spatial.set_world_orientation(value),
+        InstanceTransformUpdate::Size(value) => spatial.set_world_size(value),
     }
-    #[cfg(feature = "meshpart")]
-    if let Some(part) = instance.downcast_mut::<MeshPart>() {
-        transform_pivot(part, transform);
-    }
+}
 
+#[derive(Clone, Copy)]
+pub(crate) enum InstanceTransformUpdate {
+    Position(Vec3),
+    Orientation(Vec3),
+    Size(Vec3),
+}
+
+pub(crate) fn pivot_hierarchy_to<T: HasPVInstance + Instance + ?Sized>(
+    instance: &mut T,
+    pivot: Mat4,
+) {
+    let current = instance.pivot();
+    if current == pivot {
+        return;
+    }
+    let transform = pivot * current.inverse();
+    assert!(
+        transform.is_finite(),
+        "pivot_to requires an invertible current pivot and a finite transform delta"
+    );
+    instance.pv_mut().pivot = pivot;
     for child in instance.children_mut() {
         transform_subtree(child, transform);
     }
 }
 
-fn transform_pivot(instance: &mut impl HasPVInstance, transform: Mat4) {
-    let pivot = transform * instance.pivot();
-    instance.pv_mut().pivot = pivot;
+fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
+    if let Some(spatial) = instance.spatial_mut() {
+        spatial.set_pivot_direct(transform * spatial.world_pivot());
+    }
+    for child in instance.children_mut() {
+        transform_subtree(child, transform);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Workspace;
+    use crate::{BasePart, Camera, Part, Workspace};
 
     #[test]
     fn pivot_to_moves_nested_spatial_descendants_through_non_spatial_nodes() {
