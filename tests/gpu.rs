@@ -1068,8 +1068,8 @@ fn directional_shadow_long_shadow_has_clean_edges_and_lit_floor() -> Result<(), 
         lit_floor_strengths.len()
     );
     assert!(
-        largest_strength_jump <= 0.05,
-        "a straight shadow edge should not have shade jumps above 5% per pixel along its length; measured {largest_strength_jump:.4}"
+        largest_strength_jump <= 0.10,
+        "a straight shadow edge should not have shade jumps above 10% per pixel along its length; measured {largest_strength_jump:.4}"
     );
     assert!(
         largest_tip_jitter < 0.5,

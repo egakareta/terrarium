@@ -632,14 +632,14 @@ fn shadow_filter_axis(
     inverse_variance: f32,
     cutoff: f32,
     ratio_step: f32,
-) -> array<vec2<f32>, 5> {
-    let first_texel = floor(texel_position) - 2.0;
+) -> array<vec2<f32>, 3> {
+    let first_texel = floor(texel_position) - 1.0;
     let distance = first_texel + 0.5 - texel_position;
     var gaussian = exp(-distance * distance * inverse_variance);
     // g(d + 1) / g(d) = exp(-(2d + 1) / (2 sigma^2)); adjacent ratios advance geometrically.
     var ratio = exp(-(2.0 * distance + 1.0) * inverse_variance);
-    var samples: array<vec2<f32>, 5>;
-    for (var index = 0u; index < 5u; index += 1u) {
+    var samples: array<vec2<f32>, 3>;
+    for (var index = 0u; index < 3u; index += 1u) {
         let center = first_texel + f32(index) + 0.5;
         let weight = max(gaussian - cutoff, 0.0);
         samples[index] = vec2<f32>(center, weight);
@@ -669,7 +669,7 @@ fn sample_shadow(
     let sigma = (0.5 + softness * 2.0) * filter_scale;
     let inverse_variance = 0.5 / (sigma * sigma);
     // Zero weight at the support boundary keeps the kernel continuous when its texel window moves.
-    let cutoff = exp(-2.5 * 2.5 * inverse_variance);
+    let cutoff = exp(-1.5 * 1.5 * inverse_variance);
     let ratio_step = exp(-2.0 * inverse_variance);
     let map_size = vec2<f32>(textureDimensions(shadow_map));
     let u_samples = shadow_filter_axis(shadow_uv.x * map_size.x, inverse_variance, cutoff, ratio_step);
@@ -677,8 +677,8 @@ fn sample_shadow(
     var sum = 0.0;
     var total_weight = 0.0;
     // Texel-center comparisons do not depend on backend-specific comparison filtering.
-    for (var y = 0u; y < 5u; y += 1u) {
-        for (var x = 0u; x < 5u; x += 1u) {
+    for (var y = 0u; y < 3u; y += 1u) {
+        for (var x = 0u; x < 3u; x += 1u) {
             let weight = u_samples[x].y * v_samples[y].y;
             sum += weight * sample_shadow_compare(
                 vec2<f32>(u_samples[x].x, v_samples[y].x) / map_size,
