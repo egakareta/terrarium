@@ -578,7 +578,7 @@ impl FontMarket {
         egui::ScrollArea::vertical()
             .id_salt("font_market_results")
             .auto_shrink([false, false])
-            .show_rows(ui, 198.0, row_count, |ui, row_range| {
+            .show_rows(ui, card_height, row_count, |ui, row_range| {
                 let column_spacing = ui.spacing().item_spacing.x;
                 let card_width = (ui.available_width()
                     - column_spacing * (columns.saturating_sub(1) as f32))
