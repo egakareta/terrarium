@@ -57,6 +57,30 @@ fn frame(
     output.textures_delta.clear();
 }
 
+fn click(
+    context: &egui::Context,
+    devtools: &mut Devtools,
+    workspace: &mut Workspace,
+    position: egui::Pos2,
+) {
+    for pressed in [true, false] {
+        frame(
+            context,
+            devtools,
+            workspace,
+            vec![
+                Event::PointerMoved(position),
+                Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Modifiers::NONE,
+                },
+            ],
+        );
+    }
+}
+
 fn contains_text(shape: &egui::Shape, target: &str) -> bool {
     match shape {
         egui::Shape::Text(text) => text.galley.text() == target,
@@ -85,12 +109,10 @@ fn hidden_inspector_shows_the_development_notice() {
         devtools.show(ui.ctx(), &mut workspace);
     });
 
-    let visible = output.shapes.iter().any(|clipped| {
-        contains_text(
-            &clipped.shape,
-            "Development build: Press F12 to enable DevTools",
-        )
-    });
+    let visible = output
+        .shapes
+        .iter()
+        .any(|clipped| contains_text(&clipped.shape, "Development build"));
     output.textures_delta.clear();
     assert!(visible);
 }
@@ -128,6 +150,22 @@ fn f12_toggles_the_inspector_once_per_key_press() {
         &mut workspace,
         vec![key(Key::F12, false)],
     );
+    assert!(!devtools.is_visible());
+}
+
+#[test]
+fn bottom_right_button_toggles_the_inspector() {
+    let mut workspace = Workspace::new();
+    let mut devtools = Devtools::default();
+    let context = egui::Context::default();
+    frame(&context, &mut devtools, &mut workspace, Vec::new());
+    frame(&context, &mut devtools, &mut workspace, Vec::new());
+    let button_center = egui::pos2(1252.0, 692.0);
+
+    click(&context, &mut devtools, &mut workspace, button_center);
+    assert!(devtools.is_visible());
+
+    click(&context, &mut devtools, &mut workspace, button_center);
     assert!(!devtools.is_visible());
 }
 

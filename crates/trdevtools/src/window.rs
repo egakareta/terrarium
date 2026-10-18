@@ -171,6 +171,25 @@ impl Devtools {
             }
         }
         self.prune(workspace);
+        egui::Area::new(egui::Id::new(("terrarium_devtools_toggle", workspace.id())))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0))
+            .show(context, |ui| {
+                if ui
+                    .add_sized(
+                        egui::vec2(40.0, 40.0),
+                        egui::Button::new(egui::RichText::new(regular::WRENCH).size(22.0)),
+                    )
+                    .on_hover_text(if self.visible {
+                        "Hide DevTools (F12)"
+                    } else {
+                        "Show DevTools (F12)"
+                    })
+                    .clicked()
+                {
+                    self.set_visible(!self.visible);
+                }
+            });
         if !self.visible {
             show_development_notice(context);
             return;
@@ -504,11 +523,9 @@ fn show_development_notice(context: &egui::Context) {
         .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0))
         .show(context, |ui| {
             ui.add(
-                egui_text_outline::OutlinedLabel::new(
-                    "Development build: Press F12 to enable DevTools",
-                )
-                .text_color(egui::Color32::RED)
-                .outline(egui::Stroke::new(1.5, egui::Color32::BLACK)),
+                egui_text_outline::OutlinedLabel::new("Development build")
+                    .text_color(egui::Color32::RED)
+                    .outline(egui::Stroke::new(1.5, egui::Color32::BLACK)),
             );
         });
 }
