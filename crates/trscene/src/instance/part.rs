@@ -68,6 +68,7 @@ pub trait HasBasePart {
     fn base_part_mut(&mut self) -> &mut BasePart;
 
     crate::__instance_property! {
+        self;
         /// Tint applied when rendering this part.
         getter color() -> Color3 { self.base_part().color }
         setter set_color(color: Color3) {
@@ -77,6 +78,7 @@ pub trait HasBasePart {
     }
 
     crate::__instance_property! {
+        self;
         /// Transparency, where `0.0` is opaque and `1.0` is invisible. Values
         /// are clamped to `0.0..=1.0`; non-finite values become `0.0`.
         getter transparency() -> f32 { self.base_part().transparency }
@@ -91,6 +93,7 @@ pub trait HasBasePart {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether a physics system should treat this part as immovable. The
         /// default physics integration creates a fixed body when this is `true`
         /// and a dynamic body when this is `false`. Inside a [`crate::Rig`],
@@ -103,6 +106,7 @@ pub trait HasBasePart {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether a physics system should consider this part for collisions.
         /// The default physics integration omits this part's collider when
         /// `false`, while still simulating its rigid body.
@@ -143,6 +147,7 @@ pub trait HasMaterials {
     fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots;
 
     crate::__instance_property! {
+        self;
         /// A material is available only when all six directional slots have
         /// the same effective value. Unassigned slots use [`Material::default()`].
         getter material() -> Option<&Material> {
@@ -166,6 +171,7 @@ pub trait HasMaterials {
     }
 
     crate::__instance_property! {
+        self;
         /// Effective material for a directional slot. An unassigned slot uses
         /// [`Material::default()`]. Slots are mesh-selected, so they work for
         /// any [`PartShape`].
@@ -225,6 +231,7 @@ pub trait HasPart {
     fn part_mut(&mut self) -> &mut Part;
 
     crate::__instance_property! {
+        self;
         /// Primitive geometry used when the part is rendered.
         getter shape() -> PartShape { self.part().shape }
         setter set_shape(shape: PartShape) {

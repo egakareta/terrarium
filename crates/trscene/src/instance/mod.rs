@@ -579,6 +579,7 @@ pub trait Instance: Any + Debug + InstanceClone {
     fn class_name(&self) -> &'static str;
 
     crate::__instance_property! {
+        self;
         /// The display name of this instance. This defaults to its class name
         /// and can be changed independently of the instance type.
         declare getter name() -> &str;

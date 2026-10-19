@@ -6,6 +6,7 @@
 #[macro_export]
 macro_rules! __instance_property {
     (
+        $receiver:tt;
         $(#[$doc:meta])+
         $vis:vis
         getter $getter:ident($($getter_arg:ident: $getter_arg_ty:ty),*) -> $return_ty:ty {
@@ -20,27 +21,28 @@ macro_rules! __instance_property {
     ) => {
         #[doc = concat!("Returns the value of [`Self::", stringify!($getter), "`].")]
         $(#[$doc])*
-        $vis fn $getter(&self, $($getter_arg: $getter_arg_ty),*) -> $return_ty {
+        $vis fn $getter(&$receiver, $($getter_arg: $getter_arg_ty),*) -> $return_ty {
             $($getter_body)*
         }
 
         #[doc = concat!("Sets [`Self::", stringify!($getter), "`].")]
         $(#[$doc])*
-        $vis fn $setter(&mut self, $($arg: $arg_ty),+) {
+        $vis fn $setter(&mut $receiver, $($arg: $arg_ty),+) {
             $($setter_body)*
         }
 
         #[doc = concat!("Returns this instance with [`Self::", stringify!($getter), "`] set.")]
         $(#[$doc])*
-        $vis fn $builder(mut self, $($builder_arg: $builder_arg_ty),+) -> Self
+        $vis fn $builder(mut $receiver, $($builder_arg: $builder_arg_ty),+) -> Self
         where
             Self: Sized,
         {
             $($builder_body)*
-            self
+            $receiver
         }
     };
     (
+        $receiver:tt;
         $(#[$doc:meta])+
         $vis:vis
         getter $getter:ident($($getter_arg:ident: $getter_arg_ty:ty),*) -> $return_ty:ty {
@@ -53,27 +55,28 @@ macro_rules! __instance_property {
     ) => {
         #[doc = concat!("Returns the value of [`Self::", stringify!($getter), "`].")]
         $(#[$doc])*
-        $vis fn $getter(&self, $($getter_arg: $getter_arg_ty),*) -> $return_ty {
+        $vis fn $getter(&$receiver, $($getter_arg: $getter_arg_ty),*) -> $return_ty {
             $($getter_body)*
         }
 
         #[doc = concat!("Sets [`Self::", stringify!($getter), "`].")]
         $(#[$doc])*
-        $vis fn $setter(&mut self, $($arg: $arg_ty),+) {
+        $vis fn $setter(&mut $receiver, $($arg: $arg_ty),+) {
             $($setter_body)*
         }
 
         #[doc = concat!("Returns this instance with [`Self::", stringify!($getter), "`] set.")]
         $(#[$doc])*
-        $vis fn $builder(mut self, $($arg: $arg_ty),+) -> Self
+        $vis fn $builder(mut $receiver, $($arg: $arg_ty),+) -> Self
         where
             Self: Sized,
         {
-            self.$setter($($arg),+);
-            self
+            $receiver.$setter($($arg),+);
+            $receiver
         }
     };
     (
+        $receiver:tt;
         $(#[$doc:meta])+
         declare getter $getter:ident($($getter_arg:ident: $getter_arg_ty:ty),*) -> $return_ty:ty;
         declare setter $setter:ident($($set_arg:ident: $set_ty:ty),+);
@@ -81,15 +84,15 @@ macro_rules! __instance_property {
     ) => {
         #[doc = concat!("Returns the value of [`Self::", stringify!($getter), "`].")]
         $(#[$doc])*
-        fn $getter(&self, $($getter_arg: $getter_arg_ty),*) -> $return_ty;
+        fn $getter(&$receiver, $($getter_arg: $getter_arg_ty),*) -> $return_ty;
 
         #[doc = concat!("Sets [`Self::", stringify!($getter), "`].")]
         $(#[$doc])*
-        fn $setter(&mut self, $($set_arg: $set_ty),+);
+        fn $setter(&mut $receiver, $($set_arg: $set_ty),+);
 
         #[doc = concat!("Returns this instance with [`Self::", stringify!($getter), "`] set.")]
         $(#[$doc])*
-        fn $builder(self, $($builder_arg: $builder_ty),+) -> Self
+        fn $builder($receiver, $($builder_arg: $builder_ty),+) -> Self
         where
             Self: Sized;
     };

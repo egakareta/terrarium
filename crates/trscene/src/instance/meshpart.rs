@@ -338,6 +338,7 @@ pub trait HasMeshPart {
     fn mesh_part_mut(&mut self) -> &mut MeshPart;
 
     crate::__instance_property! {
+        self;
         /// CPU-side geometry rendered by this mesh part. Replacing it updates
         /// the bounds and schedules a new upload before the next frame.
         getter mesh() -> &Mesh { self.mesh_part().mesh.mesh() }

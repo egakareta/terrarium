@@ -35,6 +35,7 @@ pub trait HasLight {
     fn light_mut(&mut self) -> &mut LightProperties;
 
     crate::__instance_property! {
+        self;
         /// RGB color emitted by the light. Invalid color channels are
         /// sanitized by the renderer.
         getter color() -> Color3 { self.light().color }
@@ -45,6 +46,7 @@ pub trait HasLight {
     }
 
     crate::__instance_property! {
+        self;
         /// Intensity multiplier for the emitted light. Negative brightness is
         /// sanitized by the renderer.
         getter brightness() -> f32 { self.light().brightness }
@@ -55,6 +57,7 @@ pub trait HasLight {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether this light may use the renderer's bounded local-shadow budget.
         getter shadows() -> bool { self.light().shadows }
         setter set_shadows(shadows: bool) {
@@ -83,6 +86,7 @@ pub trait HasPointLight {
     fn point_light_mut(&mut self) -> &mut PointLight;
 
     crate::__instance_property! {
+        self;
         /// Maximum distance in world units affected by the light. The
         /// renderer clamps this to its supported range.
         getter range() -> f32 { self.point_light().range }
@@ -112,6 +116,7 @@ pub trait HasSpotLight {
     fn spot_light_mut(&mut self) -> &mut SpotLight;
 
     crate::__instance_property! {
+        self;
         /// Part face from which the cone emits.
         getter face() -> Face { self.spot_light().face }
         setter set_face(face: Face) {
@@ -121,6 +126,7 @@ pub trait HasSpotLight {
     }
 
     crate::__instance_property! {
+        self;
         /// Full cone angle in degrees. The renderer clamps this to `0..=180`.
         getter angle() -> f32 { self.spot_light().angle }
         setter set_angle(angle: f32) {
@@ -149,6 +155,7 @@ pub trait HasSurfaceLight {
     fn surface_light_mut(&mut self) -> &mut SurfaceLight;
 
     crate::__instance_property! {
+        self;
         /// Part face that acts as the emitting surface.
         getter face() -> Face { self.surface_light().face }
         setter set_face(face: Face) {
@@ -158,6 +165,7 @@ pub trait HasSurfaceLight {
     }
 
     crate::__instance_property! {
+        self;
         /// Full emission angle in degrees. The renderer clamps this to `0..=180`.
         getter angle() -> f32 { self.surface_light().angle }
         setter set_angle(angle: f32) {

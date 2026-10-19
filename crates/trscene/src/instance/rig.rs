@@ -30,6 +30,7 @@ impl Rig {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether the rig's physics body is immovable.
         pub getter anchored() -> bool { self.anchored }
         setter set_anchored(anchored: bool) {

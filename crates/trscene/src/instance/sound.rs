@@ -262,6 +262,7 @@ pub trait HasSound {
     fn sound_mut(&mut self) -> &mut Sound;
 
     crate::__instance_property! {
+        self;
         /// Encoded audio source descriptor. Replacing it preserves playback
         /// state and position when possible.
         getter source() -> &SoundSource { &self.sound().settings.source }
@@ -274,6 +275,7 @@ pub trait HasSound {
     }
 
     crate::__instance_property! {
+        self;
         /// Local volume before distance, occlusion, and master multipliers.
         /// Invalid values are reported by the next audio update.
         getter volume() -> f32 { self.sound().settings.volume }
@@ -284,6 +286,7 @@ pub trait HasSound {
     }
 
     crate::__instance_property! {
+        self;
         /// Authored playback speed before Doppler pitch shifting. Invalid
         /// values are reported by the next audio update.
         getter playback_speed() -> f32 { self.sound().settings.playback_speed }
@@ -294,6 +297,7 @@ pub trait HasSound {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether the source repeats when it reaches the end.
         getter looping() -> bool { self.sound().settings.looping }
         setter set_looping(looping: bool) {
@@ -303,6 +307,7 @@ pub trait HasSound {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether a part ancestor enables positional playback. Changes take
         /// effect on the next playback start or replay.
         getter spatial_enabled() -> bool { self.sound().settings.spatial_enabled }
@@ -313,6 +318,7 @@ pub trait HasSound {
     }
 
     crate::__instance_property! {
+        self;
         /// Emitter offset in the nearest part ancestor's pivot coordinates,
         /// without part scale. Active sounds follow changes on the next audio update.
         getter emitter_offset() -> Vec3 { self.sound().settings.emitter_offset }
@@ -323,6 +329,7 @@ pub trait HasSound {
     }
 
     crate::__instance_property! {
+        self;
         /// Attenuation, occlusion, Doppler, and input-channel settings. The
         /// authored emitter is ignored because scene transforms supply it.
         /// Occlusion changes apply on the next audio update; other settings

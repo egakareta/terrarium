@@ -47,6 +47,7 @@ impl Outline {
     }
 
     crate::__instance_property! {
+        self;
         /// Rendering technique used by the outline.
         pub getter mode() -> OutlineMode { self.mode }
         setter set_mode(mode: OutlineMode) {
@@ -56,6 +57,7 @@ impl Outline {
     }
 
     crate::__instance_property! {
+        self;
         /// Color of the outline.
         pub getter color() -> Color3 { self.color }
         setter set_color(color: Color3) {
@@ -65,6 +67,7 @@ impl Outline {
     }
 
     crate::__instance_property! {
+        self;
         /// Screen-space line width in pixels.
         pub getter width() -> f32 { self.width }
         setter set_width(width: f32) {
@@ -74,6 +77,7 @@ impl Outline {
     }
 
     crate::__instance_property! {
+        self;
         /// Edge threshold used by toon and silhouette detection.
         pub getter threshold() -> f32 { self.threshold }
         setter set_threshold(threshold: f32) {
@@ -83,6 +87,7 @@ impl Outline {
     }
 
     crate::__instance_property! {
+        self;
         /// Whether the outline renders through occluding geometry.
         pub getter always_on_top() -> bool { self.always_on_top }
         setter set_always_on_top(always_on_top: bool) {

@@ -72,6 +72,7 @@ pub trait HasPVInstance {
     fn pv_mut(&mut self) -> &mut PVInstance;
 
     crate::__instance_property! {
+        self;
         /// World-space transform of the pivot. Changing it updates only this
         /// instance by default; a [`Rig`] also moves its spatial descendants,
         /// preserving their relative transforms.
@@ -89,6 +90,7 @@ pub trait HasPVInstance {
     }
 
     crate::__instance_property! {
+        self;
         /// The position and orientation of the pivot, ignoring its scale.
         getter pose() -> Mat4 { PVInstance::pose_from_transform(self.pivot()) }
         setter set_pose(pose: Mat4) {
@@ -98,6 +100,7 @@ pub trait HasPVInstance {
     }
 
     crate::__instance_property! {
+        self;
         /// Translation component of the pivot. Setting position preserves
         /// orientation and scale.
         getter position() -> Vec3 { self.pivot().w_axis.truncate() }
@@ -108,6 +111,7 @@ pub trait HasPVInstance {
     }
 
     crate::__instance_property! {
+        self;
         /// XYZ Euler orientation in degrees. Setting orientation preserves
         /// position and scale.
         getter orientation() -> Vec3 {
@@ -122,6 +126,7 @@ pub trait HasPVInstance {
     }
 
     crate::__instance_property! {
+        self;
         /// Per-axis scale of the pivot. Setting size preserves position and
         /// orientation.
         getter size() -> Vec3 { self.pivot().to_scale_rotation_translation().0 }

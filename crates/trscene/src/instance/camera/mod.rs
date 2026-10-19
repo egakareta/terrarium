@@ -32,6 +32,7 @@ pub trait HasCamera {
     fn camera_mut(&mut self) -> &mut Camera;
 
     crate::__instance_property! {
+        self;
         /// Viewport width divided by viewport height. Values set through this
         /// API are clamped to at least `0.001`.
         getter aspect() -> f32 { self.camera().aspect }
@@ -42,6 +43,7 @@ pub trait HasCamera {
     }
 
     crate::__instance_property! {
+        self;
         /// Vertical field of view in radians.
         getter fovy() -> f32 { self.camera().fovy }
         setter set_fovy(fovy: f32) {
@@ -51,6 +53,7 @@ pub trait HasCamera {
     }
 
     crate::__instance_property! {
+        self;
         /// Near clipping plane distance.
         getter znear() -> f32 { self.camera().znear }
         setter set_znear(znear: f32) {
@@ -60,6 +63,7 @@ pub trait HasCamera {
     }
 
     crate::__instance_property! {
+        self;
         /// Far clipping plane distance.
         getter zfar() -> f32 { self.camera().zfar }
         setter set_zfar(zfar: f32) {
@@ -130,6 +134,7 @@ impl Camera {
     }
 
     crate::__instance_property! {
+        self;
         /// Instance followed in third-person mode. A missing subject leaves
         /// the camera in free-moving mode; a supplied ID must belong to a
         /// spatial instance in the active workspace.
