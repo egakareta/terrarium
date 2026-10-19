@@ -137,6 +137,66 @@ fn dynamic_player_rig(position: Vec3) -> Rig {
 
 #[cfg(feature = "physics")]
 #[test]
+fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
+    let mut workspace = Workspace::new();
+    workspace.add_child(
+        Part::new()
+            .with_size(Vec3::new(10.0, 1.0, 10.0))
+            .with_position(Vec3::new(0.0, -0.5, 0.0)),
+    );
+    let rig = workspace.add_child(dynamic_player_rig(Vec3::Y * 3.0));
+
+    for _ in 0..120 {
+        workspace.update(1.0 / 60.0);
+    }
+    let grounded_position = workspace.get::<Rig>(rig).unwrap().position();
+
+    let mut player = PlayerController::new(rig);
+    assert!(player.process_key(KeyCode::Space, true));
+    workspace.controllers.add(player);
+    workspace.update(1.0 / 60.0);
+
+    let airborne_position = workspace.get::<Rig>(rig).unwrap().position();
+    assert!(
+        airborne_position.y > grounded_position.y + 0.05,
+        "grounded at {grounded_position:?}, after jump at {airborne_position:?}"
+    );
+    for _ in 0..44 {
+        workspace.update(1.0 / 60.0);
+    }
+    let held_jump_position = workspace.get::<Rig>(rig).unwrap().position();
+    assert!(
+        held_jump_position.y < grounded_position.y + 3.0,
+        "held jump rose to {held_jump_position:?}"
+    );
+}
+
+#[test]
+fn player_mouse_wheel_changes_camera_orbit_distance() {
+    let mut workspace = Workspace::new();
+    let rig = workspace.add_child(Rig::new());
+    workspace.current_camera.set_subject(Some(rig));
+    workspace.camera_controller_mut().subject_distance = 5.0;
+    workspace.controllers.add(PlayerController::new(rig));
+
+    let context = Context::default();
+    frame(
+        &context,
+        &mut workspace,
+        vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, 40.0),
+            phase: TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    workspace.update(1.0 / 60.0);
+
+    assert!((workspace.camera_controller().subject_distance - 4.0).abs() < 1e-5);
+}
+
+#[cfg(feature = "physics")]
+#[test]
 fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     let mut workspace = Workspace::new();
     workspace.camera_controller_mut().set_enabled(false);

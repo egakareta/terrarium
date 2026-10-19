@@ -9,11 +9,13 @@ use crate::{
 ///
 /// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
 /// mid-turn when movement stops. Mouse and touch look orbit the active camera
-/// when the active camera follows this rig. Orbit input never turns an idle rig.
+/// when it follows this rig; the mouse wheel changes its orbit distance. Orbit
+/// input never turns an idle rig.
 ///
 /// With the `physics` feature, unanchored rigs move through their physics bodies,
-/// preserving gravity and collisions. Anchored rigs, and builds without physics,
-/// move their poses directly. Descendants and scale are preserved in both cases.
+/// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
+/// Anchored rigs, and builds without physics, move their poses directly. Descendants
+/// and scale are preserved in both cases.
 /// Movement uses the active camera's horizontal heading. To orbit around the
 /// player, set the camera subject to this rig. Disable duplicate camera input
 /// when both controllers would otherwise respond to the same device.
@@ -25,6 +27,8 @@ pub struct PlayerController {
     pub input: ControllerInput,
     /// Movement speed in world units per second.
     pub speed: f32,
+    /// Upward jump velocity in world units per second.
+    pub jump_speed: f32,
     /// Camera orbit sensitivity in radians per physical pixel.
     pub sensitivity: f32,
     /// Controls how quickly the rig turns toward its movement direction.
@@ -35,18 +39,18 @@ pub struct PlayerController {
 }
 
 impl PlayerController {
-    /// Creates a controller for `rig` with WASD/Shift movement and drag-look bindings.
+    /// Creates a controller for `rig` with WASD/Space/Shift movement and drag-look bindings.
     ///
-    /// Elevation keys are unbound by default. Mouse and touch look orbit the active
-    /// camera when it follows the rig.
+    /// Space uses the up action to jump a grounded dynamic rig. The down action is
+    /// unbound. Mouse and touch look orbit the active camera when it follows the rig.
     pub fn new(rig: InstanceId) -> Self {
         let mut input = ControllerInput::default();
-        input.key_bindings.up.clear();
         input.key_bindings.down.clear();
         Self {
             rig: Some(rig),
             input,
             speed: 6.0,
+            jump_speed: 7.0,
             sensitivity: 0.0025,
             turn_factor: 10.0,
         }
@@ -70,7 +74,7 @@ impl PlayerController {
         self
     }
 
-    /// Enables or disables mouse look input.
+    /// Enables or disables mouse look and wheel zoom input.
     pub fn with_mouse_enabled(mut self, enabled: bool) -> Self {
         self.input.set_mouse_enabled(enabled);
         self
@@ -91,10 +95,17 @@ impl PlayerController {
         self
     }
 
+    /// Sets the upward jump velocity in world units per second. Non-positive or
+    /// non-finite values disable jumping.
+    pub fn with_jump_speed(mut self, speed: f32) -> Self {
+        self.jump_speed = speed;
+        self
+    }
+
     /// Applies accumulated input directly to a rig without a workspace.
     ///
-    /// Horizontal movement is world-aligned, look is discarded, and no physics
-    /// step is performed. Register the controller with a workspace for
+    /// Horizontal movement is world-aligned, look and jumping are discarded, and
+    /// no physics step is performed. Register the controller with a workspace for
     /// camera-relative movement, camera orbit, and physics integration.
     pub fn update_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
         let actions = self.input.take_actions();
@@ -103,8 +114,8 @@ impl PlayerController {
 
     /// Applies scripted actions as world-aligned, non-physics pose updates.
     ///
-    /// Look and elevation are ignored; pass movement on `x` and `z`. The rig turns
-    /// only while moving. This method neither reads device input nor advances physics.
+    /// Look and the up action are ignored; pass movement on `x` and `z`. The rig
+    /// turns only while moving. This method neither reads device input nor advances physics.
     pub fn update_rig_with_actions(
         &self,
         rig: &mut Rig,
@@ -149,9 +160,16 @@ impl PlayerController {
         #[cfg(feature = "physics")]
         if !anchored {
             if delta_seconds > 0.0 {
-                workspace
-                    .physics_mut()
-                    .queue_player_motion(id, movement / delta_seconds, rotation);
+                let jump_speed = (actions.movement.y > 0.0
+                    && self.jump_speed.is_finite()
+                    && self.jump_speed > 0.0)
+                    .then_some(self.jump_speed);
+                workspace.physics_mut().queue_player_motion(
+                    id,
+                    movement / delta_seconds,
+                    rotation,
+                    jump_speed,
+                );
             }
             return;
         }
@@ -228,8 +246,18 @@ impl Controller for PlayerController {
     }
 
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let actions = self.input.take_actions();
+        let (actions, scroll_delta) = self.input.take_actions_and_scroll();
         self.update_workspace_with_actions(workspace, actions, delta_seconds);
+        if scroll_delta != 0.0 {
+            let follows_rig = self
+                .rig
+                .is_some_and(|id| workspace.current_camera.subject() == Some(id));
+            if follows_rig {
+                workspace
+                    .camera_controller_mut()
+                    .queue_subject_zoom(scroll_delta);
+            }
+        }
     }
 
     fn remap_instances(&mut self, map: &dyn Fn(InstanceId) -> Option<InstanceId>) {

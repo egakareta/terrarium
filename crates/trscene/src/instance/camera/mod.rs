@@ -188,6 +188,7 @@ pub struct CameraController {
     orbit_yaw: f32,
     orbit_pitch: f32,
     queued_look: Vec2,
+    queued_subject_zoom: f32,
 }
 
 impl Default for CameraController {
@@ -227,6 +228,7 @@ impl CameraController {
             orbit_yaw: 0.0,
             orbit_pitch: 0.0,
             queued_look: Vec2::ZERO,
+            queued_subject_zoom: 0.0,
         }
     }
 
@@ -286,7 +288,7 @@ impl CameraController {
         self
     }
 
-    /// Applies pending device input to `camera` and consumes the look deltas.
+    /// Applies pending device input and queued subject zoom to `camera`.
     ///
     /// In free flight, forward follows the camera's look direction, strafing stays
     /// horizontal, and elevation follows world Y. With a subject, look and
@@ -314,15 +316,25 @@ impl CameraController {
         }
     }
 
+    /// Queues a subject zoom distance change for the next camera update.
+    ///
+    /// Positive values move the camera closer; non-finite values are ignored.
+    pub fn queue_subject_zoom(&mut self, amount: f32) {
+        let queued = self.queued_subject_zoom + amount;
+        if amount.is_finite() && queued.is_finite() {
+            self.queued_subject_zoom = queued;
+        }
+    }
+
     pub(crate) fn queued_look(&self) -> Vec2 {
         self.queued_look
     }
 
-    /// Applies actions and any queued look rotation to `camera`.
+    /// Applies actions, queued look rotation, and queued subject zoom to `camera`.
     ///
     /// Does not read device state. Look in `actions` is scaled by `sensitivity`;
-    /// look queued with [`Self::queue_look`] is already in radians. Both are
-    /// consumed by this call.
+    /// look queued with [`Self::queue_look`] is already in radians. Queued look
+    /// and zoom are consumed by this call.
     pub fn update_camera_with_actions(
         &mut self,
         camera: &mut Camera,
@@ -331,6 +343,7 @@ impl CameraController {
         delta_seconds: f32,
     ) {
         let delta_seconds = crate::controller::frame_delta(delta_seconds);
+        let queued_subject_zoom = std::mem::take(&mut self.queued_subject_zoom);
         let look = actions.look * self.sensitivity + std::mem::take(&mut self.queued_look);
         let look = if look.is_finite() { look } else { Vec2::ZERO };
         let Some((subject_id, subject_pose)) = subject else {
@@ -364,7 +377,7 @@ impl CameraController {
         self.orbit_pitch = (self.orbit_pitch + look.y).clamp(min_pitch, max_pitch);
         let speed_multiplier = actions.speed_multiplier();
         let movement = self.speed * speed_multiplier * delta_seconds;
-        self.subject_distance -= axes.z * movement;
+        self.subject_distance -= queued_subject_zoom + axes.z * movement;
         let orbit_step = self.orbit_speed * speed_multiplier * delta_seconds;
         self.orbit_yaw -= axes.x * orbit_step;
         self.orbit_pitch += axes.y * orbit_step;
@@ -488,7 +501,7 @@ mod tests {
         let mut camera = Camera::default();
         let original_position = camera.pivot().w_axis.truncate();
         let mut controller = CameraController::new(6.0, 0.1);
-        controller.mouse_delta = (1.0, 0.0);
+        controller.mouse_look_delta = (1.0, 0.0);
         controller.update_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.pivot().w_axis.truncate(), original_position);
         assert!(camera.forward().x > 0.0);
@@ -503,7 +516,7 @@ mod tests {
         input.focused = true;
         controller
             .input
-            .process_eframe_input_inner(&input, false, true, |_| false);
+            .process_eframe_input_inner(&input, false, false, true, |_| false);
         assert!(!controller.forward);
         assert!(!controller.sprint);
     }
@@ -516,8 +529,8 @@ mod tests {
         input.focused = true;
         controller
             .input
-            .process_eframe_input_inner(&input, true, false, |_| false);
-        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+            .process_eframe_input_inner(&input, true, true, false, |_| false);
+        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
     }
 
     #[test]
@@ -529,7 +542,7 @@ mod tests {
         input.keys_down.insert(crate::egui::Key::W);
         controller
             .input
-            .process_eframe_input_inner(&input, false, false, |_| false);
+            .process_eframe_input_inner(&input, false, false, false, |_| false);
         assert!(!controller.forward);
         assert!(!controller.process_key(KeyCode::KeyW, true));
         assert!(!controller.forward);
@@ -546,17 +559,17 @@ mod tests {
         let mut controller = CameraController::default().with_mouse_enabled(false);
         assert!(!controller.mouse_enabled);
         controller.process_mouse_motion((10.0, -5.0));
-        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
         controller.process_device_event(&DeviceEvent::MouseMotion {
             delta: (10.0, -5.0),
         });
-        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
         let mut camera = Camera::default();
         let initial_forward = camera.forward();
-        controller.mouse_delta = (5.0, 5.0);
+        controller.mouse_look_delta = (5.0, 5.0);
         controller.update_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.forward(), initial_forward);
-        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
     }
 
     #[test]
@@ -570,7 +583,7 @@ mod tests {
         assert!(!controller.mouse_enabled);
         assert!(!controller.is_enabled());
         assert!(!controller.forward);
-        assert_eq!(controller.mouse_delta, (0.0, 0.0));
+        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
         let controller = controller
             .with_enabled(true)
             .with_keyboard_enabled(false)

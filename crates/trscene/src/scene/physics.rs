@@ -33,6 +33,7 @@ pub struct PhysicsWorld {
 struct PlayerMotion {
     velocity: Vec3,
     rotation: Option<Quat>,
+    jump_speed: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -136,9 +137,44 @@ impl PhysicsWorld {
         rig: InstanceId,
         velocity: Vec3,
         rotation: Option<Quat>,
+        jump_speed: Option<f32>,
     ) {
-        self.player_motions
-            .insert(rig, PlayerMotion { velocity, rotation });
+        self.player_motions.insert(
+            rig,
+            PlayerMotion {
+                velocity,
+                rotation,
+                jump_speed,
+            },
+        );
+    }
+
+    fn is_grounded(world: &RapierPhysicsWorld, body_handle: RigidBodyHandle) -> bool {
+        let Some(body) = world.bodies.get(body_handle) else {
+            return false;
+        };
+        body.colliders().iter().any(|collider| {
+            world
+                .narrow_phase
+                .contact_pairs_with(*collider)
+                .any(|pair| {
+                    pair.solver_manifolds().iter().any(|manifold| {
+                        if manifold.data.solver_contacts.is_empty() {
+                            return false;
+                        }
+                        // Contact normals point from collider 1 to collider 2.
+                        let (support_normal_y, other_body) =
+                            if manifold.data.rigid_body1 == Some(body_handle) {
+                                (-manifold.data.normal.y, manifold.data.rigid_body2)
+                            } else if manifold.data.rigid_body2 == Some(body_handle) {
+                                (manifold.data.normal.y, manifold.data.rigid_body1)
+                            } else {
+                                return false;
+                            };
+                        other_body != Some(body_handle) && support_normal_y > 0.5
+                    })
+                })
+        })
     }
 
     pub(crate) fn get_part_bounds_in_box(&self, query: &BoxOverlapQuery) -> Vec<InstanceId> {
@@ -189,6 +225,9 @@ impl PhysicsWorld {
             let Some(entry) = self.bodies.get(&id) else {
                 continue;
             };
+            let jump_speed = motion
+                .jump_speed
+                .filter(|_| Self::is_grounded(&self.world, entry.handle));
             let Some(body) = self.world.bodies.get_mut(entry.handle) else {
                 continue;
             };
@@ -205,10 +244,11 @@ impl PhysicsWorld {
                     true,
                 );
             }
+            let vertical_velocity = jump_speed.unwrap_or_else(|| body.linvel().y);
             body.set_linvel(
                 rapier_vector(Vec3::new(
                     motion.velocity.x,
-                    body.linvel().y,
+                    vertical_velocity,
                     motion.velocity.z,
                 )),
                 true,

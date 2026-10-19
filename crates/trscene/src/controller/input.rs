@@ -2,7 +2,7 @@ use crate::{
     ControllerActions, egui,
     glam::{Vec2, Vec3},
     winit::{
-        event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+        event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         keyboard::{KeyCode, PhysicalKey},
     },
 };
@@ -66,10 +66,11 @@ pub struct ControllerInput {
     /// Whether a sprint key is held.
     pub sprint: bool,
     /// Accumulated mouse-look delta `(x, y)`, consumed by [`Self::take_actions`].
-    pub mouse_delta: (f32, f32),
+    pub mouse_look_delta: (f32, f32),
+    mouse_scroll_delta: f32,
     /// Button that enables cursor-drag look for normalized egui input.
     pub mouse_drag_button: MouseButton,
-    /// Whether mouse-look input is processed.
+    /// Whether mouse-look and wheel-zoom input is processed.
     pub mouse_enabled: bool,
     /// Whether keyboard movement input is processed.
     pub keyboard_enabled: bool,
@@ -91,7 +92,8 @@ impl Default for ControllerInput {
             up: false,
             down: false,
             sprint: false,
-            mouse_delta: (0.0, 0.0),
+            mouse_look_delta: (0.0, 0.0),
+            mouse_scroll_delta: 0.0,
             mouse_drag_button: MouseButton::Left,
             mouse_enabled: true,
             keyboard_enabled: true,
@@ -104,10 +106,15 @@ impl Default for ControllerInput {
 }
 
 impl ControllerInput {
-    /// Reads movement and consumes accumulated look deltas from enabled devices.
+    /// Reads movement and consumes accumulated look and wheel input from enabled devices.
     pub fn take_actions(&mut self) -> ControllerActions {
+        self.take_actions_and_scroll().0
+    }
+
+    pub(crate) fn take_actions_and_scroll(&mut self) -> (ControllerActions, f32) {
         if !self.mouse_enabled {
-            self.mouse_delta = (0.0, 0.0);
+            self.mouse_look_delta = (0.0, 0.0);
+            self.mouse_scroll_delta = 0.0;
         }
         if !self.keyboard_enabled {
             self.clear_keyboard_input();
@@ -123,13 +130,13 @@ impl ControllerInput {
                 axis(self.up, self.down),
                 (axis(self.forward, self.backward) - self.touch.movement.y).clamp(-1.0, 1.0),
             ),
-            look: Vec2::new(self.mouse_delta.0, self.mouse_delta.1)
+            look: Vec2::new(self.mouse_look_delta.0, self.mouse_look_delta.1)
                 + Vec2::new(self.touch.look_delta.x, self.touch.look_delta.y),
             sprint: self.sprint,
         };
-        self.mouse_delta = (0.0, 0.0);
+        self.mouse_look_delta = (0.0, 0.0);
         self.touch.look_delta = egui::Vec2::ZERO;
-        actions
+        (actions, std::mem::take(&mut self.mouse_scroll_delta))
     }
 
     /// Enables or disables all three devices.
@@ -149,11 +156,12 @@ impl ControllerInput {
         }
     }
 
-    /// Enables mouse input, or clears its accumulated delta and drag when disabling it.
+    /// Enables mouse input, or clears accumulated look, wheel, and drag state when disabling it.
     pub fn set_mouse_enabled(&mut self, enabled: bool) {
         self.mouse_enabled = enabled;
         if !enabled {
-            self.mouse_delta = (0.0, 0.0);
+            self.mouse_look_delta = (0.0, 0.0);
+            self.mouse_scroll_delta = 0.0;
             self.stop_mouse_drag();
         }
     }
@@ -208,8 +216,8 @@ impl ControllerInput {
 
     /// Updates key and drag state from a winit window event.
     ///
-    /// Handles keyboard and mouse-drag events. Losing focus clears held keys and
-    /// active gestures; touch gestures are read from egui input events.
+    /// Handles keyboard, mouse-drag, and wheel events. Losing focus clears held
+    /// keys and active gestures; touch gestures are read from egui input events.
     pub fn process_window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::KeyboardInput { event, .. } => {
@@ -217,6 +225,13 @@ impl ControllerInput {
                     return false;
                 };
                 self.process_key(key, event.state == ElementState::Pressed)
+            }
+            WindowEvent::MouseWheel { delta, .. } if self.mouse_enabled => {
+                let zoom = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => *y,
+                    MouseScrollDelta::PixelDelta(position) => position.y as f32 / 100.0,
+                };
+                self.queue_mouse_scroll(zoom)
             }
             WindowEvent::MouseInput { state, button, .. } if *button == self.mouse_drag_button => {
                 if !self.mouse_enabled {
@@ -272,12 +287,30 @@ impl ControllerInput {
             .any(|binding| eframe_key_down(input, binding))
     }
 
-    /// Reads the current egui frame, respecting UI capture, and paints touch controls.
+    /// Reads egui input, suppressing look over egui areas and wheel zoom over
+    /// interactive widgets, and paints touch controls.
     ///
     /// Gestures are assigned at touch-down, permitting simultaneous joystick and
     /// look input. Touches starting on UI areas are left to egui.
     pub fn process_eframe_input(&mut self, context: &egui::Context) {
         let pointer_capture = context.egui_wants_pointer_input();
+        let (has_wheel_input, pointer_position) = context.input(|input| {
+            (
+                input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::MouseWheel { .. })),
+                input.pointer.hover_pos(),
+            )
+        });
+        let wheel_capture = has_wheel_input
+            && (context.egui_is_using_pointer()
+                || pointer_position.is_some_and(|position| {
+                    context
+                        .interactive_rects_last_pass()
+                        .iter()
+                        .any(|rect| rect.contains(position))
+                }));
         let keyboard_capture = context.egui_wants_keyboard_input();
         let mut captured_touches = context.input(|input| {
             input
@@ -307,9 +340,13 @@ impl ControllerInput {
                     .is_some_and(|layer| layer.order != egui::Order::Background)
         });
         context.input(|input| {
-            self.process_eframe_input_inner(input, pointer_capture, keyboard_capture, |position| {
-                captured_touches.contains(&position)
-            });
+            self.process_eframe_input_inner(
+                input,
+                pointer_capture,
+                wheel_capture,
+                keyboard_capture,
+                |position| captured_touches.contains(&position),
+            );
         });
         if self.touch_enabled && self.touch.detected {
             self.touch.paint(context);
@@ -320,6 +357,7 @@ impl ControllerInput {
         &mut self,
         input: &egui::InputState,
         pointer_capture: bool,
+        wheel_capture: bool,
         keyboard_capture: bool,
         touch_captured: impl Fn(egui::Pos2) -> bool,
     ) {
@@ -352,13 +390,29 @@ impl ControllerInput {
                 .iter()
                 .any(|event| matches!(event, egui::Event::Touch { .. }));
         if !self.mouse_enabled || pointer_capture || touch_pointer {
-            self.mouse_delta = (0.0, 0.0);
+            self.mouse_look_delta = (0.0, 0.0);
             self.stop_mouse_drag();
-        } else if let Some(button) = eframe_button(self.mouse_drag_button)
-            && input.pointer.button_down(button)
-        {
-            let delta = input.pointer.delta() * input.pixels_per_point;
-            self.process_mouse_motion((delta.x, delta.y));
+        } else {
+            if let Some(button) = eframe_button(self.mouse_drag_button)
+                && input.pointer.button_down(button)
+            {
+                let delta = input.pointer.delta() * input.pixels_per_point;
+                self.process_mouse_motion((delta.x, delta.y));
+            }
+        }
+        if !self.mouse_enabled || wheel_capture || touch_pointer {
+            self.mouse_scroll_delta = 0.0;
+        } else {
+            for event in &input.events {
+                if let egui::Event::MouseWheel { unit, delta, .. } = event {
+                    let scale = match unit {
+                        egui::MouseWheelUnit::Point => 1.0 / 40.0,
+                        egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => 1.0,
+                    };
+                    let zoom = delta.y * scale;
+                    self.queue_mouse_scroll(zoom);
+                }
+            }
         }
     }
 
@@ -395,17 +449,28 @@ impl ControllerInput {
     /// Adds a mouse delta to the pending look input when mouse input is enabled.
     pub fn process_mouse_motion(&mut self, delta: (f32, f32)) {
         if self.mouse_enabled {
-            self.mouse_delta.0 += delta.0;
-            self.mouse_delta.1 += delta.1;
+            self.mouse_look_delta.0 += delta.0;
+            self.mouse_look_delta.1 += delta.1;
         }
     }
 
     /// Clears held actions and pending look gestures without changing device settings.
     pub fn clear(&mut self) {
         self.clear_keyboard_input();
-        self.mouse_delta = (0.0, 0.0);
+        self.mouse_look_delta = (0.0, 0.0);
+        self.mouse_scroll_delta = 0.0;
         self.stop_mouse_drag();
         self.touch.clear();
+    }
+
+    fn queue_mouse_scroll(&mut self, zoom: f32) -> bool {
+        let queued = self.mouse_scroll_delta + zoom;
+        if zoom.is_finite() && queued.is_finite() {
+            self.mouse_scroll_delta = queued;
+            zoom != 0.0
+        } else {
+            false
+        }
     }
 
     fn clear_keyboard_input(&mut self) {

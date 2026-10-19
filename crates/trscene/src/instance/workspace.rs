@@ -719,7 +719,7 @@ mod tests {
         workspace.camera_controller_mut().subject_offset = Vec3::Y;
 
         workspace.update_camera(1.0 / 60.0);
-        workspace.camera_controller_mut().mouse_delta = (0.0, 10.0);
+        workspace.camera_controller_mut().mouse_look_delta = (0.0, 10.0);
         workspace.update_camera(1.0 / 60.0);
 
         let focus = Vec3::Y;
