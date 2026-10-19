@@ -73,7 +73,7 @@ fn frame(
         },
         |ui| {
             devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
-            host.workspace.process_eframe_context(ui.ctx());
+            host.workspace.process_eframe_input(ui.ctx());
             host.workspace.update(0.1);
             devtools.show_docked(ui, host);
         },
@@ -324,7 +324,8 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
                 devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
                 host.workspace
                     .camera_controller_mut()
-                    .process_eframe_context(ui.ctx());
+                    .input
+                    .process_eframe_input(ui.ctx());
                 host.workspace.update(0.1);
                 let response = ui.text_edit_singleline(&mut text);
                 if request_focus {

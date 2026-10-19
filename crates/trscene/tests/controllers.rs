@@ -17,7 +17,7 @@ fn frame(context: &Context, workspace: &mut Workspace, events: Vec<Event>) {
         events,
         ..Default::default()
     };
-    let mut output = context.run_ui(input, |ui| workspace.process_eframe_context(ui.ctx()));
+    let mut output = context.run_ui(input, |ui| workspace.process_eframe_input(ui.ctx()));
     output.textures_delta.clear();
 }
 
@@ -297,15 +297,35 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     workspace.camera_controller_mut().subject_offset = Vec3::Y;
     workspace.update_camera(0.0);
     let id = workspace.controllers.add(PlayerController::new(rig));
-    let mut input = egui::InputState::default();
-    input.focused = true;
-    input.keys_down.insert(egui::Key::W);
-    let player = workspace
-        .controllers
-        .get_mut::<PlayerController>(id)
-        .unwrap();
-    player.process_mouse_motion((20.0, 0.0));
-    player.process_eframe_input_with_capture(&input, false, true);
+    let keyboard_context = Context::default();
+    let mut text = String::new();
+    let mut output = keyboard_context.run_ui(
+        RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            ..Default::default()
+        },
+        |ui| {
+            ui.text_edit_singleline(&mut text).request_focus();
+        },
+    );
+    output.textures_delta.clear();
+    let mut output = keyboard_context.run_ui(
+        RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            events: vec![key(egui::Key::W, true)],
+            ..Default::default()
+        },
+        |ui| {
+            ui.text_edit_singleline(&mut text);
+            let player = workspace
+                .controllers
+                .get_mut::<PlayerController>(id)
+                .unwrap();
+            player.process_mouse_motion((20.0, 0.0));
+            player.process_eframe_input(ui.ctx());
+        },
+    );
+    output.textures_delta.clear();
     workspace.update(0.1);
     assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::ZERO);
     assert!(workspace.current_camera.forward().x > 0.0);
@@ -318,12 +338,44 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     );
 
     let forward = workspace.current_camera.forward();
-    let player = workspace
-        .controllers
-        .get_mut::<PlayerController>(id)
-        .unwrap();
-    player.process_mouse_motion((20.0, 0.0));
-    player.process_eframe_input_with_capture(&input, true, false);
+    let pointer_context = Context::default();
+    let mut output = pointer_context.run_ui(
+        RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            ..Default::default()
+        },
+        |ui| {
+            let _ = ui.button("capture");
+        },
+    );
+    output.textures_delta.clear();
+    let pointer_pos = pos2(20.0, 16.0);
+    let mut output = pointer_context.run_ui(
+        RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            events: vec![
+                Event::PointerMoved(pointer_pos),
+                Event::PointerButton {
+                    pos: pointer_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                key(egui::Key::W, true),
+            ],
+            ..Default::default()
+        },
+        |ui| {
+            let _ = ui.button("capture");
+            let player = workspace
+                .controllers
+                .get_mut::<PlayerController>(id)
+                .unwrap();
+            player.process_mouse_motion((20.0, 0.0));
+            player.process_eframe_input(ui.ctx());
+        },
+    );
+    output.textures_delta.clear();
     workspace.update(0.1);
     assert!(
         workspace

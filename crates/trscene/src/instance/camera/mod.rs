@@ -525,7 +525,9 @@ mod tests {
         controller.process_key(KeyCode::ShiftLeft, true);
         let mut input = crate::egui::InputState::default();
         input.focused = true;
-        controller.process_eframe_input_with_capture(&input, false, true);
+        controller
+            .input
+            .process_eframe_input_inner(&input, false, true, |_| false);
         assert!(!controller.forward);
         assert!(!controller.sprint);
     }
@@ -536,7 +538,9 @@ mod tests {
         controller.process_mouse_motion((4.0, -2.0));
         let mut input = crate::egui::InputState::default();
         input.focused = true;
-        controller.process_eframe_input_with_capture(&input, true, false);
+        controller
+            .input
+            .process_eframe_input_inner(&input, true, false, |_| false);
         assert_eq!(controller.mouse_delta, (0.0, 0.0));
     }
 
@@ -547,7 +551,9 @@ mod tests {
         let mut input = crate::egui::InputState::default();
         input.focused = true;
         input.keys_down.insert(crate::egui::Key::W);
-        controller.process_eframe_input_with_capture(&input, false, false);
+        controller
+            .input
+            .process_eframe_input_inner(&input, false, false, |_| false);
         assert!(!controller.forward);
         assert!(!controller.process_key(KeyCode::KeyW, true));
         assert!(!controller.forward);
