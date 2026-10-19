@@ -34,47 +34,36 @@ pub trait HasLight {
     /// Returns mutable access to the underlying [`LightProperties`].
     fn light_mut(&mut self) -> &mut LightProperties;
 
-    /// Returns the RGB color emitted by the light.
-    fn color(&self) -> Color3 {
-        self.light().color
+    crate::__instance_property! {
+        self;
+        /// RGB color emitted by the light. Invalid color channels are
+        /// sanitized by the renderer.
+        getter color() -> Color3 { self.light().color }
+        setter set_color(color: Color3) {
+            self.light_mut().color = color;
+        }
+        builder with_color;
     }
 
-    /// Returns the intensity multiplier for the emitted light.
-    fn brightness(&self) -> f32 {
-        self.light().brightness
+    crate::__instance_property! {
+        self;
+        /// Intensity multiplier for the emitted light. Negative brightness is
+        /// sanitized by the renderer.
+        getter brightness() -> f32 { self.light().brightness }
+        setter set_brightness(brightness: f32) {
+            self.light_mut().brightness = brightness;
+        }
+        builder with_brightness;
     }
 
-    /// Returns whether this light may use the renderer's bounded local-shadow
-    /// budget.
-    fn shadows(&self) -> bool {
-        self.light().shadows
-    }
-
-    /// Sets the RGB color emitted by the light.
-    fn with_color(mut self, color: Color3) -> Self
-    where
-        Self: Sized,
-    {
-        self.light_mut().color = color;
-        self
-    }
-
-    /// Sets the intensity multiplier for the emitted light.
-    fn with_brightness(mut self, brightness: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.light_mut().brightness = brightness;
-        self
-    }
-
-    /// Sets whether this light may use the renderer's bounded local-shadow budget.
-    fn with_shadows(mut self, shadows: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self.light_mut().shadows = shadows;
-        self
+    crate::__instance_property! {
+        self;
+        /// Whether this light may use the renderer's bounded local-shadow budget.
+        getter shadows() -> bool { self.light().shadows }
+        setter set_shadows(shadows: bool) {
+            self.light_mut().shadows = shadows;
+        }
+        builder with_shadows;
     }
 }
 
@@ -96,18 +85,15 @@ pub trait HasPointLight {
     /// Returns mutable access to the underlying [`PointLight`].
     fn point_light_mut(&mut self) -> &mut PointLight;
 
-    /// Returns the maximum distance in world units affected by this light.
-    fn range(&self) -> f32 {
-        self.point_light().range
-    }
-
-    /// Sets the maximum distance in world units affected by this light.
-    fn with_range(mut self, range: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.point_light_mut().range = range;
-        self
+    crate::__instance_property! {
+        self;
+        /// Maximum distance in world units affected by the light. The
+        /// renderer clamps this to its supported range.
+        getter range() -> f32 { self.point_light().range }
+        setter set_range(range: f32) {
+            self.point_light_mut().range = range;
+        }
+        builder with_range;
     }
 }
 
@@ -129,32 +115,24 @@ pub trait HasSpotLight {
     /// Returns mutable access to the underlying [`SpotLight`].
     fn spot_light_mut(&mut self) -> &mut SpotLight;
 
-    /// Returns the part face from which the cone emits.
-    fn face(&self) -> Face {
-        self.spot_light().face
+    crate::__instance_property! {
+        self;
+        /// Part face from which the cone emits.
+        getter face() -> Face { self.spot_light().face }
+        setter set_face(face: Face) {
+            self.spot_light_mut().face = face;
+        }
+        builder with_face;
     }
 
-    /// Returns the full cone angle in degrees.
-    fn angle(&self) -> f32 {
-        self.spot_light().angle
-    }
-
-    /// Sets the part face from which the cone emits.
-    fn with_face(mut self, face: Face) -> Self
-    where
-        Self: Sized,
-    {
-        self.spot_light_mut().face = face;
-        self
-    }
-
-    /// Sets the full cone angle in degrees.
-    fn with_angle(mut self, angle: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.spot_light_mut().angle = angle;
-        self
+    crate::__instance_property! {
+        self;
+        /// Full cone angle in degrees. The renderer clamps this to `0..=180`.
+        getter angle() -> f32 { self.spot_light().angle }
+        setter set_angle(angle: f32) {
+            self.spot_light_mut().angle = angle;
+        }
+        builder with_angle;
     }
 }
 
@@ -176,32 +154,24 @@ pub trait HasSurfaceLight {
     /// Returns mutable access to the underlying [`SurfaceLight`].
     fn surface_light_mut(&mut self) -> &mut SurfaceLight;
 
-    /// Returns the part face that acts as the emitting surface.
-    fn face(&self) -> Face {
-        self.surface_light().face
+    crate::__instance_property! {
+        self;
+        /// Part face that acts as the emitting surface.
+        getter face() -> Face { self.surface_light().face }
+        setter set_face(face: Face) {
+            self.surface_light_mut().face = face;
+        }
+        builder with_face;
     }
 
-    /// Returns the full emission angle in degrees.
-    fn angle(&self) -> f32 {
-        self.surface_light().angle
-    }
-
-    /// Sets the part face that acts as the emitting surface.
-    fn with_face(mut self, face: Face) -> Self
-    where
-        Self: Sized,
-    {
-        self.surface_light_mut().face = face;
-        self
-    }
-
-    /// Sets the full emission angle in degrees.
-    fn with_angle(mut self, angle: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.surface_light_mut().angle = angle;
-        self
+    crate::__instance_property! {
+        self;
+        /// Full emission angle in degrees. The renderer clamps this to `0..=180`.
+        getter angle() -> f32 { self.surface_light().angle }
+        setter set_angle(angle: f32) {
+            self.surface_light_mut().angle = angle;
+        }
+        builder with_angle;
     }
 }
 
@@ -281,9 +251,7 @@ crate::impl_instance!(
 pub struct SpotLight {
     #[cfg_attr(feature = "devtools", inspect(flatten))]
     light: LightProperties,
-    /// Part face from which the cone emits.
     face: Face,
-    /// Full cone angle in degrees, clamped to `0..=180` while rendering.
     angle: f32,
 }
 
@@ -344,9 +312,7 @@ crate::impl_instance!(
 pub struct SurfaceLight {
     #[cfg_attr(feature = "devtools", inspect(flatten))]
     light: LightProperties,
-    /// Part face that acts as the emitting surface.
     face: Face,
-    /// Full emission angle in degrees, clamped to `0..=180` while rendering.
     angle: f32,
 }
 

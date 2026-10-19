@@ -261,114 +261,87 @@ pub trait HasSound {
     /// Returns mutable access to the underlying sound.
     fn sound_mut(&mut self) -> &mut Sound;
 
-    /// Returns the encoded audio source descriptor.
-    fn source(&self) -> &SoundSource {
-        &self.sound().settings.source
+    crate::__instance_property! {
+        self;
+        /// Encoded audio source descriptor. Replacing it preserves playback
+        /// state and position when possible.
+        getter source() -> &SoundSource { &self.sound().settings.source }
+        setter set_source(source: SoundSource) {
+            self.sound_mut().settings.source = source;
+        }
+        builder with_source(source: impl Into<SoundSource>) {
+            self.set_source(source.into());
+        }
     }
 
-    /// Returns the local volume before distance, occlusion, and master multipliers.
-    fn volume(&self) -> f32 {
-        self.sound().settings.volume
+    crate::__instance_property! {
+        self;
+        /// Local volume before distance, occlusion, and master multipliers.
+        /// Invalid values are reported by the next audio update.
+        getter volume() -> f32 { self.sound().settings.volume }
+        setter set_volume(volume: f32) {
+            self.sound_mut().settings.volume = volume;
+        }
+        builder with_volume;
     }
 
-    /// Returns the authored playback speed, before Doppler pitch shifting.
-    fn playback_speed(&self) -> f32 {
-        self.sound().settings.playback_speed
+    crate::__instance_property! {
+        self;
+        /// Authored playback speed before Doppler pitch shifting. Invalid
+        /// values are reported by the next audio update.
+        getter playback_speed() -> f32 { self.sound().settings.playback_speed }
+        setter set_playback_speed(speed: f32) {
+            self.sound_mut().settings.playback_speed = speed;
+        }
+        builder with_playback_speed;
     }
 
-    /// Returns whether the source repeats when it reaches the end.
-    fn looping(&self) -> bool {
-        self.sound().settings.looping
+    crate::__instance_property! {
+        self;
+        /// Whether the source repeats when it reaches the end.
+        getter looping() -> bool { self.sound().settings.looping }
+        setter set_looping(looping: bool) {
+            self.sound_mut().settings.looping = looping;
+        }
+        builder with_looping;
     }
 
-    /// Returns whether a part ancestor enables positional playback.
-    fn spatial_enabled(&self) -> bool {
-        self.sound().settings.spatial_enabled
+    crate::__instance_property! {
+        self;
+        /// Whether a part ancestor enables positional playback. Changes take
+        /// effect on the next playback start or replay.
+        getter spatial_enabled() -> bool { self.sound().settings.spatial_enabled }
+        setter set_spatial_enabled(enabled: bool) {
+            self.sound_mut().settings.spatial_enabled = enabled;
+        }
+        builder with_spatial_enabled;
     }
 
-    /// Returns the emitter offset in its nearest part ancestor's pivot coordinates.
-    fn emitter_offset(&self) -> Vec3 {
-        self.sound().settings.emitter_offset
+    crate::__instance_property! {
+        self;
+        /// Emitter offset in the nearest part ancestor's pivot coordinates,
+        /// without part scale. Active sounds follow changes on the next audio update.
+        getter emitter_offset() -> Vec3 { self.sound().settings.emitter_offset }
+        setter set_emitter_offset(offset: Vec3) {
+            self.sound_mut().settings.emitter_offset = offset;
+        }
+        builder with_emitter_offset;
     }
 
-    /// Returns attenuation, occlusion, Doppler, and input-channel settings.
-    ///
-    /// The authored emitter field is ignored; scene transforms supply it instead.
-    fn spatial_settings(&self) -> SpatialSound {
-        self.sound().settings.spatial
-    }
-
-    /// Replaces the source, preserving playback state and position when possible.
-    fn with_source(mut self, source: impl Into<SoundSource>) -> Self
-    where
-        Self: Sized,
-    {
-        self.sound_mut().settings.source = source.into();
-        self
-    }
-
-    /// Sets the local volume. Invalid values are reported by the next audio update.
-    fn with_volume(mut self, volume: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.sound_mut().settings.volume = volume;
-        self
-    }
-
-    /// Sets playback speed. Invalid values are reported by the next audio update.
-    fn with_playback_speed(mut self, speed: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.sound_mut().settings.playback_speed = speed;
-        self
-    }
-
-    /// Enables or disables repeating the source.
-    fn with_looping(mut self, looping: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self.sound_mut().settings.looping = looping;
-        self
-    }
-
-    /// Enables or disables positional playback beneath a part.
-    ///
-    /// Like Euphorium's spatial renderer configuration, this takes effect on
-    /// the next playback start or replay, not on an already playing voice.
-    fn with_spatial_enabled(mut self, enabled: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self.sound_mut().settings.spatial_enabled = enabled;
-        self
-    }
-
-    /// Sets the emitter offset in part-local pivot coordinates, without part scale.
-    /// Active positional sounds follow changes on the next audio update.
-    fn with_emitter_offset(mut self, offset: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        self.sound_mut().settings.emitter_offset = offset;
-        self
-    }
-
-    /// Sets attenuation, occlusion, Doppler, and input-channel handling.
-    ///
-    /// Occlusion changes apply on the next audio update. Other configuration
-    /// changes take effect when playback next starts or is replayed. Emitter
-    /// position and velocity are always supplied by the scene. Invalid spatial
-    /// settings are reported by the next audio update for positional sounds.
-    fn with_spatial_settings(mut self, mut settings: SpatialSound) -> Self
-    where
-        Self: Sized,
-    {
-        settings.emitter = EmitterState::default();
-        self.sound_mut().settings.spatial = settings;
-        self
+    crate::__instance_property! {
+        self;
+        /// Attenuation, occlusion, Doppler, and input-channel settings. The
+        /// authored emitter is ignored because scene transforms supply it.
+        /// Occlusion changes apply on the next audio update; other settings
+        /// take effect on playback start or replay. Invalid values are reported
+        /// by the next audio update for positional sounds.
+        getter spatial_settings() -> SpatialSound { self.sound().settings.spatial }
+        setter set_spatial_settings(settings: SpatialSound) {
+            let mut settings = settings;
+            settings.emitter = EmitterState::default();
+            self.sound_mut().settings.spatial = settings;
+        }
+        builder with_spatial_settings;
     }
 }
 

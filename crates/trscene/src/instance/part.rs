@@ -67,78 +67,54 @@ pub trait HasBasePart {
     /// Returns mutable access to the underlying [`BasePart`].
     fn base_part_mut(&mut self) -> &mut BasePart;
 
-    /// Tint.
-    fn color(&self) -> Color3 {
-        self.base_part().color
+    crate::__instance_property! {
+        self;
+        /// Tint applied when rendering this part.
+        getter color() -> Color3 { self.base_part().color }
+        setter set_color(color: Color3) {
+            self.base_part_mut().color = color;
+        }
+        builder with_color;
     }
 
-    /// Returns the transparency, where `0.0` is opaque and `1.0` is invisible.
-    fn transparency(&self) -> f32 {
-        self.base_part().transparency
+    crate::__instance_property! {
+        self;
+        /// Transparency, where `0.0` is opaque and `1.0` is invisible. Values
+        /// are clamped to `0.0..=1.0`; non-finite values become `0.0`.
+        getter transparency() -> f32 { self.base_part().transparency }
+        setter set_transparency(transparency: f32) {
+            self.base_part_mut().transparency = if transparency.is_finite() {
+                transparency.clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+        }
+        builder with_transparency;
     }
 
-    /// Whether a physics system should treat this part as immovable.
-    ///
-    /// The default physics integration creates a fixed body when this is `true`
-    /// and a dynamic body when this is `false`.
-    /// Inside a [`crate::Rig`], the rig's anchored state controls the shared body.
-    fn anchored(&self) -> bool {
-        self.base_part().anchored
+    crate::__instance_property! {
+        self;
+        /// Whether a physics system should treat this part as immovable. The
+        /// default physics integration creates a fixed body when this is `true`
+        /// and a dynamic body when this is `false`. Inside a [`crate::Rig`],
+        /// the rig's anchored state controls the shared body.
+        getter anchored() -> bool { self.base_part().anchored }
+        setter set_anchored(anchored: bool) {
+            self.base_part_mut().anchored = anchored;
+        }
+        builder with_anchored;
     }
 
-    /// Whether a physics system should consider this part for collisions.
-    ///
-    /// The default physics integration omits this part's collider when this is
-    /// `false`, while still simulating its rigid body.
-    fn can_collide(&self) -> bool {
-        self.base_part().can_collide
-    }
-
-    /// Sets the tint.
-    fn with_color(mut self, color: Color3) -> Self
-    where
-        Self: Sized,
-    {
-        self.base_part_mut().color = color;
-        self
-    }
-
-    /// Sets the transparency, where `0.0` is opaque and `1.0` is invisible.
-    fn with_transparency(mut self, transparency: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.base_part_mut().transparency = if transparency.is_finite() {
-            transparency.clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        self
-    }
-
-    /// Sets whether a physics system should treat this part as immovable.
-    ///
-    /// The default physics integration creates a fixed body when this is `true`
-    /// and a dynamic body when this is `false`.
-    /// Inside a [`crate::Rig`], the rig's anchored state controls the shared body.
-    fn with_anchored(mut self, anchored: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self.base_part_mut().anchored = anchored;
-        self
-    }
-
-    /// Sets whether a physics system should consider this part for collisions.
-    ///
-    /// The default physics integration omits this part's collider when this is
-    /// `false`, while still simulating its rigid body.
-    fn with_can_collide(mut self, can_collide: bool) -> Self
-    where
-        Self: Sized,
-    {
-        self.base_part_mut().can_collide = can_collide;
-        self
+    crate::__instance_property! {
+        self;
+        /// Whether a physics system should consider this part for collisions.
+        /// The default physics integration omits this part's collider when
+        /// `false`, while still simulating its rigid body.
+        getter can_collide() -> bool { self.base_part().can_collide }
+        setter set_can_collide(can_collide: bool) {
+            self.base_part_mut().can_collide = can_collide;
+        }
+        builder with_can_collide;
     }
 }
 
@@ -170,51 +146,42 @@ pub trait HasMaterials {
     /// Returns mutable access to the directional material slots.
     fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots;
 
-    /// Returns the material if all directional slots have the same effective material.
-    ///
-    /// Unassigned slots use [`Material::default()`] when compared.
-    fn material(&self) -> Option<&Material> {
-        let material = self.material_slot(Face::ALL[0]);
-        if Face::ALL
-            .into_iter()
-            .skip(1)
-            .all(|slot| self.material_slot(slot) == material)
-        {
-            Some(material)
-        } else {
-            None
+    crate::__instance_property! {
+        self;
+        /// A material is available only when all six directional slots have
+        /// the same effective value. Unassigned slots use [`Material::default()`].
+        getter material() -> Option<&Material> {
+            let material = self.material_slot(Face::ALL[0]);
+            if Face::ALL
+                .into_iter()
+                .skip(1)
+                .all(|slot| self.material_slot(slot) == material)
+            {
+                Some(material)
+            } else {
+                None
+            }
         }
+        setter set_material(material: Material) {
+            for slot in Face::ALL {
+                self.material_slots_mut().set(slot, material);
+            }
+        }
+        builder with_material;
     }
 
-    /// Returns the effective material for a slot.
-    ///
-    /// An unassigned slot uses [`Material::default()`].
-    fn material_slot(&self, slot: Face) -> &Material {
-        self.material_slots().get(slot).unwrap_or(&DEFAULT_MATERIAL)
-    }
-
-    /// Assigns the same material to all six directional slots.
-    fn with_material(mut self, material: Material) -> Self
-    where
-        Self: Sized,
-    {
-        for slot in Face::ALL {
+    crate::__instance_property! {
+        self;
+        /// Effective material for a directional slot. An unassigned slot uses
+        /// [`Material::default()`]. Slots are mesh-selected, so they work for
+        /// any [`PartShape`].
+        getter material_slot(slot: Face) -> &Material {
+            self.material_slots().get(slot).unwrap_or(&DEFAULT_MATERIAL)
+        }
+        setter set_material_slot(slot: Face, material: Material) {
             self.material_slots_mut().set(slot, material);
         }
-        self
-    }
-
-    /// Assigns a material to a mesh-selected directional slot.
-    ///
-    /// Slots are directional, so they work for any [`PartShape`]: setting
-    /// [`Face::Top`] affects the top-facing triangles of a block,
-    /// cylinder cap, wedge slope, sphere pole, or custom mesh alike.
-    fn with_material_slot(mut self, slot: Face, material: Material) -> Self
-    where
-        Self: Sized,
-    {
-        self.material_slots_mut().set(slot, material);
-        self
+        builder with_material_slot;
     }
 }
 
@@ -263,18 +230,14 @@ pub trait HasPart {
     /// Returns mutable access to the underlying [`Part`].
     fn part_mut(&mut self) -> &mut Part;
 
-    /// Primitive geometry used when the part is rendered.
-    fn shape(&self) -> PartShape {
-        self.part().shape
-    }
-
-    /// Sets the primitive geometry used when the part is rendered.
-    fn with_shape(mut self, shape: PartShape) -> Self
-    where
-        Self: Sized,
-    {
-        self.part_mut().shape = shape;
-        self
+    crate::__instance_property! {
+        self;
+        /// Primitive geometry used when the part is rendered.
+        getter shape() -> PartShape { self.part().shape }
+        setter set_shape(shape: PartShape) {
+            self.part_mut().shape = shape;
+        }
+        builder with_shape;
     }
 }
 

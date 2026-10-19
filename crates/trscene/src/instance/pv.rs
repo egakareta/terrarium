@@ -71,12 +71,16 @@ pub trait HasPVInstance {
     /// Returns mutable access to the underlying [`PVInstance`].
     fn pv_mut(&mut self) -> &mut PVInstance;
 
-    /// Sets the world-space pivot in place.
-    ///
-    /// The default implementation changes only this instance. [`Rig`] also
-    /// moves its descendants, preserving their relative transforms.
-    fn set_pivot(&mut self, pivot: Mat4) {
-        self.pv_mut().pivot = pivot;
+    crate::__instance_property! {
+        self;
+        /// World-space transform of the pivot. Changing it updates only this
+        /// instance by default; a [`Rig`] also moves its spatial descendants,
+        /// preserving their relative transforms.
+        getter pivot() -> Mat4 { self.pv().pivot }
+        setter set_pivot(pivot: Mat4) {
+            self.pv_mut().pivot = pivot;
+        }
+        builder with_pivot;
     }
 
     /// Reports whether this instance accepts the supplied pivot.
@@ -85,27 +89,51 @@ pub trait HasPVInstance {
         true
     }
 
-    /// The world-space transform of the instance's pivot.
-    fn pivot(&self) -> Mat4 {
-        self.pv().pivot
+    crate::__instance_property! {
+        self;
+        /// The position and orientation of the pivot, ignoring its scale.
+        getter pose() -> Mat4 { PVInstance::pose_from_transform(self.pivot()) }
+        setter set_pose(pose: Mat4) {
+            self.set_pivot(pivot_with_pose(self.pivot(), pose));
+        }
+        builder with_pose;
     }
 
-    /// Returns the position and orientation (rigid pose), ignoring the pivot's scale.
-    fn pose(&self) -> Mat4 {
-        PVInstance::pose_from_transform(self.pivot())
+    crate::__instance_property! {
+        self;
+        /// Translation component of the pivot. Setting position preserves
+        /// orientation and scale.
+        getter position() -> Vec3 { self.pivot().w_axis.truncate() }
+        setter set_position(position: Vec3) {
+            self.set_pivot(pivot_with_position(self.pivot(), position));
+        }
+        builder with_position;
     }
 
-    /// Returns the translation component of the pivot.
-    fn position(&self) -> Vec3 {
-        self.pivot().w_axis.truncate()
+    crate::__instance_property! {
+        self;
+        /// XYZ Euler orientation in degrees. Setting orientation preserves
+        /// position and scale.
+        getter orientation() -> Vec3 {
+            let (_, rotation, _) = self.pivot().to_scale_rotation_translation();
+            let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
+            Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
+        }
+        setter set_orientation(orientation: Vec3) {
+            self.set_pivot(pivot_with_orientation(self.pivot(), orientation));
+        }
+        builder with_orientation;
     }
 
-    /// Returns XYZ Euler orientation angles in degrees.
-    fn orientation(&self) -> Vec3 {
-        let (_, rotation, _) = self.pivot().to_scale_rotation_translation();
-        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
-
-        Vec3::new(x.to_degrees(), y.to_degrees(), z.to_degrees())
+    crate::__instance_property! {
+        self;
+        /// Per-axis scale of the pivot. Setting size preserves position and
+        /// orientation.
+        getter size() -> Vec3 { self.pivot().to_scale_rotation_translation().0 }
+        setter set_size(size: Vec3) {
+            self.set_pivot(pivot_with_size(self.pivot(), size));
+        }
+        builder with_size;
     }
 
     /// Returns the normalized world-space direction of local `-Z`.
@@ -145,55 +173,6 @@ pub trait HasPVInstance {
         Self: Instance,
     {
         pivot_hierarchy_to(self, pivot);
-    }
-
-    /// Replaces this instance's position, orientation and scale.
-    ///
-    /// Descendants keep their world-space transforms by default. [`Rig`]
-    /// moves its descendants with it. Use [`Self::pivot_to`] to move any
-    /// instance hierarchy together.
-    fn with_pivot(mut self, pivot: Mat4) -> Self
-    where
-        Self: Sized,
-    {
-        self.set_pivot(pivot);
-        self
-    }
-
-    /// Replaces the position and orientation (rigid pose) while preserving the current scale.
-    fn with_pose(mut self, pose: Mat4) -> Self
-    where
-        Self: Sized,
-    {
-        self.set_pivot(pivot_with_pose(self.pivot(), pose));
-        self
-    }
-
-    /// Replaces the per-axis scale while preserving the current position and orientation (rigid pose).
-    fn with_size(mut self, size: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        self.set_pivot(pivot_with_size(self.pivot(), size));
-        self
-    }
-
-    /// Replaces the translation while preserving the current orientation and size.
-    fn with_position(mut self, position: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        self.set_pivot(pivot_with_position(self.pivot(), position));
-        self
-    }
-
-    /// Replaces the XYZ Euler orientation in degrees while preserving position and size.
-    fn with_orientation(mut self, orientation: Vec3) -> Self
-    where
-        Self: Sized,
-    {
-        self.set_pivot(pivot_with_orientation(self.pivot(), orientation));
-        self
     }
 }
 

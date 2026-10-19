@@ -31,60 +31,45 @@ pub trait HasCamera {
     /// Returns mutable access to the underlying [`Camera`].
     fn camera_mut(&mut self) -> &mut Camera;
 
-    /// Viewport width divided by viewport height.
-    fn aspect(&self) -> f32 {
-        self.camera().aspect
+    crate::__instance_property! {
+        self;
+        /// Viewport width divided by viewport height. Values set through this
+        /// API are clamped to at least `0.001`.
+        getter aspect() -> f32 { self.camera().aspect }
+        setter set_aspect(aspect: f32) {
+            self.camera_mut().aspect = aspect.max(0.001);
+        }
+        builder with_aspect;
     }
 
-    /// Vertical field of view in radians.
-    fn fovy(&self) -> f32 {
-        self.camera().fovy
+    crate::__instance_property! {
+        self;
+        /// Vertical field of view in radians.
+        getter fovy() -> f32 { self.camera().fovy }
+        setter set_fovy(fovy: f32) {
+            self.camera_mut().fovy = fovy;
+        }
+        builder with_fovy;
     }
 
-    /// Near clipping plane distance.
-    fn znear(&self) -> f32 {
-        self.camera().znear
+    crate::__instance_property! {
+        self;
+        /// Near clipping plane distance.
+        getter znear() -> f32 { self.camera().znear }
+        setter set_znear(znear: f32) {
+            self.camera_mut().znear = znear;
+        }
+        builder with_znear;
     }
 
-    /// Far clipping plane distance.
-    fn zfar(&self) -> f32 {
-        self.camera().zfar
-    }
-
-    /// Sets the viewport width divided by viewport height.
-    fn with_aspect(mut self, aspect: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.camera_mut().aspect = aspect.max(0.001);
-        self
-    }
-
-    /// Sets the vertical field of view in radians.
-    fn with_fovy(mut self, fovy: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.camera_mut().fovy = fovy;
-        self
-    }
-
-    /// Sets the near clipping plane distance.
-    fn with_znear(mut self, znear: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.camera_mut().znear = znear;
-        self
-    }
-
-    /// Sets the far clipping plane distance.
-    fn with_zfar(mut self, zfar: f32) -> Self
-    where
-        Self: Sized,
-    {
-        self.camera_mut().zfar = zfar;
-        self
+    crate::__instance_property! {
+        self;
+        /// Far clipping plane distance.
+        getter zfar() -> f32 { self.camera().zfar }
+        setter set_zfar(zfar: f32) {
+            self.camera_mut().zfar = zfar;
+        }
+        builder with_zfar;
     }
 }
 
@@ -148,25 +133,16 @@ impl Camera {
         glam::camera::rh::proj::directx::perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
 
-    /// Returns the instance this camera follows in third-person mode.
-    ///
-    /// A missing subject leaves the camera in free-moving mode.
-    pub fn subject(&self) -> Option<InstanceId> {
-        self.subject
-    }
-
-    /// Sets the instance this camera follows in third-person mode.
-    ///
-    /// The ID must belong to a spatial instance in the active workspace. Set
-    /// this to `None` to return to free-moving mode.
-    pub fn set_subject(&mut self, subject: Option<InstanceId>) {
-        self.subject = subject;
-    }
-
-    /// Sets the instance this camera follows, returning `self` for chaining.
-    pub fn with_subject(mut self, subject: Option<InstanceId>) -> Self {
-        self.set_subject(subject);
-        self
+    crate::__instance_property! {
+        self;
+        /// Instance followed in third-person mode. A missing subject leaves
+        /// the camera in free-moving mode; a supplied ID must belong to a
+        /// spatial instance in the active workspace.
+        pub getter subject() -> Option<InstanceId> { self.subject }
+        setter set_subject(subject: Option<InstanceId>) {
+            self.subject = subject;
+        }
+        builder with_subject;
     }
 }
 

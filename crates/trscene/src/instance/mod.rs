@@ -578,19 +578,14 @@ pub trait Instance: Any + Debug + InstanceClone {
     /// The concrete class name of this instance.
     fn class_name(&self) -> &'static str;
 
-    /// The display name of this instance.
-    ///
-    /// This is the class name e.g. `"Part"`, `"PointLight"` if
-    /// not explicitly set.
-    fn name(&self) -> &str;
-
-    /// Replaces this instance's display name in place.
-    fn set_name(&mut self, name: String);
-
-    /// Returns this instance with its display name set.
-    fn with_name(self, name: impl Into<String>) -> Self
-    where
-        Self: Sized;
+    crate::__instance_property! {
+        self;
+        /// The display name of this instance. This defaults to its class name
+        /// and can be changed independently of the instance type.
+        declare getter name() -> &str;
+        declare setter set_name(name: String);
+        declare builder with_name(name: impl Into<String>);
+    }
 
     /// Returns this instance's stable identifier.
     fn id(&self) -> InstanceId;
