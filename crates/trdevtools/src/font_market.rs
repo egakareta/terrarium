@@ -1149,15 +1149,7 @@ impl FontMarket {
         } else {
             400
         };
-        let mut definitions = base_font_definitions.cloned().unwrap_or_else(|| {
-            let mut definitions = egui::FontDefinitions::default();
-            tregui::egui_phosphor::add_to_fonts(
-                &mut definitions,
-                tregui::egui_phosphor::Variant::Regular,
-            );
-            definitions
-        });
-        self.add_cached_fonts(&mut definitions);
+        let mut definitions = self.font_definitions(base_font_definitions);
         let data_name = font_data_name(id);
         let proportional = definitions
             .families
@@ -1183,15 +1175,7 @@ impl FontMarket {
         context: &egui::Context,
         base_font_definitions: Option<&egui::FontDefinitions>,
     ) {
-        let mut definitions = base_font_definitions.cloned().unwrap_or_else(|| {
-            let mut definitions = egui::FontDefinitions::default();
-            tregui::egui_phosphor::add_to_fonts(
-                &mut definitions,
-                tregui::egui_phosphor::Variant::Regular,
-            );
-            definitions
-        });
-        self.add_cached_fonts(&mut definitions);
+        let mut definitions = self.font_definitions(base_font_definitions);
         if let Some(active_font) = &self.active_font {
             let active_data_name = font_data_name(active_font);
             let proportional = definitions
@@ -1202,6 +1186,22 @@ impl FontMarket {
             proportional.insert(0, active_data_name);
         }
         context.set_fonts(definitions);
+    }
+
+    fn font_definitions(
+        &self,
+        base_font_definitions: Option<&egui::FontDefinitions>,
+    ) -> egui::FontDefinitions {
+        let mut definitions = base_font_definitions.cloned().unwrap_or_else(|| {
+            let mut definitions = egui::FontDefinitions::default();
+            tregui::egui_phosphor::add_to_fonts(
+                &mut definitions,
+                tregui::egui_phosphor::Variant::Regular,
+            );
+            definitions
+        });
+        self.add_cached_fonts(&mut definitions);
+        definitions
     }
 
     fn add_cached_fonts(&self, definitions: &mut egui::FontDefinitions) {

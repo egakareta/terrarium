@@ -409,9 +409,9 @@ impl Workspace {
     ///
     /// Call once per frame before [`Self::update`]. Each controller receives the
     /// same input and applies its own enabled-device and UI-capture settings.
-    pub fn process_eframe_context(&mut self, context: &crate::egui::Context) {
-        self.camera_controller.process_eframe_context(context);
-        self.controllers.process_eframe_context(context);
+    pub fn process_eframe_input(&mut self, context: &crate::egui::Context) {
+        self.camera_controller.process_eframe_input(context);
+        self.controllers.process_eframe_input(context);
     }
 
     /// Sends a winit window event to the camera and registered controllers.

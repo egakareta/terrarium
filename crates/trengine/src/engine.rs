@@ -165,6 +165,18 @@ pub struct Engine {
 }
 
 impl Engine {
+    #[cfg(feature = "devtools")]
+    fn with_devtools_render_selection<R>(
+        &mut self,
+        selected: &[InstanceId],
+        render: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = self.devtools_render_selection.replace(selected.to_vec());
+        let result = render(self);
+        self.devtools_render_selection = previous;
+        result
+    }
+
     /// Creates the engine with the supplied workspace from eframe's WGPU creation context.
     ///
     /// `fallback_size` is used on web and when no native window is available. The renderer is
@@ -459,7 +471,7 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     } else {
         0.0
     };
-    workspace.process_eframe_context(context);
+    workspace.process_eframe_input(context);
     delta
 }
 
@@ -647,11 +659,11 @@ impl trdevtools::DevtoolsHost for Engine {
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
-        let previous = self.devtools_render_selection.replace(selected.to_vec());
-        if let Err(error) = self.render(ui) {
-            log::error!("scene preparation failed: {error}");
-        }
-        self.devtools_render_selection = previous;
+        self.with_devtools_render_selection(selected, |engine| {
+            if let Err(error) = engine.render(ui) {
+                log::error!("scene preparation failed: {error}");
+            }
+        });
     }
 }
 
@@ -756,12 +768,10 @@ impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
-        let previous = self
-            .engine
-            .devtools_render_selection
-            .replace(selected.to_vec());
-        self.app.render(self.engine, ui, self.frame);
-        self.engine.devtools_render_selection = previous;
+        let app = &mut self.app;
+        let frame = &mut self.frame;
+        self.engine
+            .with_devtools_render_selection(selected, |engine| app.render(engine, ui, frame));
     }
 }
 

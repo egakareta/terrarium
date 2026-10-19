@@ -429,10 +429,7 @@ impl Image {
     ///
     /// Panics if (`x`, `y`) is outside the image dimensions.
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
-        let start = pixel_index(self.width, self.height, x, y);
-        self.pixels[start..start + 4]
-            .try_into()
-            .expect("pixel index is within validated pixel data")
+        pixel_at(self.width, self.height, &self.pixels, x, y)
     }
 
     /// Sets the RGBA8 pixel at (`x`, `y`) and returns this image for chaining.
@@ -441,8 +438,7 @@ impl Image {
     ///
     /// Panics if (`x`, `y`) is outside the image dimensions.
     pub fn with_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
-        let start = pixel_index(self.width, self.height, x, y);
-        self.pixels[start..start + 4].copy_from_slice(&pixel);
+        set_pixel(&mut self.pixels, self.width, self.height, x, y, pixel);
         self
     }
 
@@ -475,7 +471,7 @@ impl Image {
     ///
     /// Width and height are swapped.
     pub fn rotate90(mut self) -> Self {
-        rotate90_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        rotate_quarter_turn_in_place(&mut self.width, &mut self.height, &mut self.pixels, true);
         self
     }
 
@@ -490,7 +486,7 @@ impl Image {
     ///
     /// Width and height are swapped.
     pub fn rotate270(mut self) -> Self {
-        rotate270_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        rotate_quarter_turn_in_place(&mut self.width, &mut self.height, &mut self.pixels, false);
         self
     }
 
@@ -522,20 +518,7 @@ impl Image {
     }
 
     fn validate(&self) -> Result<(), TextureError> {
-        if self.width == 0 || self.height == 0 {
-            return Err(TextureError::ZeroDimensions);
-        }
-        let expected = (self.width as usize)
-            .checked_mul(self.height as usize)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or(TextureError::DimensionsTooLarge)?;
-        if self.pixels.len() != expected {
-            return Err(TextureError::InvalidData {
-                actual: self.pixels.len(),
-                expected,
-            });
-        }
-        Ok(())
+        validate_rgba8(self.width, self.height, &self.pixels)
     }
 }
 
@@ -634,10 +617,7 @@ impl Texture {
     ///
     /// Panics if (`x`, `y`) is outside the texture dimensions.
     pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
-        let start = pixel_index(self.width, self.height, x, y);
-        self.pixels[start..start + 4]
-            .try_into()
-            .expect("pixel index is within validated pixel data")
+        pixel_at(self.width, self.height, &self.pixels, x, y)
     }
 
     /// Sets the RGBA8 pixel at (`x`, `y`) and returns this texture for
@@ -647,8 +627,7 @@ impl Texture {
     ///
     /// Panics if (`x`, `y`) is outside the texture dimensions.
     pub fn with_pixel(&mut self, x: u32, y: u32, pixel: [u8; 4]) -> &mut Self {
-        let start = pixel_index(self.width, self.height, x, y);
-        self.pixels[start..start + 4].copy_from_slice(&pixel);
+        set_pixel(&mut self.pixels, self.width, self.height, x, y, pixel);
         self
     }
 
@@ -681,7 +660,7 @@ impl Texture {
     ///
     /// Width and height are swapped.
     pub fn rotate90(mut self) -> Self {
-        rotate90_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        rotate_quarter_turn_in_place(&mut self.width, &mut self.height, &mut self.pixels, true);
         self
     }
 
@@ -696,7 +675,7 @@ impl Texture {
     ///
     /// Width and height are swapped.
     pub fn rotate270(mut self) -> Self {
-        rotate270_cw_in_place(&mut self.width, &mut self.height, &mut self.pixels);
+        rotate_quarter_turn_in_place(&mut self.width, &mut self.height, &mut self.pixels, false);
         self
     }
 
@@ -781,21 +760,37 @@ impl Texture {
 
     /// Checks dimensions and verifies that the pixel buffer is tightly packed RGBA8.
     pub fn validate(&self) -> Result<(), TextureError> {
-        if self.width == 0 || self.height == 0 {
-            return Err(TextureError::ZeroDimensions);
-        }
-        let expected = (self.width as usize)
-            .checked_mul(self.height as usize)
-            .and_then(|pixels| pixels.checked_mul(4))
-            .ok_or(TextureError::DimensionsTooLarge)?;
-        if self.pixels.len() != expected {
-            return Err(TextureError::InvalidData {
-                actual: self.pixels.len(),
-                expected,
-            });
-        }
-        Ok(())
+        validate_rgba8(self.width, self.height, &self.pixels)
     }
+}
+
+fn validate_rgba8(width: u32, height: u32, pixels: &[u8]) -> Result<(), TextureError> {
+    if width == 0 || height == 0 {
+        return Err(TextureError::ZeroDimensions);
+    }
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(TextureError::DimensionsTooLarge)?;
+    if pixels.len() != expected {
+        return Err(TextureError::InvalidData {
+            actual: pixels.len(),
+            expected,
+        });
+    }
+    Ok(())
+}
+
+fn pixel_at(width: u32, height: u32, pixels: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let start = pixel_index(width, height, x, y);
+    pixels[start..start + 4]
+        .try_into()
+        .expect("pixel index is within validated pixel data")
+}
+
+fn set_pixel(pixels: &mut [u8], width: u32, height: u32, x: u32, y: u32, pixel: [u8; 4]) {
+    let start = pixel_index(width, height, x, y);
+    pixels[start..start + 4].copy_from_slice(&pixel);
 }
 
 fn pixel_index(width: u32, height: u32, x: u32, y: u32) -> usize {
@@ -840,30 +835,25 @@ fn rotate180_in_place(pixels: &mut [u8]) {
     }
 }
 
-/// 90 degrees clockwise: destination (`x`, `y`) samples source
-/// (`y`, `source_height - 1 - x`) and the dimensions swap.
-fn rotate90_cw_in_place(width: &mut u32, height: &mut u32, pixels: &mut Vec<u8>) {
+/// Rotates by one quarter turn, swapping the dimensions.
+///
+/// Clockwise destinations sample source `(y, height - 1 - x)`; counterclockwise
+/// destinations sample `(width - 1 - y, x)`.
+fn rotate_quarter_turn_in_place(
+    width: &mut u32,
+    height: &mut u32,
+    pixels: &mut Vec<u8>,
+    clockwise: bool,
+) {
     let (source_width, source_height) = (*width as usize, *height as usize);
     let mut rotated = vec![0u8; pixels.len()];
     for y in 0..source_width {
         for x in 0..source_height {
-            let source = ((source_height - 1 - x) * source_width + y) * 4;
-            let destination = (y * source_height + x) * 4;
-            rotated[destination..destination + 4].copy_from_slice(&pixels[source..source + 4]);
-        }
-    }
-    *pixels = rotated;
-    std::mem::swap(width, height);
-}
-
-/// 270 degrees clockwise: destination (`x`, `y`) samples source
-/// (`source_width - 1 - y`, `x`) and the dimensions swap.
-fn rotate270_cw_in_place(width: &mut u32, height: &mut u32, pixels: &mut Vec<u8>) {
-    let (source_width, source_height) = (*width as usize, *height as usize);
-    let mut rotated = vec![0u8; pixels.len()];
-    for y in 0..source_width {
-        for x in 0..source_height {
-            let source = (x * source_width + (source_width - 1 - y)) * 4;
+            let source = if clockwise {
+                ((source_height - 1 - x) * source_width + y) * 4
+            } else {
+                (x * source_width + (source_width - 1 - y)) * 4
+            };
             let destination = (y * source_height + x) * 4;
             rotated[destination..destination + 4].copy_from_slice(&pixels[source..source + 4]);
         }

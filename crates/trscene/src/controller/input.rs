@@ -272,31 +272,11 @@ impl ControllerInput {
             .any(|binding| eframe_key_down(input, binding))
     }
 
-    /// Reads an egui input snapshot without applying UI-capture filtering.
-    pub fn process_eframe_input(&mut self, input: &egui::InputState) {
-        self.process_eframe_input_with_capture(input, false, false);
-    }
-
-    /// Reads an egui input snapshot with independent pointer and keyboard capture.
-    ///
-    /// Captured pointer input suppresses mouse look and new touch gestures;
-    /// captured keyboard input clears held movement keys.
-    pub fn process_eframe_input_with_capture(
-        &mut self,
-        input: &egui::InputState,
-        pointer_capture: bool,
-        keyboard_capture: bool,
-    ) {
-        self.process_eframe_input_inner(input, pointer_capture, keyboard_capture, |_| {
-            pointer_capture
-        });
-    }
-
-    /// Reads the current egui frame, respecting UI capture, and paints the joystick.
+    /// Reads the current egui frame, respecting UI capture, and paints touch controls.
     ///
     /// Gestures are assigned at touch-down, permitting simultaneous joystick and
     /// look input. Touches starting on UI areas are left to egui.
-    pub fn process_eframe_context(&mut self, context: &egui::Context) {
+    pub fn process_eframe_input(&mut self, context: &egui::Context) {
         let pointer_capture = context.egui_wants_pointer_input();
         let keyboard_capture = context.egui_wants_keyboard_input();
         let mut captured_touches = context.input(|input| {
@@ -331,17 +311,12 @@ impl ControllerInput {
                 captured_touches.contains(&position)
             });
         });
-        self.paint_touch_controls(context);
-    }
-
-    /// Paints the joystick after input has detected a touchscreen.
-    pub fn paint_touch_controls(&self, context: &egui::Context) {
         if self.touch_enabled && self.touch.detected {
             self.touch.paint(context);
         }
     }
 
-    fn process_eframe_input_inner(
+    pub(crate) fn process_eframe_input_inner(
         &mut self,
         input: &egui::InputState,
         pointer_capture: bool,
