@@ -46,59 +46,49 @@ impl Outline {
         Self::new(OutlineMode::Stencil)
     }
 
-    /// Returns the outline technique.
-    pub fn mode(&self) -> OutlineMode {
-        self.mode
+    crate::__instance_property! {
+        /// Rendering technique used by the outline.
+        pub getter mode() -> OutlineMode { self.mode }
+        setter set_mode(mode: OutlineMode) {
+            self.mode = mode;
+        }
+        builder with_mode;
     }
 
-    /// Returns the outline color.
-    pub fn color(&self) -> Color3 {
-        self.color
+    crate::__instance_property! {
+        /// Color of the outline.
+        pub getter color() -> Color3 { self.color }
+        setter set_color(color: Color3) {
+            self.color = color;
+        }
+        builder with_color;
     }
 
-    /// Returns the screen-space line width in pixels.
-    pub fn width(&self) -> f32 {
-        self.width
+    crate::__instance_property! {
+        /// Screen-space line width in pixels.
+        pub getter width() -> f32 { self.width }
+        setter set_width(width: f32) {
+            self.width = width;
+        }
+        builder with_width;
     }
 
-    /// Returns the edge threshold used by toon and silhouette detection.
-    pub fn threshold(&self) -> f32 {
-        self.threshold
+    crate::__instance_property! {
+        /// Edge threshold used by toon and silhouette detection.
+        pub getter threshold() -> f32 { self.threshold }
+        setter set_threshold(threshold: f32) {
+            self.threshold = threshold;
+        }
+        builder with_threshold;
     }
 
-    /// Returns whether the outline renders through occluding geometry.
-    pub fn always_on_top(&self) -> bool {
-        self.always_on_top
-    }
-
-    /// Sets the outline technique.
-    pub fn with_mode(mut self, mode: OutlineMode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    /// Sets the outline color.
-    pub fn with_color(mut self, color: Color3) -> Self {
-        self.color = color;
-        self
-    }
-
-    /// Sets the screen-space line width in pixels.
-    pub fn with_width(mut self, width: f32) -> Self {
-        self.width = width;
-        self
-    }
-
-    /// Sets the edge threshold used by toon and silhouette detection.
-    pub fn with_threshold(mut self, threshold: f32) -> Self {
-        self.threshold = threshold;
-        self
-    }
-
-    /// Sets whether the outline renders through occluding geometry.
-    pub fn with_always_on_top(mut self, always_on_top: bool) -> Self {
-        self.always_on_top = always_on_top;
-        self
+    crate::__instance_property! {
+        /// Whether the outline renders through occluding geometry.
+        pub getter always_on_top() -> bool { self.always_on_top }
+        setter set_always_on_top(always_on_top: bool) {
+            self.always_on_top = always_on_top;
+        }
+        builder with_always_on_top;
     }
 }
 

@@ -337,26 +337,22 @@ pub trait HasMeshPart {
     /// Returns mutable access to the underlying [`MeshPart`].
     fn mesh_part_mut(&mut self) -> &mut MeshPart;
 
-    /// Returns the CPU-side geometry rendered by this mesh part.
-    fn mesh(&self) -> &Mesh {
-        self.mesh_part().mesh.mesh()
+    crate::__instance_property! {
+        /// CPU-side geometry rendered by this mesh part. Replacing it updates
+        /// the bounds and schedules a new upload before the next frame.
+        getter mesh() -> &Mesh { self.mesh_part().mesh.mesh() }
+        setter set_mesh(mesh: Mesh) {
+            let mesh_part = self.mesh_part_mut();
+            mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
+            mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots.clone());
+            mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
+        }
+        builder with_mesh;
     }
 
     /// Returns the shared mesh asset used by this part.
     fn mesh_handle(&self) -> &MeshHandle {
         &self.mesh_part().mesh
-    }
-
-    /// Replaces the geometry and schedules it for upload before the next frame.
-    fn with_mesh(mut self, mesh: Mesh) -> Self
-    where
-        Self: Sized,
-    {
-        let mesh_part = self.mesh_part_mut();
-        mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
-        mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots.clone());
-        mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
-        self
     }
 }
 

@@ -29,20 +29,13 @@ impl Rig {
         }
     }
 
-    /// Returns whether the rig's physics body is immovable.
-    pub fn anchored(&self) -> bool {
-        self.anchored
-    }
-
-    /// Sets whether the rig's physics body is immovable.
-    pub fn with_anchored(mut self, anchored: bool) -> Self {
-        self.set_anchored(anchored);
-        self
-    }
-
-    /// Sets whether the rig's physics body is immovable in place.
-    pub fn set_anchored(&mut self, anchored: bool) {
-        self.anchored = anchored;
+    crate::__instance_property! {
+        /// Whether the rig's physics body is immovable.
+        pub getter anchored() -> bool { self.anchored }
+        setter set_anchored(anchored: bool) {
+            self.anchored = anchored;
+        }
+        builder with_anchored;
     }
 
     /// Adds a spatial child, interpreting its pivot relative to this rig.
