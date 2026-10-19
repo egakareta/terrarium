@@ -1,9 +1,9 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use std::sync::{Mutex, OnceLock};
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 use std::{cell::RefCell, rc::Rc};
 
 use bytemuck::{Pod, Zeroable};
@@ -79,7 +79,7 @@ impl RendererShaders {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 fn renderer_shaders(device: &wgpu::Device) -> RendererShaders {
     static SHADERS: OnceLock<Mutex<Option<(wgpu::Device, RendererShaders)>>> = OnceLock::new();
     let mut shaders = SHADERS
@@ -97,12 +97,12 @@ fn renderer_shaders(device: &wgpu::Device) -> RendererShaders {
     created
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn renderer_shaders(device: &wgpu::Device) -> RendererShaders {
     RendererShaders::new(device)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 fn renderer_pipeline_cache(device: &wgpu::Device) -> Option<wgpu::PipelineCache> {
     if !device.features().contains(wgpu::Features::PIPELINE_CACHE) {
         return None;
@@ -131,7 +131,7 @@ fn renderer_pipeline_cache(device: &wgpu::Device) -> Option<wgpu::PipelineCache>
     Some(created)
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn renderer_pipeline_cache(_device: &wgpu::Device) -> Option<wgpu::PipelineCache> {
     None
 }
@@ -506,7 +506,7 @@ struct OutputTarget {
     pipeline: wgpu::RenderPipeline,
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 #[derive(Default)]
 struct WebPixelReadbackState {
     latest: Option<Vec<[u8; 4]>>,
@@ -543,7 +543,7 @@ pub struct Renderer {
     stencil_mask_pipeline: wgpu::RenderPipeline,
     stencil_outline_pipeline: wgpu::RenderPipeline,
     output: OutputTarget,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     web_pixel_readback: Rc<RefCell<WebPixelReadbackState>>,
     skybox_pipeline: wgpu::RenderPipeline,
     skybox_bind_group_layout: wgpu::BindGroupLayout,

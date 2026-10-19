@@ -1,7 +1,7 @@
 #[cfg(feature = "meshpart")]
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use std::sync::{Mutex, OnceLock};
 
 use slotmap::Key;
@@ -18,7 +18,7 @@ pub use trrender::{DEPTH_FORMAT, RendererError};
 #[cfg(feature = "meshpart")]
 pub use viewport::{Viewport, ViewportTexture};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 static WGPU_INSTANCE_KEEPALIVE: OnceLock<Mutex<Option<crate::wgpu::Instance>>> = OnceLock::new();
 
 #[cfg(feature = "meshpart")]
@@ -44,7 +44,7 @@ impl RenderAdapter {
         render_state: &egui_wgpu::RenderState,
         size: [u32; 2],
     ) -> Result<Self, RendererError> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             let keepalive = WGPU_INSTANCE_KEEPALIVE.get_or_init(|| Mutex::new(None));
             *keepalive

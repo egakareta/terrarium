@@ -5,12 +5,12 @@ pub fn run(
     _install_fonts: impl FnOnce(&mut egui::FontDefinitions) + 'static,
     _draw: impl FnMut(&mut egui::Ui) + 'static,
 ) -> eframe::Result<()> {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     {
         Ok(())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     {
         eframe::run_native(
             _title,
@@ -27,12 +27,12 @@ pub fn run(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 struct Showcase {
     draw: Box<dyn FnMut(&mut egui::Ui)>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 impl eframe::App for Showcase {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         (self.draw)(ui);

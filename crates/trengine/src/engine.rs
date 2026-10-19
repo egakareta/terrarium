@@ -1,10 +1,10 @@
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 use std::cell::RefMut;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use std::rc::Rc;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 use std::rc::{Rc, Weak};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::{
     cell::RefCell,
@@ -16,7 +16,7 @@ use crate::{
     *,
 };
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 #[wasm_bindgen::prelude::wasm_bindgen]
 unsafe extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = error)]
@@ -28,19 +28,19 @@ const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
 /// Error returned while creating an application.
 pub type AppCreationError = Box<dyn std::error::Error + Send + Sync>;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 type RendererHandle = Rc<RefCell<RenderAdapter>>;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 type RendererHandle = Arc<Mutex<RenderAdapter>>;
 
 type EngineSlot = Rc<RefCell<Option<Engine>>>;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 static DEFAULT_HEADLESS_RENDER_STATE: OnceLock<Result<egui_wgpu::RenderState, String>> =
     OnceLock::new();
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 fn default_headless_render_state(
     options: &egui_wgpu::WgpuConfiguration,
 ) -> Result<egui_wgpu::RenderState, eframe::Error> {
@@ -79,13 +79,13 @@ fn default_headless_render_state(
 
 // WebGPU objects are not transferable between browser threads. Keep the renderer on its owning
 // thread and let the Send + Sync callback carry only an index into this thread-local registry.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 thread_local! {
     static RENDERERS: RefCell<Vec<Option<Weak<RefCell<RenderAdapter>>>>>
         = const { RefCell::new(Vec::new()) };
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn register_renderer(renderer: &RendererHandle) -> usize {
     RENDERERS.with(|renderers| {
         let mut renderers = renderers.borrow_mut();
@@ -95,7 +95,7 @@ fn register_renderer(renderer: &RendererHandle) -> usize {
     })
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn unregister_renderer(id: usize) {
     RENDERERS.with(|renderers| {
         if let Some(renderer) = renderers.borrow_mut().get_mut(id) {
@@ -104,7 +104,7 @@ fn unregister_renderer(id: usize) {
     });
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn with_renderer<R>(id: usize, f: impl FnOnce(&mut RenderAdapter) -> R) -> R {
     let renderer = RENDERERS.with(|renderers| {
         renderers
@@ -118,9 +118,9 @@ fn with_renderer<R>(id: usize, f: impl FnOnce(&mut RenderAdapter) -> R) -> R {
 }
 
 struct SceneCallback {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     renderer: Arc<Mutex<RenderAdapter>>,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     renderer_id: usize,
 }
 
@@ -131,13 +131,13 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         render_pass: &mut egui_wgpu::wgpu::RenderPass<'static>,
         _callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         self.renderer
             .lock()
             .expect("engine renderer lock poisoned")
             .paint_eframe_scene(render_pass);
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         with_renderer(self.renderer_id, |renderer| {
             renderer.paint_eframe_scene(render_pass);
         });
@@ -157,7 +157,7 @@ pub struct Engine {
     #[cfg(feature = "devtools")]
     devtools_render_selection: Option<Vec<InstanceId>>,
     creation_context: eframe::CreationContext<'static>,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     renderer_id: usize,
     clear_color: [f32; 4],
     #[cfg(feature = "bevy")]
@@ -186,16 +186,16 @@ impl Engine {
         fallback_size: [u32; 2],
         workspace: Workspace,
     ) -> Result<Self, RendererError> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         let size = creation_context
             .winit_window()
             .map(|window| window.inner_size())
             .map_or(fallback_size, |size| [size.width, size.height]);
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let size = fallback_size;
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let mut workspace = workspace;
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
             workspace
                 .camera_controller_mut()
@@ -207,12 +207,12 @@ impl Engine {
             .as_ref()
             .ok_or(RendererError::MissingEframeWgpuRenderState)?;
         let renderer = RenderAdapter::new(render_state, [size[0].max(1), size[1].max(1)])?;
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let renderer = Rc::new(RefCell::new(renderer));
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         let renderer = Arc::new(Mutex::new(renderer));
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let renderer_id = register_renderer(&renderer);
 
         Ok(Self {
@@ -229,7 +229,7 @@ impl Engine {
             #[cfg(feature = "devtools")]
             devtools_render_selection: None,
             creation_context: Self::owned_creation_context(creation_context),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
             renderer_id,
             clear_color: DEFAULT_CLEAR_COLOR,
             #[cfg(feature = "bevy")]
@@ -286,13 +286,13 @@ impl Engine {
     }
 
     /// Returns locked access to the underlying renderer for advanced operations.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     pub fn renderer(&self) -> MutexGuard<'_, RenderAdapter> {
         self.renderer.lock().expect("engine renderer lock poisoned")
     }
 
     /// Returns mutable access to the underlying renderer for advanced operations.
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     pub fn renderer(&self) -> RefMut<'_, RenderAdapter> {
         self.renderer.borrow_mut()
     }
@@ -329,11 +329,11 @@ impl Engine {
     /// Registers the paint callback for the workspace prepared with [`Self::prepare`].
     pub fn paint(&self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         let callback = SceneCallback {
             renderer: Arc::clone(&self.renderer),
         };
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let callback = SceneCallback {
             renderer_id: self.renderer_id,
         };
@@ -349,16 +349,16 @@ impl Engine {
     }
 
     fn start(config: Terrarium<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         if config.env_logger {
             let _ = env_logger::try_init();
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let _ = config.env_logger;
 
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
         (config.wgpu_options)(&mut wgpu_options);
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             let headless_frame_limit = match config.headless {
                 HeadlessMode::Disabled => None,
@@ -424,7 +424,7 @@ impl Engine {
             eframe::run_native(config.title, native_options, app_creator)
         }
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             use wasm_bindgen::JsCast as _;
 
@@ -475,7 +475,7 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     delta
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn normalize_web_canvas_input(context: &egui::Context, raw_input: &mut egui::RawInput) {
     use wasm_bindgen::JsCast;
 
@@ -612,14 +612,14 @@ fn prepare_workspace(
         (rect.height() * pixels_per_point).round().max(1.0) as u32,
     ];
     workspace.current_camera.resize(size[0], size[1]);
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     let mut renderer = renderer.lock().expect("engine renderer lock poisoned");
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     let mut renderer = renderer.borrow_mut();
     renderer.prepare_eframe_scene(workspace, size, selected)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 fn native_viewport(title: &str, size: [u32; 2], size_explicit: bool) -> egui::ViewportBuilder {
     let viewport = egui::ViewportBuilder::default().with_title(title);
     if size_explicit {
@@ -629,7 +629,7 @@ fn native_viewport(title: &str, size: [u32; 2], size_explicit: bool) -> egui::Vi
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(all(test, not(all(target_family = "wasm", not(target_os = "wasi")))))]
 mod tests {
     use super::*;
 
@@ -823,7 +823,7 @@ impl<A: App> eframe::App for AppAdapter<A> {
     }
 
     fn raw_input_hook(&mut self, context: &egui::Context, raw_input: &mut egui::RawInput) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         normalize_web_canvas_input(context, raw_input);
         with_engine(&self.engine, |engine| {
             self.app.raw_input_hook(engine, context, raw_input);
@@ -835,7 +835,7 @@ fn take_engine(slot: EngineSlot) -> Option<Engine> {
     Rc::try_unwrap(slot).ok()?.into_inner()
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 impl Drop for Engine {
     fn drop(&mut self) {
         unregister_renderer(self.renderer_id);
@@ -860,7 +860,7 @@ impl DerefMut for Engine {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 #[derive(Clone, Copy)]
 enum HeadlessMode {
     Disabled,
@@ -875,16 +875,16 @@ pub struct Terrarium<'a> {
     bevy_app: Option<bevy_app::App>,
     title: &'a str,
     size: [u32; 2],
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     size_explicit: bool,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     canvas_id: &'a str,
     wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
     wgpu_options_customized: bool,
     env_logger: bool,
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     headless: HeadlessMode,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     console_error_panic_hook: bool,
     bundle_fonts: bool,
 }
@@ -897,16 +897,16 @@ impl<'a> Default for Terrarium<'a> {
             bevy_app: None,
             title: "App",
             size: [1280, 720],
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
             size_explicit: false,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
             canvas_id: "app",
             wgpu_options: Box::new(|_| {}),
             wgpu_options_customized: false,
             env_logger: true,
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
             headless: HeadlessMode::Disabled,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
             console_error_panic_hook: true,
             bundle_fonts: cfg!(feature = "default-fonts"),
         }
@@ -1050,7 +1050,7 @@ impl<'a> Terrarium<'a> {
     ///
     /// This has no useful effect on web applications.
     pub fn with_headless(self, frame_count: Option<usize>) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             let mut this = self;
             this.headless = match frame_count {
@@ -1060,7 +1060,7 @@ impl<'a> Terrarium<'a> {
             this
         }
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             let _ = frame_count;
             self
@@ -1076,7 +1076,7 @@ impl<'a> Terrarium<'a> {
     /// The window size on native platforms.
     pub fn with_size(mut self, size: [u32; 2]) -> Self {
         self.size = size;
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             self.size_explicit = true;
         }
@@ -1085,14 +1085,14 @@ impl<'a> Terrarium<'a> {
 
     /// The element to render the web application.
     pub fn with_canvas_id(self, canvas_id: &'a str) -> Self {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             let mut this = self;
             this.canvas_id = canvas_id;
             this
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             let _ = canvas_id;
             self
@@ -1121,14 +1121,14 @@ impl<'a> Terrarium<'a> {
     ///
     /// By default, this is enabled.
     pub fn with_console_error_panic_hook(self, enabled: bool) -> Self {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             let mut this = self;
             this.console_error_panic_hook = enabled;
             this
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             let _ = enabled;
             self

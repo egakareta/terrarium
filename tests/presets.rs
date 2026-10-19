@@ -55,7 +55,7 @@ fn baseplate_supports_dynamic_parts() {
     assert!(height > 0.4 && height < 0.6, "resting height: {height}");
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 #[test]
 fn launchers_apply_presets_before_the_initializer() -> Result<(), AppCreationError> {
     for (launcher, preset) in [
@@ -84,7 +84,10 @@ fn launchers_apply_presets_before_the_initializer() -> Result<(), AppCreationErr
     Ok(())
 }
 
-#[cfg(all(feature = "bevy", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "bevy",
+    not(all(target_family = "wasm", not(target_os = "wasi")))
+))]
 #[test]
 fn bevy_without_a_supplied_workspace_uses_the_launcher_preset() -> Result<(), AppCreationError> {
     let engine = Terrarium::preset(WorkspacePreset::Baseplate)
@@ -101,7 +104,10 @@ fn bevy_without_a_supplied_workspace_uses_the_launcher_preset() -> Result<(), Ap
     Ok(())
 }
 
-#[cfg(all(feature = "bevy", not(target_arch = "wasm32")))]
+#[cfg(all(
+    feature = "bevy",
+    not(all(target_family = "wasm", not(target_os = "wasi")))
+))]
 #[test]
 fn a_supplied_empty_bevy_workspace_overrides_the_launcher_preset() -> Result<(), AppCreationError> {
     let mut app = terrarium::bevy::app::App::new();

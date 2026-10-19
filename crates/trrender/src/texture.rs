@@ -587,7 +587,7 @@ fn material_mip_levels(
     surface: &Texture,
     emissive: &Texture,
 ) -> Result<MaterialMipLevels, TextureError> {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     if u64::from(base_color.width) * u64::from(base_color.height) >= 256 * 256 {
         return std::thread::scope(|scope| {
             let surface_mips = scope.spawn(|| surface.mip_levels());

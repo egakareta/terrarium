@@ -27,10 +27,10 @@ trscene = { workspace = true }
 wgpu = { version = "30", default-features = false, features = ["std"] }
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))'.dependencies]
 pollster = "1"
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_family = "wasm", not(target_os = "wasi")))'.dependencies]
 console_error_panic_hook = "0.1"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

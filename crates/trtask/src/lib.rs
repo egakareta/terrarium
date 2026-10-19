@@ -8,7 +8,7 @@ use std::future::Future;
 /// On native targets, the future runs on a dedicated thread and must be `Send`.
 /// On wasm32, it is scheduled locally, does not need to be `Send`, and must not
 /// block the browser's event loop.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 pub fn spawn_background<F>(future: F)
 where
     F: Future<Output = ()> + Send + 'static,
@@ -21,7 +21,7 @@ where
 /// On native targets, the future runs on a dedicated thread and must be `Send`.
 /// On wasm32, it is scheduled locally, does not need to be `Send`, and must not
 /// block the browser's event loop.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 pub fn spawn_background<F>(future: F)
 where
     F: Future<Output = ()> + 'static,

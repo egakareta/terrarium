@@ -1,4 +1,7 @@
-#![cfg(all(feature = "devtools", not(target_arch = "wasm32")))]
+#![cfg(all(
+    feature = "devtools",
+    not(all(target_family = "wasm", not(target_os = "wasi")))
+))]
 
 use trengine::{App, AppCreationError, Engine, Terrarium, egui};
 

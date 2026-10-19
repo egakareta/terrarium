@@ -2,16 +2,16 @@ use super::*;
 
 // WGPU requires a Send callback in non-atomic WASM builds. Browser readback state stays
 // on its owning thread; the callback passed to WGPU carries only a registry key.
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 type WebReadbackCallback = Box<dyn FnOnce(Result<(), wgpu::BufferAsyncError>)>;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 thread_local! {
     static WEB_READBACK_CALLBACKS: RefCell<slotmap::SlotMap<slotmap::DefaultKey, WebReadbackCallback>>
         = RefCell::new(slotmap::SlotMap::new());
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn map_web_readback(
     buffer: &wgpu::Buffer,
     callback: impl FnOnce(Result<(), wgpu::BufferAsyncError>) + 'static,
@@ -95,7 +95,7 @@ impl Renderer {
     /// [`RendererError::PixelReadbackPending`], and completed captures may be
     /// several frames old.
     pub fn read_pixels(&self) -> Result<Vec<[u8; 4]>, RendererError> {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
             self.read_texture_pixels(
                 &self.output._texture,
@@ -105,7 +105,7 @@ impl Renderer {
             )
         }
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             let (latest, error) = {
                 let mut readback = self.web_pixel_readback.borrow_mut();
@@ -121,7 +121,7 @@ impl Renderer {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     fn read_texture_pixels(
         &self,
         texture: &wgpu::Texture,
@@ -192,7 +192,7 @@ impl Renderer {
         Ok(pixels)
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     fn start_web_pixel_readback(&self) -> Result<(), RendererError> {
         let (unpadded_bytes_per_row, padded_bytes_per_row, buffer_size) =
             pixel_readback_layout(self.width, self.height)?;
@@ -290,7 +290,7 @@ impl Renderer {
         if width == 0 || height == 0 {
             return;
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             let mut readback = self.web_pixel_readback.borrow_mut();
             readback.generation = readback.generation.wrapping_add(1);

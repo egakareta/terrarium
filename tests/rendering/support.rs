@@ -1,4 +1,4 @@
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use std::sync::{OnceLock, mpsc};
 
 use terrarium::{glam::Vec3, *};
@@ -17,28 +17,28 @@ struct OffscreenRenderer {
     renderer: Renderer,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 struct RenderRequest {
     build_workspace: WorkspaceBuilder,
     pixels_tx: mpsc::Sender<Vec<[u8; 4]>>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 static RENDERER_THREAD: OnceLock<mpsc::Sender<RenderRequest>> = OnceLock::new();
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 
 macro_rules! rendering_test {
     ($name:ident) => {
         paste::paste! {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
             #[test]
             fn $name() {
                 pollster::block_on([<$name _test>]());
             }
 
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
             #[wasm_bindgen_test::wasm_bindgen_test]
             async fn $name() {
                 [<$name _test>]().await;
@@ -51,7 +51,7 @@ fn pixel(pixels: &[[u8; 4]], x: u32, y: u32) -> [u8; 4] {
     pixels[y as usize * WIDTH as usize + x as usize]
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 async fn render_workspace_pixels(
     build_workspace: impl FnOnce(&mut Workspace) + Send + 'static,
 ) -> Vec<[u8; 4]> {
@@ -85,7 +85,7 @@ async fn render_workspace_pixels(
         .expect("the pixel-rendering thread exited before returning an image")
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 async fn render_workspace_pixels(
     build_workspace: impl FnOnce(&mut Workspace) + Send + 'static,
 ) -> Vec<[u8; 4]> {
@@ -117,9 +117,9 @@ async fn render_workspace_frame(
 impl OffscreenRenderer {
     async fn new() -> Self {
         let descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         let instance = wgpu::Instance::new(descriptor);
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let instance = wgpu::util::new_instance_with_webgpu_detection(descriptor).await;
 
         let adapter_options = wgpu::RequestAdapterOptions {
@@ -148,14 +148,14 @@ impl OffscreenRenderer {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 async fn read_pixels(renderer: &Renderer) -> Vec<[u8; 4]> {
     renderer
         .read_pixels()
         .expect("could not read the rendered pixels")
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 async fn read_pixels(renderer: &Renderer) -> Vec<[u8; 4]> {
     for _ in 0..300 {
         match renderer.read_pixels() {
@@ -168,7 +168,7 @@ async fn read_pixels(renderer: &Renderer) -> Vec<[u8; 4]> {
     panic!("the browser did not complete the render-target pixel readback");
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 async fn wait_for_browser_task() {
     let promise = js_sys::Promise::new(&mut |resolve, _reject| {
         web_sys::window()

@@ -11,7 +11,7 @@ pub struct ClipboardError(String);
         any(unix, windows),
         not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
     ),
-    target_arch = "wasm32"
+    all(target_family = "wasm", not(target_os = "wasi"))
 )))]
 static FALLBACK_TEXT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
@@ -69,7 +69,7 @@ impl Clipboard {
                 .get_text()
                 .map_err(|error| ClipboardError(error.to_string()))
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             let text = wasm_bindgen_futures::JsFuture::from(web_clipboard()?.read_text())
                 .await
@@ -82,7 +82,7 @@ impl Clipboard {
                 any(unix, windows),
                 not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
             ),
-            target_arch = "wasm32"
+            all(target_family = "wasm", not(target_os = "wasi"))
         )))]
         {
             Ok(FALLBACK_TEXT
@@ -105,7 +105,7 @@ impl Clipboard {
                 .set_text(text)
                 .map_err(|error| ClipboardError(error.to_string()))
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         {
             wasm_bindgen_futures::JsFuture::from(web_clipboard()?.write_text(text))
                 .await
@@ -117,7 +117,7 @@ impl Clipboard {
                 any(unix, windows),
                 not(any(target_os = "android", target_os = "ios", target_os = "emscripten"))
             ),
-            target_arch = "wasm32"
+            all(target_family = "wasm", not(target_os = "wasi"))
         )))]
         {
             *FALLBACK_TEXT
@@ -128,7 +128,7 @@ impl Clipboard {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 fn web_clipboard() -> Result<web_sys::Clipboard, ClipboardError> {
     use wasm_bindgen::JsValue;
 

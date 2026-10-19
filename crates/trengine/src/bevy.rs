@@ -116,7 +116,7 @@ pub(crate) fn update_app(
 fn finish_plugins(app: &mut BevyApp) -> bool {
     match app.plugins_state() {
         PluginsState::Adding => {
-            #[cfg(not(target_arch = "wasm32"))]
+            #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
             bevy_tasks::tick_global_task_pools_on_main_thread();
             false
         }

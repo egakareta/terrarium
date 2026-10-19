@@ -125,7 +125,7 @@ pollster = "1"
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 trdylib = { workspace = true, optional = true }
 
-[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+[target.'cfg(all(target_family = "wasm", not(target_os = "wasi")))'.dev-dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 js-sys = "0.3"
 wasm-bindgen-futures = "0.4"

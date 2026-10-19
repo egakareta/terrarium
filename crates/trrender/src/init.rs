@@ -924,7 +924,7 @@ impl Renderer {
             stencil_mask_pipeline,
             stencil_outline_pipeline,
             output,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
             web_pixel_readback: Rc::new(RefCell::new(WebPixelReadbackState::default())),
             skybox_pipeline,
             skybox_bind_group_layout,

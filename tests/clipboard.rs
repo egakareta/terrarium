@@ -1,4 +1,4 @@
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 
 use terrarium::Clipboard;
 

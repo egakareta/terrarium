@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use approx::assert_abs_diff_eq;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use terrarium::bevy::{
     EguiContext,
     app::{AppExit, Plugin, Startup, Update},
@@ -117,7 +117,7 @@ fn systems_can_edit_the_scene_after_tweens_advance() {
     assert_abs_diff_eq!(position.y, 2.0, epsilon = 1e-6);
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 #[test]
 fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), AppCreationError> {
     #[derive(Resource, Default)]
@@ -238,7 +238,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 #[test]
 fn plugin_finalization_can_populate_the_scene_before_startup() -> Result<(), AppCreationError> {
     struct ScenePlugin;
@@ -298,7 +298,7 @@ fn plugin_finalization_can_populate_the_scene_before_startup() -> Result<(), App
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 #[test]
 fn pending_plugins_prepare_the_scene_before_systems_run() -> Result<(), AppCreationError> {
     use std::sync::{
