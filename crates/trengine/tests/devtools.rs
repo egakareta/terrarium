@@ -66,6 +66,9 @@ fn inspector_can_edit_the_engine_and_its_workspace_descendants() -> Result<(), A
     let root = engine.id();
     let workspace = engine.workspace().id();
     let part = engine.workspace().children()[0].id();
+    let inspector_root = trdevtools::DevtoolsHost::root(&mut engine);
+    assert_eq!(inspector_root.id(), root);
+    assert_eq!(inspector_root.children()[0].id(), workspace);
     let rows = [root, workspace, part];
     let mut inspector = Devtools::default();
 

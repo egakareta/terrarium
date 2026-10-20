@@ -28,7 +28,7 @@ pub trait DevtoolsHost {
     /// Returns mutable access to the workspace being inspected.
     fn workspace(&mut self) -> &mut Workspace;
 
-    /// Returns the root of the inspected hierarchy.
+    /// Returns the root shown at the top of the Explorer hierarchy.
     fn root(&mut self) -> &mut dyn Instance {
         self.workspace()
     }
@@ -216,13 +216,13 @@ impl Devtools {
             }
         }
         let scene_title = host.scene_title().to_owned();
-        let workspace_id = host.workspace().id();
+        let root_id = host.root().id();
         self.prune(host.root());
         self.focus_scene_on_camera_input(&context, host.workspace());
 
         if !self.visible {
             host.render_scene(ui, &self.selected);
-            self.show_toggle_button(&context, workspace_id);
+            self.show_toggle_button(&context, root_id);
             show_development_notice(&context);
             return;
         }
@@ -279,7 +279,7 @@ impl Devtools {
                     });
                 });
             DockArea::new(&mut self.dock_state)
-                .id(egui::Id::new(("terrarium_app_dock", workspace_id)))
+                .id(egui::Id::new(("terrarium_app_dock", root_id)))
                 .style(Style::from_egui(ui.style().as_ref()))
                 .show_inside(ui, &mut viewer);
         });
@@ -404,8 +404,8 @@ impl TabViewer for DevtoolsTabViewer<'_> {
 
 impl DevtoolsTabViewer<'_> {
     fn show_explorer(&mut self, ui: &mut egui::Ui) {
-        let workspace = self.host.root();
-        let workspace_id = workspace.id();
+        let root = self.host.root();
+        let root_id = root.id();
         let context_delete_selection = &mut *self.context_delete_selection;
         if self.tree_state.selected().as_slice() != self.selected.as_slice() {
             self.tree_state.set_selected(self.selected.clone());
@@ -414,31 +414,30 @@ impl DevtoolsTabViewer<'_> {
             .id_salt("tree")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let (_, actions) =
-                    TreeView::new(ui.make_persistent_id(("workspace_tree", workspace_id)))
-                        .fallback_context_menu(|ui, ids| {
-                            let can_delete = ids.iter().any(|&id| {
-                                id != workspace_id
-                                    && resolve(workspace, id)
-                                        .is_some_and(|instance| !instance.is::<Workspace>())
-                            });
-                            if ui
-                                .add_enabled(
-                                    can_delete,
-                                    egui::Button::new(format!("{} Delete", regular::TRASH)),
-                                )
-                                .clicked()
-                            {
-                                *context_delete_selection = Some(ids.clone());
-                            }
-                        })
-                        .allow_multi_selection(true)
-                        .range_selection_modifier(egui::Modifiers::SHIFT)
-                        .set_selection_modifier(egui::Modifiers::COMMAND)
-                        .allow_drag_and_drop(false)
-                        .show_state(ui, self.tree_state, |builder| {
-                            build_tree(builder, workspace, true);
+                let (_, actions) = TreeView::new(ui.make_persistent_id(("instance_tree", root_id)))
+                    .fallback_context_menu(|ui, ids| {
+                        let can_delete = ids.iter().any(|&id| {
+                            id != root_id
+                                && resolve(root, id)
+                                    .is_some_and(|instance| !instance.is::<Workspace>())
                         });
+                        if ui
+                            .add_enabled(
+                                can_delete,
+                                egui::Button::new(format!("{} Delete", regular::TRASH)),
+                            )
+                            .clicked()
+                        {
+                            *context_delete_selection = Some(ids.clone());
+                        }
+                    })
+                    .allow_multi_selection(true)
+                    .range_selection_modifier(egui::Modifiers::SHIFT)
+                    .set_selection_modifier(egui::Modifiers::COMMAND)
+                    .allow_drag_and_drop(false)
+                    .show_state(ui, self.tree_state, |builder| {
+                        build_tree(builder, root, true);
+                    });
                 for action in actions {
                     if let Action::SetSelected(selection) = action {
                         let modifiers = ui.input(|input| input.modifiers);
@@ -468,7 +467,7 @@ impl DevtoolsTabViewer<'_> {
     }
 
     fn show_properties(&mut self, ui: &mut egui::Ui) {
-        let workspace = self.host.root();
+        let root = self.host.root();
         if self.selected.is_empty() {
             ui.label("Select an instance to inspect its properties.");
         }
@@ -479,7 +478,7 @@ impl DevtoolsTabViewer<'_> {
             .id_salt("properties")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for field in properties_for_selection(self.selected, workspace) {
+                for field in properties_for_selection(self.selected, root) {
                     let mut value = field.property.value.clone();
                     if let PropertyValue::Json(json) = &mut value
                         && let Some(draft) = self.json_drafts.get(&field.property.path)
@@ -508,10 +507,9 @@ impl DevtoolsTabViewer<'_> {
                         if let PropertyValue::Json(json) = &value {
                             self.json_drafts.insert(path.clone(), json.clone());
                         }
-                        *self.error =
-                            edit_selection_property(workspace, self.selected, &path, value)
-                                .err()
-                                .map(|error| error.to_string());
+                        *self.error = edit_selection_property(root, self.selected, &path, value)
+                            .err()
+                            .map(|error| error.to_string());
                         if self.error.is_none() {
                             self.json_drafts.remove(&path);
                         }

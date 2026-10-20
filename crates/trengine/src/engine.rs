@@ -930,14 +930,24 @@ impl InstanceClone for Engine {
     }
 }
 
-trscene::impl_instance!(
-    Engine,
-    class_name = "Engine",
-    data = instance,
-    inspect = Engine,
-    set_lookup = reject_lookup,
-    set_parent = reject_parent,
-);
+macro_rules! impl_engine_instance {
+    ($($inspect:tt)*) => {
+        trscene::impl_instance!(
+            Engine,
+            class_name = "Engine",
+            data = instance
+            $($inspect)*
+            , set_lookup = reject_lookup,
+            set_parent = reject_parent,
+        );
+    };
+}
+
+#[cfg(feature = "devtools")]
+impl_engine_instance!(, inspect = Engine);
+
+#[cfg(not(feature = "devtools"))]
+impl_engine_instance!();
 
 #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 #[derive(Clone, Copy)]
