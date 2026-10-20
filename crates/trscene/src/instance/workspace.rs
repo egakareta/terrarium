@@ -265,6 +265,28 @@ impl Workspace {
             .filter_map(|instance| instance.downcast_ref::<T>())
     }
 
+    /// Borrows an inherited API from a descendant without losing its identity.
+    pub fn view<T: crate::InstanceType>(
+        &self,
+        id: InstanceId,
+    ) -> Option<crate::InstanceRef<'_, T>> {
+        self.instance(id)?.view::<T>()
+    }
+
+    /// Mutably borrows a descendant's inherited API with its overrides.
+    pub fn view_mut<T: crate::InstanceType>(
+        &mut self,
+        id: InstanceId,
+    ) -> Option<crate::InstanceMut<'_, T>> {
+        self.instance_mut(id)?.view_mut::<T>()
+    }
+
+    /// Returns all descendants providing an API, including composed subclasses.
+    pub fn views<T: crate::InstanceType>(&self) -> impl Iterator<Item = crate::InstanceRef<'_, T>> {
+        self.descendants()
+            .filter_map(|instance| instance.view::<T>())
+    }
+
     /// Returns parts whose colliders intersect the box in `overlap_params`.
     ///
     /// Results are instance IDs in Rapier query order. Only parts with active
@@ -383,7 +405,7 @@ impl Workspace {
     /// updated parent transforms. This is called automatically by [`Self::update`].
     pub fn update_animations(&mut self, delta_seconds: f32) {
         fn update(instance: &mut dyn Instance, delta_seconds: f32) {
-            if let Some(rig) = instance.downcast_mut::<Rig>() {
+            if let Some(mut rig) = instance.view_mut::<Rig>() {
                 rig.update_animation(delta_seconds);
             }
             for child in instance.children_mut() {

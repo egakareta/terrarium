@@ -6,80 +6,109 @@ use crate::{
     glam::{Mat4, Quat, Vec2, Vec3},
 };
 
-/// A perspective camera with a world-space pivot.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Camera {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) instance: InstanceData,
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) pv_instance: PVInstance,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    subject: Option<InstanceId>,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
+crate::instance! {
+    #[instance(default = false, inspect = false)]
+    /// A perspective camera with a world-space pivot.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct Camera {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        pub(crate) instance: InstanceData,
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[compose]
+        pub(crate) pv_instance: PVInstance,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        subject: Option<InstanceId>,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        aspect: f32,
+        fovy: f32,
+        znear: f32,
+        zfar: f32,
+    }
+    impl Camera {
+        /// Returns shared access to the underlying [`Camera`].
+        pub fn camera(&self) -> &Camera {
+            crate::Project::<Camera>::project(self)
+        }
 
-/// Access to a camera's projection properties.
-pub trait HasCamera {
-    /// Returns shared access to the underlying [`Camera`].
-    fn camera(&self) -> &Camera;
+        /// Returns mutable access to the underlying [`Camera`].
+        pub fn camera_mut(&mut self) -> &mut Camera {
+            crate::Project::<Camera>::project_mut(self)
+        }
 
-    /// Returns mutable access to the underlying [`Camera`].
-    fn camera_mut(&mut self) -> &mut Camera;
-
-    crate::__instance_property! {
-        self;
         /// Viewport width divided by viewport height. Values set through this
         /// API are clamped to at least `0.001`.
-        getter aspect() -> f32 { self.camera().aspect }
-        setter set_aspect(aspect: f32) {
+        #[property]
+        pub fn aspect(&self) -> f32 {
+            self.camera().aspect
+        }
+        /// Sets `aspect`.
+        pub fn set_aspect(&mut self, aspect: f32) {
             self.camera_mut().aspect = aspect.max(0.001);
         }
-        builder with_aspect;
-    }
+        /// Returns this value with `aspect` set.
+        pub fn with_aspect(mut self, aspect: f32) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_aspect(aspect);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Vertical field of view in radians.
-        getter fovy() -> f32 { self.camera().fovy }
-        setter set_fovy(fovy: f32) {
+        #[property]
+        pub fn fovy(&self) -> f32 {
+            self.camera().fovy
+        }
+        /// Sets `fovy`.
+        pub fn set_fovy(&mut self, fovy: f32) {
             self.camera_mut().fovy = fovy;
         }
-        builder with_fovy;
-    }
+        /// Returns this value with `fovy` set.
+        pub fn with_fovy(mut self, fovy: f32) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_fovy(fovy);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Near clipping plane distance.
-        getter znear() -> f32 { self.camera().znear }
-        setter set_znear(znear: f32) {
+        #[property]
+        pub fn znear(&self) -> f32 {
+            self.camera().znear
+        }
+        /// Sets `znear`.
+        pub fn set_znear(&mut self, znear: f32) {
             self.camera_mut().znear = znear;
         }
-        builder with_znear;
-    }
+        /// Returns this value with `znear` set.
+        pub fn with_znear(mut self, znear: f32) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_znear(znear);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Far clipping plane distance.
-        getter zfar() -> f32 { self.camera().zfar }
-        setter set_zfar(zfar: f32) {
+        #[property]
+        pub fn zfar(&self) -> f32 {
+            self.camera().zfar
+        }
+        /// Sets `zfar`.
+        pub fn set_zfar(&mut self, zfar: f32) {
             self.camera_mut().zfar = zfar;
         }
-        builder with_zfar;
-    }
-}
-
-impl<T: HasCamera + ?Sized> HasCamera for &mut T {
-    fn camera(&self) -> &Camera {
-        (**self).camera()
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        (**self).camera_mut()
+        /// Returns this value with `zfar` set.
+        pub fn with_zfar(mut self, zfar: f32) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_zfar(zfar);
+            self
+        }
     }
 }
 
@@ -145,13 +174,6 @@ impl Camera {
         builder with_subject;
     }
 }
-
-crate::impl_instance!(
-    Camera,
-    class_name = "Camera",
-    data = instance,
-    inspect = Camera
-);
 
 /// Physical keyboard keys assigned to camera movement and orbit actions.
 pub type CameraKeyBindings = ControllerKeyBindings;
@@ -458,25 +480,8 @@ impl Controller for CameraController {
     }
 }
 
-impl HasPVInstance for Camera {
-    fn pv(&self) -> &PVInstance {
-        &self.pv_instance
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        &mut self.pv_instance
-    }
-}
-
-impl HasCamera for Camera {
-    fn camera(&self) -> &Camera {
-        self
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        self
-    }
-}
+/// Compatibility name for the generated Camera API.
+pub use CameraExt as HasCamera;
 
 #[cfg(test)]
 mod tests {

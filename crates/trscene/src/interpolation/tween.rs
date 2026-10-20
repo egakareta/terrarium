@@ -1,7 +1,5 @@
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
 use crate::{
-    BasePart, Color3, HasBasePart, InstanceId, Part, Workspace,
+    BasePart, Color3, HasBasePart, InstanceId, Workspace,
     glam::{Vec2, Vec3, Vec4},
     instance::{InstanceTransformUpdate, update_instance_transform},
 };
@@ -412,7 +410,7 @@ impl TweenTrack {
             Self::Color { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
                 with_base_part(workspace, *target, |part| {
-                    part.with_color(value);
+                    part.set_color(value);
                 });
             }
         }
@@ -431,17 +429,10 @@ impl TweenTrack {
 fn with_base_part(
     workspace: &mut Workspace,
     target: InstanceId,
-    apply: impl FnOnce(&mut BasePart),
+    apply: impl FnOnce(&mut dyn HasBasePart),
 ) {
-    if let Some(part) = workspace.get_mut::<Part>(target) {
-        apply(part.base_part_mut());
-    } else if let Some(part) = workspace.get_mut::<BasePart>(target) {
-        apply(part);
-    } else {
-        #[cfg(feature = "meshpart")]
-        if let Some(part) = workspace.get_mut::<MeshPart>(target) {
-            apply(part.base_part_mut());
-        }
+    if let Some(mut part) = workspace.view_mut::<BasePart>(target) {
+        apply(&mut *part);
     }
 }
 

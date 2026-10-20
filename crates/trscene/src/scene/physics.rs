@@ -5,11 +5,9 @@ use rapier3d::prelude::{
     QueryFilter, RigidBody, RigidBodyBuilder, RigidBodyHandle, RigidBodyType,
 };
 
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
 use crate::{
-    BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, HasPart, Instance, InstanceId,
-    PVInstance, Part, PartShape, Rig,
+    BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, Instance, InstanceId, PVInstance, Part,
+    PartShape, Rig,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -442,7 +440,7 @@ impl fmt::Debug for PhysicsWorld {
 
 impl PhysicsInstance {
     pub(crate) fn collect(instance: &dyn Instance, instances: &mut Vec<Self>) {
-        if let Some(rig) = instance.downcast_ref::<Rig>() {
+        if let Some(rig) = instance.view::<Rig>() {
             let mut body = Self {
                 id: rig.id(),
                 transform: rig.pivot(),
@@ -450,8 +448,8 @@ impl PhysicsInstance {
                 members: Vec::new(),
                 parts: Vec::new(),
             };
-            for child in rig.descendants() {
-                if child.is::<Rig>() {
+            for child in instance.descendants() {
+                if child.is_a::<Rig>() {
                     body.members.push(child.id());
                 }
                 if let Some(part) = PhysicsPart::from_instance(child) {
@@ -479,19 +477,14 @@ impl PhysicsInstance {
 
 impl PhysicsPart {
     fn from_instance(instance: &dyn Instance) -> Option<Self> {
-        if let Some(part) = instance.downcast_ref::<Part>() {
-            return Some(Self::from_traits(part.id(), part, part.shape()));
-        }
-        #[cfg(feature = "meshpart")]
-        if let Some(part) = instance.downcast_ref::<MeshPart>() {
-            return Some(Self::from_traits(part.id(), part, PartShape::Block));
-        }
-        instance
-            .downcast_ref::<BasePart>()
-            .map(|part| Self::from_traits(part.id(), part, PartShape::Block))
+        let part = instance.view::<BasePart>()?;
+        let shape = instance
+            .view::<Part>()
+            .map_or(PartShape::Block, |part| part.shape());
+        Some(Self::from_traits(instance.id(), &*part, shape))
     }
 
-    fn from_traits<T: HasBasePart + HasPVInstance>(
+    fn from_traits<T: HasBasePart + HasPVInstance + ?Sized>(
         id: InstanceId,
         part: &T,
         shape: PartShape,

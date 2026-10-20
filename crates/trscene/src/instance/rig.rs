@@ -3,128 +3,159 @@ use crate::{
     pivot_hierarchy_to,
 };
 
-/// A spatial assembly whose descendants move together when its pivot changes.
-///
-/// Children retain world-space pivots, as elsewhere in the scene tree. All
-/// [`HasPVInstance`] setters on a rig carry its spatial descendants with it.
-/// With physics enabled, the outermost rig owns a single body with colliders
-/// from its descendant parts. The rig's anchored state controls that body;
-/// descendant parts retain their individual collision flags and shapes.
-#[derive(Clone, Debug)]
-pub struct Rig {
-    instance: InstanceData,
-    pv_instance: PVInstance,
-    anchored: bool,
-    animation: Option<AnimationPlayer>,
-}
-
-impl Rig {
-    /// Creates an anchored rig at the identity transform.
-    pub fn new() -> Self {
-        Self {
-            instance: InstanceData::new("Rig"),
-            pv_instance: PVInstance::new(),
-            anchored: true,
-            animation: None,
-        }
+crate::instance! {
+    #[instance(default = false, inspect = false, inherent = true)]
+    /// A spatial assembly whose descendants move together when its pivot changes.
+    ///
+    /// Children retain world-space pivots, as elsewhere in the scene tree. All
+    /// [`HasPVInstance`] setters on a rig carry its spatial descendants with it.
+    /// With physics enabled, the outermost rig owns a single body with colliders
+    /// from its descendant parts. The rig's anchored state controls that body;
+    /// descendant parts retain their individual collision flags and shapes.
+    #[derive(Clone, Debug)]
+    pub struct Rig {
+        #[data]
+        instance: InstanceData,
+        #[compose]
+        pv_instance: PVInstance,
+        anchored: bool,
+        animation: Option<AnimationPlayer>,
     }
+    impl Rig {
+        #[r#override(PVInstance::set_pivot)]
+        fn set_pivot(&mut self, pivot: crate::glam::Mat4) {
+            self.pivot_to(pivot);
+        }
 
-    crate::__instance_property! {
-        self;
+        #[r#override(PVInstance::accepts_pivot)]
+        fn accepts_pivot(&self, pivot: crate::glam::Mat4) -> bool {
+            pivot.inverse().is_finite()
+        }
+
+        #[r#override(PVInstance::pivot_to)]
+        fn pivot_to(&mut self, pivot: crate::glam::Mat4) {
+            assert!(
+                pivot.inverse().is_finite(),
+                "rig pivots must be finite and invertible"
+            );
+            pivot_hierarchy_to(self, pivot);
+        }
+
+        /// Creates an anchored rig at the identity transform.
+        pub fn new() -> Self {
+            Self {
+                instance: InstanceData::new("Rig"),
+                pv_instance: PVInstance::new(),
+                anchored: true,
+                animation: None,
+            }
+        }
+
         /// Whether the rig's physics body is immovable.
-        pub getter anchored() -> bool { self.anchored }
-        setter set_anchored(anchored: bool) {
+        #[property]
+        pub fn anchored(&self) -> bool {
+            self.anchored
+        }
+        /// Sets `anchored`.
+        pub fn set_anchored(&mut self, anchored: bool) {
             self.anchored = anchored;
         }
-        builder with_anchored;
-    }
+        /// Returns this value with `anchored` set.
+        pub fn with_anchored(mut self, anchored: bool) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_anchored(anchored);
+            self
+        }
 
-    /// Adds a spatial child, interpreting its pivot relative to this rig.
-    ///
-    /// [`Instance::add_child`] instead retains the child's existing world pivot.
-    pub fn add_child_local<T: Instance + HasPVInstance>(
-        &mut self,
-        mut child: T,
-    ) -> crate::InstanceId {
-        let pivot = self.pivot() * child.pivot();
-        child.set_pivot(pivot);
-        self.add_child(child)
-    }
+        /// Adds a spatial child, interpreting its pivot relative to this rig.
+        ///
+        /// [`Instance::add_child`] instead retains the child's existing world pivot.
+        pub fn add_child_local<T: Instance + HasPVInstance>(
+            &mut self,
+            mut child: T,
+        ) -> crate::InstanceId {
+            let pivot = self.pivot() * child.pivot();
+            child.set_pivot(pivot);
+            self.as_instance_mut().add_child_box(Box::new(child))
+        }
 
-    /// Starts an animation and immediately applies its current pose.
-    ///
-    /// Every target path must resolve unambiguously to a built-in spatial
-    /// descendant. A failed validation leaves the current animation and pose
-    /// untouched. Removed targets and subtrees with singular pivots are skipped
-    /// during playback.
-    pub fn play_animation(&mut self, player: AnimationPlayer) -> Result<(), AnimationError> {
-        for track in player.clip().tracks() {
-            let mut instance: &dyn Instance = self;
-            for name in track.target() {
-                if instance
-                    .spatial()
-                    .is_some_and(|spatial| !spatial.world_pivot().inverse().is_finite())
-                {
-                    return Err(AnimationError::InvalidTransform);
+        /// Starts an animation and immediately applies its current pose.
+        ///
+        /// Every target path must resolve unambiguously to a built-in spatial
+        /// descendant. A failed validation leaves the current animation and pose
+        /// untouched. Removed targets and subtrees with singular pivots are skipped
+        /// during playback.
+        pub fn play_animation(&mut self, player: AnimationPlayer) -> Result<(), AnimationError> {
+            for track in player.clip().tracks() {
+                let mut instance: &dyn Instance = self.as_instance();
+                for name in track.target() {
+                    if instance
+                        .spatial()
+                        .is_some_and(|spatial| !spatial.world_pivot().inverse().is_finite())
+                    {
+                        return Err(AnimationError::InvalidTransform);
+                    }
+                    let mut matches = instance
+                        .children()
+                        .iter()
+                        .filter(|child| child.name() == name);
+                    let Some(child) = matches.next() else {
+                        return Err(AnimationError::TargetNotFound(track.target().to_vec()));
+                    };
+                    if matches.next().is_some() {
+                        return Err(AnimationError::AmbiguousTarget(track.target().to_vec()));
+                    }
+                    instance = child.as_ref();
                 }
-                let mut matches = instance
-                    .children()
-                    .iter()
-                    .filter(|child| child.name() == name);
-                let Some(child) = matches.next() else {
+                let Some(pivot) = instance.spatial().map(|spatial| spatial.world_pivot()) else {
                     return Err(AnimationError::TargetNotFound(track.target().to_vec()));
                 };
-                if matches.next().is_some() {
-                    return Err(AnimationError::AmbiguousTarget(track.target().to_vec()));
+                if !pivot.inverse().is_finite() {
+                    return Err(AnimationError::InvalidTransform);
                 }
-                instance = child.as_ref();
             }
-            let Some(pivot) = instance.spatial().map(|spatial| spatial.world_pivot()) else {
-                return Err(AnimationError::TargetNotFound(track.target().to_vec()));
-            };
-            if !pivot.inverse().is_finite() {
-                return Err(AnimationError::InvalidTransform);
-            }
-        }
-        apply_animation(self, &player);
-        self.animation = Some(player);
-        Ok(())
-    }
-
-    /// Returns the current animation's playback state, including completed clips.
-    pub fn animation(&self) -> Option<&AnimationPlayer> {
-        self.animation.as_ref()
-    }
-
-    /// Returns mutable playback state for pausing, seeking, and restarting.
-    pub fn animation_mut(&mut self) -> Option<&mut AnimationPlayer> {
-        self.animation.as_mut()
-    }
-
-    /// Stops playback, retaining the current pose.
-    pub fn stop_animation(&mut self) -> Option<AnimationPlayer> {
-        self.animation.take()
-    }
-
-    /// Advances this rig's animation and applies poses from ancestors to descendants.
-    ///
-    /// [`crate::Workspace::update_animations`] advances every rig in a workspace.
-    pub fn update_animation(&mut self, delta_seconds: f32) {
-        let Some(mut player) = self.animation.take() else {
-            return;
-        };
-        if !player.is_finished() {
-            player.update(delta_seconds);
             apply_animation(self, &player);
+            self.animation = Some(player);
+            Ok(())
         }
-        self.animation = Some(player);
+
+        /// Returns the current animation's playback state, including completed clips.
+        pub fn animation(&self) -> Option<&AnimationPlayer> {
+            self.animation.as_ref()
+        }
+
+        /// Returns mutable playback state for pausing, seeking, and restarting.
+        pub fn animation_mut(&mut self) -> Option<&mut AnimationPlayer> {
+            self.animation.as_mut()
+        }
+
+        /// Stops playback, retaining the current pose.
+        pub fn stop_animation(&mut self) -> Option<AnimationPlayer> {
+            self.animation.take()
+        }
+
+        /// Advances this rig's animation and applies poses from ancestors to descendants.
+        ///
+        /// [`crate::Workspace::update_animations`] advances every rig in a workspace.
+        pub fn update_animation(&mut self, delta_seconds: f32) {
+            let Some(mut player) = self.animation.take() else {
+                return;
+            };
+            if !player.is_finished() {
+                player.update(delta_seconds);
+                apply_animation(self, &player);
+            }
+            self.animation = Some(player);
+        }
     }
 }
 
-fn apply_animation(rig: &mut Rig, player: &AnimationPlayer) {
+fn apply_animation<T: RigExt + ?Sized>(rig: &mut T, player: &AnimationPlayer) {
     let pivot = rig.pivot();
     let mut path = Vec::new();
-    for child in rig.children_mut() {
+    for child in rig.as_instance_mut().children_mut() {
         apply_tracks(child, pivot, &mut path, player);
     }
 }
@@ -164,34 +195,6 @@ fn apply_tracks(
 impl Default for Rig {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-crate::impl_instance!(Rig, class_name = "Rig", data = instance, inspect = Rig);
-
-impl HasPVInstance for Rig {
-    fn pv(&self) -> &PVInstance {
-        &self.pv_instance
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        &mut self.pv_instance
-    }
-
-    fn set_pivot(&mut self, pivot: Mat4) {
-        self.pivot_to(pivot);
-    }
-
-    fn accepts_pivot(&self, pivot: Mat4) -> bool {
-        pivot.inverse().is_finite()
-    }
-
-    fn pivot_to(&mut self, pivot: Mat4) {
-        assert!(
-            pivot.inverse().is_finite(),
-            "rig pivots must be finite and invertible"
-        );
-        pivot_hierarchy_to(self, pivot);
     }
 }
 

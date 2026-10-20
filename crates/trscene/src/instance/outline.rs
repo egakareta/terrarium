@@ -1,108 +1,144 @@
 use crate::{Color3, InstanceData, OutlineMode};
 
-/// A render-only instance that outlines its parent and the parent's siblings.
-///
-/// An outline is attached to the instance tree just like any other child, but
-/// it does not render geometry itself. For example, adding an outline child to
-/// a part outlines that part and the other renderable children of the part's
-/// parent. Multiple outline instances may select different groups and modes.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Outline {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    instance: InstanceData,
-    mode: OutlineMode,
-    color: Color3,
-    width: f32,
-    threshold: f32,
-    always_on_top: bool,
-}
-
-impl Outline {
-    /// Creates an outline using `mode`, with a black one-pixel line.
-    pub fn new(mode: OutlineMode) -> Self {
-        Self {
-            instance: InstanceData::new("Outline"),
-            mode,
-            color: Color3::BLACK,
-            width: 1.0,
-            threshold: 0.08,
-            always_on_top: false,
+crate::instance! {
+    #[instance(default = false, inspect = false, inherent = true)]
+    /// A render-only instance that outlines its parent and the parent's siblings.
+    ///
+    /// An outline is attached to the instance tree just like any other child, but
+    /// it does not render geometry itself. For example, adding an outline child to
+    /// a part outlines that part and the other renderable children of the part's
+    /// parent. Multiple outline instances may select different groups and modes.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct Outline {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        instance: InstanceData,
+        mode: OutlineMode,
+        color: Color3,
+        width: f32,
+        threshold: f32,
+        always_on_top: bool,
+    }
+    impl Outline {
+        /// Creates an outline using `mode`, with a black one-pixel line.
+        pub fn new(mode: OutlineMode) -> Self {
+            Self {
+                instance: InstanceData::new("Outline"),
+                mode,
+                color: Color3::BLACK,
+                width: 1.0,
+                threshold: 0.08,
+                always_on_top: false,
+            }
         }
-    }
 
-    /// Creates a toon outline.
-    pub fn toon() -> Self {
-        Self::new(OutlineMode::Toon)
-    }
+        /// Creates a toon outline.
+        pub fn toon() -> Self {
+            Self::new(OutlineMode::Toon)
+        }
 
-    /// Creates a silhouette outline.
-    pub fn silhouette() -> Self {
-        Self::new(OutlineMode::Silhouette)
-    }
+        /// Creates a silhouette outline.
+        pub fn silhouette() -> Self {
+            Self::new(OutlineMode::Silhouette)
+        }
 
-    /// Creates a stencil-buffer outline.
-    pub fn stencil() -> Self {
-        Self::new(OutlineMode::Stencil)
-    }
+        /// Creates a stencil-buffer outline.
+        pub fn stencil() -> Self {
+            Self::new(OutlineMode::Stencil)
+        }
 
-    crate::__instance_property! {
-        self;
         /// Rendering technique used by the outline.
-        pub getter mode() -> OutlineMode { self.mode }
-        setter set_mode(mode: OutlineMode) {
+        #[property]
+        pub fn mode(&self) -> OutlineMode {
+            self.mode
+        }
+        /// Sets `mode`.
+        pub fn set_mode(&mut self, mode: OutlineMode) {
             self.mode = mode;
         }
-        builder with_mode;
-    }
+        /// Returns this value with `mode` set.
+        pub fn with_mode(mut self, mode: OutlineMode) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_mode(mode);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Color of the outline.
-        pub getter color() -> Color3 { self.color }
-        setter set_color(color: Color3) {
+        #[property]
+        pub fn color(&self) -> Color3 {
+            self.color
+        }
+        /// Sets `color`.
+        pub fn set_color(&mut self, color: Color3) {
             self.color = color;
         }
-        builder with_color;
-    }
+        /// Returns this value with `color` set.
+        pub fn with_color(mut self, color: Color3) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_color(color);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Screen-space line width in pixels.
-        pub getter width() -> f32 { self.width }
-        setter set_width(width: f32) {
+        #[property]
+        pub fn width(&self) -> f32 {
+            self.width
+        }
+        /// Sets `width`.
+        pub fn set_width(&mut self, width: f32) {
             self.width = width;
         }
-        builder with_width;
-    }
+        /// Returns this value with `width` set.
+        pub fn with_width(mut self, width: f32) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_width(width);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Edge threshold used by toon and silhouette detection.
-        pub getter threshold() -> f32 { self.threshold }
-        setter set_threshold(threshold: f32) {
+        #[property]
+        pub fn threshold(&self) -> f32 {
+            self.threshold
+        }
+        /// Sets `threshold`.
+        pub fn set_threshold(&mut self, threshold: f32) {
             self.threshold = threshold;
         }
-        builder with_threshold;
-    }
+        /// Returns this value with `threshold` set.
+        pub fn with_threshold(mut self, threshold: f32) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_threshold(threshold);
+            self
+        }
 
-    crate::__instance_property! {
-        self;
         /// Whether the outline renders through occluding geometry.
-        pub getter always_on_top() -> bool { self.always_on_top }
-        setter set_always_on_top(always_on_top: bool) {
+        #[property]
+        pub fn always_on_top(&self) -> bool {
+            self.always_on_top
+        }
+        /// Sets `always_on_top`.
+        pub fn set_always_on_top(&mut self, always_on_top: bool) {
             self.always_on_top = always_on_top;
         }
-        builder with_always_on_top;
+        /// Returns this value with `always_on_top` set.
+        pub fn with_always_on_top(mut self, always_on_top: bool) -> Self
+        where
+            Self: Sized,
+        {
+            self.set_always_on_top(always_on_top);
+            self
+        }
     }
 }
-
-crate::impl_instance!(
-    Outline,
-    class_name = "Outline",
-    data = instance,
-    inspect = Outline,
-);
 
 #[cfg(test)]
 mod tests {

@@ -1,150 +1,80 @@
 use crate::{
-    Color3, DEFAULT_MATERIAL, Face, HasPVInstance, Instance, InstanceData, Material,
-    MeshMaterialSlots, PVInstance, PartShape,
+    Color3, DEFAULT_MATERIAL, Face, InstanceData, Material, MeshMaterialSlots, PVInstance,
+    PartShape,
 };
 
-/// A named, transformable scene node with optional collision metadata.
-///
-/// `BasePart` is useful as a parent for custom instance hierarchies. A visible
-/// [`Part`] builds on it with a primitive shape and material.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct BasePart {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) instance: InstanceData,
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) pv_instance: PVInstance,
-    color: Color3,
-    #[cfg_attr(feature = "devtools", inspect(setter = with_transparency))]
-    transparency: f32,
-    anchored: bool,
-    can_collide: bool,
-}
-
-impl BasePart {
-    /// Creates a base part with identity pose, unit scale, white tint,
-    /// opaque rendering, and collision metadata enabled.
-    pub fn new() -> Self {
-        Self {
-            instance: InstanceData::new("BasePart"),
-            pv_instance: PVInstance::new(),
-            color: Color3::WHITE,
-            transparency: 0.0,
-            anchored: true,
-            can_collide: true,
-        }
-    }
-}
-
-impl Default for BasePart {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-crate::impl_instance!(
-    BasePart,
-    class_name = "BasePart",
-    data = instance,
-    inspect = BasePart,
-);
-
-impl HasPVInstance for BasePart {
-    fn pv(&self) -> &PVInstance {
-        &self.pv_instance
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        &mut self.pv_instance
-    }
-}
-
-/// Access to the underlying [`BasePart`].
-pub trait HasBasePart {
-    /// Returns shared access to the underlying [`BasePart`].
-    fn base_part(&self) -> &BasePart;
-
-    /// Returns mutable access to the underlying [`BasePart`].
-    fn base_part_mut(&mut self) -> &mut BasePart;
-
-    crate::__instance_property! {
-        self;
+crate::instance! {
+    #[instance(inspect = false)]
+    /// A named, transformable scene node with optional collision metadata.
+    ///
+    /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
+    /// [`Part`] builds on it with a primitive shape and material.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct BasePart {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        pub(crate) instance: InstanceData,
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[compose]
+        pub(crate) pv_instance: PVInstance,
         /// Tint applied when rendering this part.
-        getter color() -> Color3 { self.base_part().color }
-        setter set_color(color: Color3) {
-            self.base_part_mut().color = color;
-        }
-        builder with_color;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property(default = Color3::WHITE)]
+        color: Color3,
         /// Transparency, where `0.0` is opaque and `1.0` is invisible. Values
         /// are clamped to `0.0..=1.0`; non-finite values become `0.0`.
-        getter transparency() -> f32 { self.base_part().transparency }
-        setter set_transparency(transparency: f32) {
-            self.base_part_mut().transparency = if transparency.is_finite() {
-                transparency.clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-        }
-        builder with_transparency;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property(default = 0.0, sanitize = sanitize_transparency)]
+        #[cfg_attr(feature = "devtools", inspect(setter = with_transparency))]
+        transparency: f32,
         /// Whether a physics system should treat this part as immovable. The
         /// default physics integration creates a fixed body when this is `true`
         /// and a dynamic body when this is `false`. Inside a [`crate::Rig`],
         /// the rig's anchored state controls the shared body.
-        getter anchored() -> bool { self.base_part().anchored }
-        setter set_anchored(anchored: bool) {
-            self.base_part_mut().anchored = anchored;
-        }
-        builder with_anchored;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property(default = true)]
+        anchored: bool,
         /// Whether a physics system should consider this part for collisions.
         /// The default physics integration omits this part's collider when
         /// `false`, while still simulating its rigid body.
-        getter can_collide() -> bool { self.base_part().can_collide }
-        setter set_can_collide(can_collide: bool) {
-            self.base_part_mut().can_collide = can_collide;
+        #[property(default = true)]
+        can_collide: bool,
+    }
+
+    impl BasePart {
+        /// Creates a base part with identity pose, unit scale, white tint,
+        /// opaque rendering, and collision metadata enabled.
+        pub fn new() -> Self {
+            Self::default()
         }
-        builder with_can_collide;
+        /// Returns shared access to the underlying [`BasePart`].
+        pub fn base_part(&self) -> &BasePart {
+            crate::Project::<BasePart>::project(self)
+        }
+        /// Returns mutable access to the underlying [`BasePart`].
+        pub fn base_part_mut(&mut self) -> &mut BasePart {
+            crate::Project::<BasePart>::project_mut(self)
+        }
     }
 }
 
-impl HasBasePart for BasePart {
-    fn base_part(&self) -> &BasePart {
-        self
-    }
-
-    fn base_part_mut(&mut self) -> &mut BasePart {
-        self
-    }
-}
-
-impl<T: HasBasePart + ?Sized> HasBasePart for &mut T {
-    fn base_part(&self) -> &BasePart {
-        (**self).base_part()
-    }
-
-    fn base_part_mut(&mut self) -> &mut BasePart {
-        (**self).base_part_mut()
+fn sanitize_transparency(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
     }
 }
 
 /// Access to directional material slots.
-pub trait HasMaterials {
+pub trait MaterialsExt: crate::Project<MeshMaterialSlots> {
     /// Returns shared access to the directional material slots.
-    fn material_slots(&self) -> &MeshMaterialSlots;
+    fn material_slots(&self) -> &MeshMaterialSlots {
+        self.project()
+    }
 
     /// Returns mutable access to the directional material slots.
-    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots;
+    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
+        self.project_mut()
+    }
 
     crate::__instance_property! {
         self;
@@ -185,7 +115,7 @@ pub trait HasMaterials {
     }
 }
 
-impl<T: HasMaterials + ?Sized> HasMaterials for &mut T {
+impl<T: MaterialsExt + ?Sized> MaterialsExt for &mut T {
     fn material_slots(&self) -> &MeshMaterialSlots {
         (**self).material_slots()
     }
@@ -193,114 +123,128 @@ impl<T: HasMaterials + ?Sized> HasMaterials for &mut T {
     fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
         (**self).material_slots_mut()
     }
-}
 
-/// A visible scene object rendered with one of the built-in primitive shapes.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Part {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    basepart: BasePart,
-    shape: PartShape,
-    pub(crate) material_slots: MeshMaterialSlots,
-}
+    fn material(&self) -> Option<&Material> {
+        (**self).material()
+    }
 
-impl Part {
-    /// Creates a visible part using a unit [`PartShape::Block`] and the default
-    /// material.
-    pub fn new() -> Self {
-        Self {
-            basepart: BasePart::new().with_name("Part"),
-            shape: PartShape::Block,
-            material_slots: MeshMaterialSlots::default(),
-        }
+    fn set_material(&mut self, material: Material) {
+        (**self).set_material(material);
+    }
+
+    fn material_slot(&self, slot: Face) -> &Material {
+        (**self).material_slot(slot)
+    }
+
+    fn set_material_slot(&mut self, slot: Face, material: Material) {
+        (**self).set_material_slot(slot, material);
     }
 }
 
-impl Default for Part {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Access to the underlying [`Part`].
-pub trait HasPart {
-    /// Returns shared access to the underlying [`Part`].
-    fn part(&self) -> &Part;
-    /// Returns mutable access to the underlying [`Part`].
-    fn part_mut(&mut self) -> &mut Part;
-
-    crate::__instance_property! {
-        self;
+crate::instance! {
+    #[instance(inspect = false)]
+    /// A visible scene object rendered with one of the built-in primitive shapes.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct Part {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[extends]
+        basepart: BasePart,
         /// Primitive geometry used when the part is rendered.
-        getter shape() -> PartShape { self.part().shape }
-        setter set_shape(shape: PartShape) {
-            self.part_mut().shape = shape;
+        #[property(default = PartShape::Block)]
+        shape: PartShape,
+        #[compose]
+        pub(crate) material_slots: MeshMaterialSlots,
+    }
+
+    impl Part {
+        /// Creates a visible part using a unit [`PartShape::Block`] and the default material.
+        pub fn new() -> Self {
+            Self::default()
         }
-        builder with_shape;
+        /// Returns shared access to the underlying [`Part`].
+        pub fn part(&self) -> &Part {
+            crate::Project::<Part>::project(self)
+        }
+        /// Returns mutable access to the underlying [`Part`].
+        pub fn part_mut(&mut self) -> &mut Part {
+            crate::Project::<Part>::project_mut(self)
+        }
     }
 }
 
-impl HasPart for Part {
-    fn part(&self) -> &Part {
+/// Compatibility name for the generated base-part API.
+pub use BasePartExt as HasBasePart;
+/// Compatibility name for the material API.
+pub use MaterialsExt as HasMaterials;
+/// Compatibility name for the generated primitive-part API.
+pub use PartExt as HasPart;
+
+impl crate::Project<MeshMaterialSlots> for MeshMaterialSlots {
+    fn project(&self) -> &MeshMaterialSlots {
         self
     }
-
-    fn part_mut(&mut self) -> &mut Part {
+    fn project_mut(&mut self) -> &mut MeshMaterialSlots {
         self
     }
 }
-
-impl<T: HasPart + ?Sized> HasPart for &mut T {
-    fn part(&self) -> &Part {
-        (**self).part()
-    }
-    fn part_mut(&mut self) -> &mut Part {
-        (**self).part_mut()
-    }
-}
-
-crate::impl_instance!(
-    Part,
-    class_name = "Part",
-    data = basepart.instance,
-    inspect = Part,
-);
-
-impl HasPVInstance for Part {
-    fn pv(&self) -> &PVInstance {
-        self.basepart.pv()
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        self.basepart.pv_mut()
+impl MaterialsExt for MeshMaterialSlots {}
+/// A scene instance exposing directional material slots.
+pub trait MaterialsView: MaterialsExt + crate::InstanceReceiver {}
+impl<T: MaterialsExt + crate::InstanceReceiver + ?Sized> MaterialsView for T {}
+impl crate::InstanceType for MeshMaterialSlots {
+    type Api = dyn MaterialsView;
+    fn descriptor() -> &'static crate::InstanceClass {
+        &crate::InstanceClass {
+            name: "MeshMaterialSlots",
+            type_id: std::any::TypeId::of::<Self>,
+            bases: &[],
+        }
     }
 }
-
-impl HasBasePart for Part {
-    fn base_part(&self) -> &BasePart {
-        &self.basepart
-    }
-
-    fn base_part_mut(&mut self) -> &mut BasePart {
-        &mut self.basepart
-    }
+/// Supplies the material capability's schema to composed instances.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __terrarium_material_slots {
+    ($callback:path, [$($state:tt)*]) => {
+        $callback! { $($state)* [{ MeshMaterialSlots [$crate::MeshMaterialSlots] [$crate::MaterialsExt] [$crate::MaterialsView] [$crate::__MaterialInspection] [material_slots material_slots_mut material set_material with_material material_slot set_material_slot with_material_slot] false [] }] }
+    };
 }
 
-impl HasMaterials for Part {
-    fn material_slots(&self) -> &MeshMaterialSlots {
-        &self.material_slots
+/// Inspector adapter for directional material storage.
+#[doc(hidden)]
+#[cfg(feature = "devtools")]
+pub struct __MaterialInspection;
+#[cfg(feature = "devtools")]
+impl __MaterialInspection {
+    /// Returns fields supplied by directional material storage.
+    pub fn __instance_properties<R: MaterialsExt + ?Sized>(
+        receiver: &R,
+    ) -> Vec<crate::devtools::Property> {
+        crate::devtools::Inspect::properties(receiver.material_slots())
+            .into_iter()
+            .map(|property| property.prefixed("material_slots"))
+            .collect()
     }
-
-    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
-        &mut self.material_slots
+    /// Applies an edit to directional material storage.
+    pub fn __instance_set_property<R: MaterialsExt + ?Sized>(
+        receiver: &mut R,
+        path: &str,
+        value: &crate::devtools::PropertyValue,
+    ) -> Result<(), crate::devtools::PropertyError> {
+        let tail = crate::devtools::property_tail(path, "material_slots")
+            .ok_or(crate::devtools::PropertyError::NotFound)?;
+        crate::devtools::Inspect::set_property(receiver.material_slots_mut(), tail, value.clone())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::glam::{EulerRot, Mat4, Quat, Vec3};
+    use crate::{
+        HasPVInstance, Instance,
+        glam::{EulerRot, Mat4, Quat, Vec3},
+    };
 
     #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {

@@ -14,6 +14,9 @@ use std::{
 use serde::{Serialize, de::DeserializeOwned};
 use slotmap::SlotMap;
 
+pub mod composition;
+pub use composition::*;
+
 mod camera;
 mod light;
 #[cfg(feature = "meshpart")]
@@ -96,7 +99,9 @@ impl InstanceLookup {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 
-    pub(crate) fn unregister(&self, id: InstanceId) {
+    /// Removes an instance from the lookup index.
+    #[doc(hidden)]
+    pub fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
         self.generation.set(self.generation.get().wrapping_add(1));
     }
@@ -145,10 +150,33 @@ impl InstanceLookup {
 macro_rules! impl_instance {
     (
         $type:ty,
-        class_name = $class_name:literal,
+        class_name = $class_name:expr,
         data = $data:ident $(.$data_tail:ident)* $(, inspect = $inspect:ty)? $(,)?
     ) => {
+        impl $crate::Project<$crate::InstanceData> for $type {
+            fn project(&self) -> &$crate::InstanceData { &self.$data $(.$data_tail)* }
+            fn project_mut(&mut self) -> &mut $crate::InstanceData { &mut self.$data $(.$data_tail)* }
+        }
+        $crate::impl_instance!($type, class_name = $class_name, projected, _composition = [] $(, inspect = $inspect)?);
+    };
+    (
+        $type:ty,
+        class_name = $class_name:expr,
+        projected, composition $(, inspect = $inspect:ty)? $(,)?
+    ) => {
+        $crate::impl_instance!($type, class_name = $class_name, projected, _composition = [composition] $(, inspect = $inspect)?);
+    };
+    (
+        $type:ty,
+        class_name = $class_name:expr,
+        projected, _composition = [$($composition:ident)?] $(, inspect = $inspect:ty)? $(,)?
+    ) => {
+        impl $crate::InstanceReceiver for $type {
+            fn as_instance(&self) -> &dyn $crate::Instance { self }
+            fn as_instance_mut(&mut self) -> &mut dyn $crate::Instance { self }
+        }
         impl $crate::Instance for $type {
+            $crate::__instance_composition_methods!($($composition)?);
             $(
                 $crate::__impl_instance_inspection!($inspect);
             )?
@@ -170,80 +198,80 @@ macro_rules! impl_instance {
             }
 
             fn name(&self) -> &str {
-                self.$data $(.$data_tail)*.name()
+                $crate::Project::<$crate::InstanceData>::project(self).name()
             }
 
             fn set_name(&mut self, name: String) {
-                self.$data $(.$data_tail)*.set_name(name);
+                $crate::Project::<$crate::InstanceData>::project_mut(self).set_name(name);
             }
 
             fn with_name(mut self, name: impl Into<String>) -> Self {
-                self.$data $(.$data_tail)*.set_name(name.into());
+                $crate::Project::<$crate::InstanceData>::project_mut(&mut self).set_name(name.into());
                 self
             }
 
             fn id(&self) -> $crate::InstanceId {
-                self.$data $(.$data_tail)*.id()
+                $crate::Project::<$crate::InstanceData>::project(self).id()
             }
 
             fn parent(&self) -> Option<$crate::InstanceId> {
-                self.$data $(.$data_tail)*.parent()
+                $crate::Project::<$crate::InstanceData>::project(self).parent()
             }
 
             fn children(&self) -> &[Box<dyn $crate::Instance>] {
-                self.$data $(.$data_tail)*.children()
+                $crate::Project::<$crate::InstanceData>::project(self).children()
             }
 
             fn children_mut(&mut self) -> $crate::ChildrenMut<'_> {
-                self.$data $(.$data_tail)*.children_mut()
+                $crate::Project::<$crate::InstanceData>::project_mut(self).children_mut()
             }
 
             fn remove_child(&mut self, id: $crate::InstanceId) -> bool {
-                self.$data $(.$data_tail)*.remove_child(id)
+                $crate::Project::<$crate::InstanceData>::project_mut(self).remove_child(id)
             }
 
             fn add_child_box(
                 &mut self,
                 child: Box<dyn $crate::Instance>,
             ) -> $crate::InstanceId {
-                self.$data $(.$data_tail)*.add_child(child)
+                $crate::Project::<$crate::InstanceData>::project_mut(self).add_child(child)
             }
 
             fn set_instance_parent(&mut self, parent: Option<$crate::InstanceId>) {
-                self.$data $(.$data_tail)*.set_parent(parent);
+                $crate::Project::<$crate::InstanceData>::project_mut(self).set_parent(parent);
             }
 
             fn sibling_index(&self) -> usize {
-                self.$data $(.$data_tail)*.sibling_index()
+                $crate::Project::<$crate::InstanceData>::project(self).sibling_index()
             }
 
             fn set_sibling_index(&mut self, index: usize) {
-                self.$data $(.$data_tail)*.set_sibling_index(index);
+                $crate::Project::<$crate::InstanceData>::project_mut(self).set_sibling_index(index);
             }
 
             fn with_attribute(
                 mut self,
                 name: impl Into<String>,
-                value: serde_json::Value,
+                value: $crate::serde_json::Value,
             ) -> Self {
-                self.$data $(.$data_tail)*.set_attribute(name.into(), value);
+                $crate::Project::<$crate::InstanceData>::project_mut(&mut self).set_attribute(name.into(), value);
                 self
             }
 
-            fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
-                self.$data $(.$data_tail)*.get_attribute(name)
+            fn get_attribute(&self, name: &str) -> Option<&$crate::serde_json::Value> {
+                $crate::Project::<$crate::InstanceData>::project(self).get_attribute(name)
             }
 
             fn attributes(&self) -> &$crate::Attributes {
-                self.$data $(.$data_tail)*.attributes()
+                $crate::Project::<$crate::InstanceData>::project(self).attributes()
             }
 
-            fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
-                self.$data $(.$data_tail)*.remove_attribute(name)
+            fn remove_attribute(&mut self, name: &str) -> Option<$crate::serde_json::Value> {
+                $crate::Project::<$crate::InstanceData>::project_mut(self).remove_attribute(name)
             }
 
             fn clear_attributes(&mut self) {
-                self.$data $(.$data_tail)*.clear_attributes();
+                $crate::Project::<$crate::InstanceData>::project_mut(self).clear_attributes();
             }
 
             fn as_any(&self) -> &dyn ::std::any::Any {
@@ -264,7 +292,7 @@ macro_rules! impl_instance {
                     lookup.unregister(self.id());
                 }
 
-                self.$data $(.$data_tail)*.set_lookup(lookup.as_ref());
+                $crate::Project::<$crate::InstanceData>::project_mut(self).set_lookup(lookup.as_ref());
 
                 for child in self.children_mut() {
                     child.set_instance_lookup(lookup.clone());
@@ -272,10 +300,41 @@ macro_rules! impl_instance {
             }
 
             fn instance_lookup(&self) -> Option<::std::rc::Rc<$crate::InstanceLookup>> {
-                self.$data $(.$data_tail)*.lookup()
+                $crate::Project::<$crate::InstanceData>::project(self).lookup()
             }
         }
     };
+}
+
+/// Implements generated runtime composition queries.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __instance_composition_methods {
+    () => {};
+    (composition) => {
+        fn query(&self, target: ::core::any::TypeId) -> Option<&'static dyn ::core::any::Any> {
+            Self::__instance_query(target)
+        }
+        fn instance_class(&self) -> Option<&'static $crate::InstanceClass> {
+            Some(<Self as $crate::InstanceType>::descriptor())
+        }
+    };
+}
+
+/// Emits inspector implementations when the runtime enables devtools.
+#[doc(hidden)]
+#[cfg(feature = "devtools")]
+#[macro_export]
+macro_rules! __instance_inspection_items {
+    ($($items:tt)*) => { $($items)* };
+}
+
+/// Omits inspector implementations when the runtime disables devtools.
+#[doc(hidden)]
+#[cfg(not(feature = "devtools"))]
+#[macro_export]
+macro_rules! __instance_inspection_items {
+    ($($items:tt)*) => {};
 }
 
 /// Concrete type marker for spatial capability detection in [`impl_instance!`].
@@ -366,7 +425,8 @@ impl InstanceId {
 
 #[derive(Debug)]
 #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub(crate) struct InstanceData {
+#[doc(hidden)]
+pub struct InstanceData {
     name: String,
     #[cfg_attr(feature = "devtools", inspect(readonly))]
     id: InstanceId,
@@ -381,8 +441,15 @@ pub(crate) struct InstanceData {
     attributes: Attributes,
 }
 
+impl Default for InstanceData {
+    fn default() -> Self {
+        Self::new("Instance")
+    }
+}
+
 impl InstanceData {
-    pub(crate) fn new(name: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             id: InstanceId::new(),
@@ -394,71 +461,88 @@ impl InstanceData {
         }
     }
 
-    pub(crate) fn name(&self) -> &str {
+    #[doc(hidden)]
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub(crate) fn set_name(&mut self, name: String) {
+    #[doc(hidden)]
+    pub fn set_name(&mut self, name: String) {
         self.name = name;
     }
 
-    pub(crate) fn id(&self) -> InstanceId {
+    #[doc(hidden)]
+    pub fn id(&self) -> InstanceId {
         self.id
     }
 
-    pub(crate) fn parent(&self) -> Option<InstanceId> {
+    #[doc(hidden)]
+    pub fn parent(&self) -> Option<InstanceId> {
         self.parent
     }
 
-    pub(crate) fn set_parent(&mut self, parent: Option<InstanceId>) {
+    #[doc(hidden)]
+    pub fn set_parent(&mut self, parent: Option<InstanceId>) {
         self.parent = parent;
     }
 
-    pub(crate) fn sibling_index(&self) -> usize {
+    #[doc(hidden)]
+    pub fn sibling_index(&self) -> usize {
         self.sibling_index
     }
 
-    pub(crate) fn set_sibling_index(&mut self, index: usize) {
+    #[doc(hidden)]
+    pub fn set_sibling_index(&mut self, index: usize) {
         self.sibling_index = index;
     }
 
-    pub(crate) fn lookup(&self) -> Option<Rc<InstanceLookup>> {
+    #[doc(hidden)]
+    pub fn lookup(&self) -> Option<Rc<InstanceLookup>> {
         self.lookup.upgrade()
     }
 
-    pub(crate) fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
+    #[doc(hidden)]
+    pub fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
         self.lookup = lookup.map_or_else(Weak::new, Rc::downgrade);
     }
 
-    pub(crate) fn children(&self) -> &[Box<dyn Instance>] {
+    #[doc(hidden)]
+    pub fn children(&self) -> &[Box<dyn Instance>] {
         &self.children
     }
 
-    pub(crate) fn children_mut(&mut self) -> ChildrenMut<'_> {
+    #[doc(hidden)]
+    pub fn children_mut(&mut self) -> ChildrenMut<'_> {
         ChildrenMut::new(self.children.iter_mut())
     }
 
-    pub(crate) fn set_attribute(&mut self, name: String, value: serde_json::Value) {
+    #[doc(hidden)]
+    pub fn set_attribute(&mut self, name: String, value: serde_json::Value) {
         self.attributes.insert(name, value);
     }
 
-    pub(crate) fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
+    #[doc(hidden)]
+    pub fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
         self.attributes.get(name)
     }
 
-    pub(crate) fn attributes(&self) -> &Attributes {
+    #[doc(hidden)]
+    pub fn attributes(&self) -> &Attributes {
         &self.attributes
     }
 
-    pub(crate) fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
+    #[doc(hidden)]
+    pub fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
         self.attributes.remove(name)
     }
 
-    pub(crate) fn clear_attributes(&mut self) {
+    #[doc(hidden)]
+    pub fn clear_attributes(&mut self) {
         self.attributes.clear();
     }
 
-    pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
+    #[doc(hidden)]
+    pub fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
         child.set_instance_parent(Some(self.id));
         child.set_sibling_index(self.children.len());
         let child_id = child.id();
@@ -472,7 +556,8 @@ impl InstanceData {
         child_id
     }
 
-    pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
+    #[doc(hidden)]
+    pub fn remove_child(&mut self, id: InstanceId) -> bool {
         let indexed_position = self.lookup().and_then(|lookup| {
             let instance = lookup.get(id)?;
             // Registered instances remain boxed at stable addresses while parented.
@@ -525,6 +610,17 @@ impl Clone for InstanceData {
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
 pub trait Instance: Any + Debug + InstanceClone {
+    /// Returns the generated composition descriptor, when available.
+    fn instance_class(&self) -> Option<&'static InstanceClass> {
+        None
+    }
+
+    /// Looks up a typed API adapter for this concrete receiver.
+    #[doc(hidden)]
+    fn query(&self, _target: std::any::TypeId) -> Option<&'static dyn Any> {
+        None
+    }
+
     /// Returns this instance's spatial capability, when it has a world-space pivot.
     fn spatial(&self) -> Option<&dyn Spatial> {
         None

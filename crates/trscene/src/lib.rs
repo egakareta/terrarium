@@ -1,6 +1,8 @@
 #![deny(missing_docs)]
 #![doc = include_str!("../README.md")]
 
+extern crate self as trscene;
+
 /// Generates the getter, in-place setter, and consuming builder for an instance property.
 #[doc(hidden)]
 #[macro_export]
@@ -98,12 +100,19 @@ macro_rules! __instance_property {
     };
 }
 
+#[doc(hidden)]
+pub use __terrarium_material_slots as MeshMaterialSlots;
 pub use egui;
 #[cfg(feature = "sound")]
 pub use euphorium;
 #[cfg(feature = "physics")]
 pub use rapier3d;
+#[doc(hidden)]
+pub use serde_json;
 pub use trrendert::{glam, *};
+#[doc(hidden)]
+pub use trscene_macros::__instance_expand;
+pub use trscene_macros::instance;
 pub use winit;
 
 pub mod controller;
@@ -118,3 +127,16 @@ pub use instance::*;
 pub use interpolation::*;
 #[cfg(any(feature = "physics", feature = "sound"))]
 pub use scene::*;
+
+/// Common instance methods and composition macros.
+pub mod prelude {
+    #[cfg(feature = "meshpart")]
+    pub use crate::MeshPartExt;
+    #[cfg(feature = "sound")]
+    pub use crate::SoundExt;
+    pub use crate::{
+        BasePartExt, CameraExt, Instance, InstanceAttributes, InstanceReceiver, LightPropertiesExt,
+        MaterialsExt, OutlineExt, PVInstanceExt, PartExt, PointLightExt, RigExt, SpotLightExt,
+        SurfaceLightExt, instance,
+    };
+}
