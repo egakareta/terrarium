@@ -1,7 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    Controller, ControllerActions, ControllerInput, HasPVInstance, InstanceId, Rig, Workspace,
+    Controller, ControllerActions, ControllerInput, HasPVInstance, InstanceData, InstanceId, Rig,
+    Workspace,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -19,11 +20,17 @@ use crate::{
 /// Movement uses the active camera's horizontal heading. To orbit around the
 /// player, set the camera subject to this rig. Disable duplicate camera input
 /// when both controllers would otherwise respond to the same device.
+/// Parent this instance directly to a workspace to receive input and updates.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct PlayerController {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
+    instance: InstanceData,
     /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
+    #[cfg_attr(feature = "devtools", inspect(readonly))]
     pub rig: Option<InstanceId>,
     /// Device state and bindings used to generate controller actions.
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     pub input: ControllerInput,
     /// Movement speed in world units per second.
     pub speed: f32,
@@ -47,6 +54,7 @@ impl PlayerController {
         let mut input = ControllerInput::default();
         input.key_bindings.down.clear();
         Self {
+            instance: InstanceData::new("PlayerController"),
             rig: Some(rig),
             input,
             speed: 6.0,
@@ -105,7 +113,7 @@ impl PlayerController {
     /// Applies accumulated input directly to a rig without a workspace.
     ///
     /// Horizontal movement is world-aligned, look and jumping are discarded, and
-    /// no physics step is performed. Register the controller with a workspace for
+    /// no physics step is performed. Parent the controller directly to a workspace for
     /// camera-relative movement, camera orbit, and physics integration.
     pub fn update_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
         let actions = self.input.take_actions();
@@ -149,8 +157,9 @@ impl PlayerController {
         let anchored = rig.anchored();
 
         let mut reference = ControllerActions::default();
-        if workspace.current_camera.subject() == Some(id) {
-            let camera = workspace.camera_controller_mut();
+        if workspace.current_camera.subject() == Some(id)
+            && let Some(camera) = workspace.camera_controller_mut()
+        {
             camera.queue_look(actions.look * self.sensitivity);
             reference.look = camera.queued_look();
         }
@@ -222,6 +231,13 @@ impl PlayerController {
     }
 }
 
+crate::impl_instance!(
+    PlayerController,
+    class_name = "PlayerController",
+    data = instance,
+    inspect = PlayerController,
+);
+
 impl Deref for PlayerController {
     type Target = ControllerInput;
 
@@ -252,10 +268,8 @@ impl Controller for PlayerController {
             let follows_rig = self
                 .rig
                 .is_some_and(|id| workspace.current_camera.subject() == Some(id));
-            if follows_rig {
-                workspace
-                    .camera_controller_mut()
-                    .queue_subject_zoom(scroll_delta);
+            if follows_rig && let Some(camera) = workspace.camera_controller_mut() {
+                camera.queue_subject_zoom(scroll_delta);
             }
         }
     }

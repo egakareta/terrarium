@@ -103,6 +103,8 @@ pub use egui;
 pub use euphorium;
 #[cfg(feature = "physics")]
 pub use rapier3d;
+#[doc(hidden)]
+pub use serde_json;
 pub use trrendert::{glam, *};
 pub use winit;
 

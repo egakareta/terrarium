@@ -221,6 +221,7 @@ fn always_on_top_outline_renders_through_occluding_geometry() -> Result<(), AppC
                     Camera::new(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO, 1.0);
                 engine.add_child(
                     Part::new()
+                        .with_name("Outlined")
                         .with_size(Vec3::splat(2.0))
                         .with_color(Color3::BLUE),
                 );
@@ -235,7 +236,12 @@ fn always_on_top_outline_renders_through_occluding_geometry() -> Result<(), AppC
             .unwrap();
 
         let mut scene = engine.workspace.render_scene();
-        let target = scene.nodes[0].id;
+        let target = scene
+            .nodes
+            .iter()
+            .find(|node| node.name == "Outlined")
+            .unwrap()
+            .id;
         scene.outlines.push(RenderOutline {
             mode: OutlineMode::Stencil,
             targets: vec![target],

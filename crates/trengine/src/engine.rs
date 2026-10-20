@@ -197,9 +197,15 @@ impl Engine {
         let mut workspace = workspace;
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
-            workspace
-                .camera_controller_mut()
-                .set_touchscreen_detected(true);
+            use trscene::Instance as _;
+
+            for child in workspace.children_mut() {
+                if let Some(controller) = child.controller_mut()
+                    && let Some(input) = controller.input_mut()
+                {
+                    input.set_touchscreen_detected(true);
+                }
+            }
         }
 
         let render_state = creation_context

@@ -162,9 +162,15 @@ pub type CameraKeyBindings = ControllerKeyBindings;
 /// look direction. With a subject, look and horizontal movement orbit, vertical
 /// movement changes pitch, and forward/backward movement adjusts distance.
 /// [`Self::update_camera_with_actions`] also accepts actions directly.
+/// Parent this instance directly to a workspace to receive input and update its
+/// active camera after physics.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub struct CameraController {
+    #[cfg_attr(feature = "devtools", inspect(flatten))]
+    instance: InstanceData,
     /// Keyboard, mouse, and touch state used by this controller.
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     pub input: ControllerInput,
     /// Movement and zoom speed in world units per second.
     pub speed: f32,
@@ -184,10 +190,15 @@ pub struct CameraController {
     pub min_subject_pitch: f32,
     /// Maximum vertical orbit angle in radians.
     pub max_subject_pitch: f32,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     orbit_subject: Option<InstanceId>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     orbit_yaw: f32,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     orbit_pitch: f32,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     queued_look: Vec2,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     queued_subject_zoom: f32,
 }
 
@@ -214,6 +225,7 @@ impl CameraController {
         let mut input = ControllerInput::default();
         input.key_bindings = key_bindings;
         Self {
+            instance: InstanceData::new("CameraController"),
             input,
             speed,
             sensitivity,
@@ -425,6 +437,13 @@ impl CameraController {
     }
 }
 
+crate::impl_instance!(
+    CameraController,
+    class_name = "CameraController",
+    data = instance,
+    inspect = CameraController,
+);
+
 impl Deref for CameraController {
     type Target = ControllerInput;
 
@@ -455,6 +474,10 @@ impl Controller for CameraController {
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
         self.update_camera(&mut workspace.current_camera, subject, delta_seconds);
+    }
+
+    fn remap_instances(&mut self, map: &dyn Fn(InstanceId) -> Option<InstanceId>) {
+        self.orbit_subject = self.orbit_subject.and_then(map);
     }
 }
 

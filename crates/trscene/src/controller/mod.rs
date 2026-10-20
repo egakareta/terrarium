@@ -2,15 +2,18 @@
 //!
 //! [`ControllerInput`] translates device events into [`ControllerActions`],
 //! separating input collection from per-frame behavior. Actions can also be
-//! created directly for scripted control. [`Controllers`] stores behaviors in
-//! update order; the workspace owns its camera controller separately.
+//! created directly for scripted control. Controllers receive input and updates
+//! only while parented directly to a workspace. Camera controllers update after
+//! physics; other controllers update before it, in child order.
 //!
 //! ```
-//! use trscene::{Controller, ControllerActions, HasPVInstance, Instance, InstanceId, Rig, Workspace};
+//! use trscene::{Controller, ControllerActions, HasPVInstance, Instance, InstanceData, InstanceId, Rig, Workspace};
 //! use trscene::glam::{Quat, Vec3};
 //!
 //! #[derive(Clone, Debug)]
-//! struct Autopilot { rig: Option<InstanceId> }
+//! struct Autopilot { instance: InstanceData, rig: Option<InstanceId> }
+//!
+//! trscene::impl_instance!(Autopilot, class_name = "Autopilot", data = instance);
 //!
 //! impl Controller for Autopilot {
 //!     fn update(&mut self, workspace: &mut Workspace, delta: f32) {
@@ -28,15 +31,13 @@
 //!
 //! let mut workspace = Workspace::new();
 //! let rig = workspace.add_child(Rig::new());
-//! workspace.controllers.add(Autopilot { rig: Some(rig) });
+//! workspace.add_child(Autopilot { instance: InstanceData::new("Autopilot"), rig: Some(rig) });
 //! workspace.update(0.1);
 //! assert!(workspace.get::<Rig>(rig).unwrap().position().z < 0.0);
 //! ```
 
-use std::{any::Any, fmt::Debug};
-
 use crate::{
-    InstanceId, Workspace, egui,
+    Instance, InstanceId, Workspace, egui,
     winit::event::{DeviceEvent, WindowEvent},
 };
 
@@ -50,14 +51,15 @@ pub use actions::*;
 pub use input::*;
 pub use player::*;
 
-/// Per-frame behavior registered with a [`Workspace`].
+/// Per-frame behavior of an instance parented directly to a [`Workspace`].
 ///
-/// Implementations must be cloneable because cloning a workspace clones its
-/// controllers. The default event handlers use [`Self::input_mut`]; override
+/// Use [`crate::impl_instance!`] to expose this capability on a custom instance.
+/// The default event handlers use [`Self::input_mut`]; override
 /// them when input should be translated differently or shared with other state.
-/// The workspace sends each event to every controller, then calls [`Self::update`]
-/// in registration order before physics and camera updates.
-pub trait Controller: Any + Debug + ControllerClone {
+/// The workspace sends each event to every direct controller child, then calls
+/// [`Self::update`] in child order. Camera controllers update after physics;
+/// other controllers update before physics.
+pub trait Controller: Instance {
     /// Returns input state for inspection, or `None` for controllers without it.
     ///
     /// Override this together with [`Self::input_mut`] to use the default event
@@ -96,7 +98,8 @@ pub trait Controller: Any + Debug + ControllerClone {
 
     /// Applies this controller's behavior for one frame.
     ///
-    /// Runs after animation updates and before physics and the default camera.
+    /// Runs after animation updates, before physics for general controllers or
+    /// after physics for [`crate::CameraController`].
     /// `delta_seconds` is finite and clamped to `0..=0.1` by the workspace.
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32);
 
@@ -106,140 +109,4 @@ pub trait Controller: Any + Debug + ControllerClone {
     /// original ID is not part of the cloned workspace. Update any stored scene
     /// references here; the default leaves controller state unchanged.
     fn remap_instances(&mut self, _map: &dyn Fn(InstanceId) -> Option<InstanceId>) {}
-}
-
-/// Object-safe clone support used by [`Controller`] trait objects.
-#[doc(hidden)]
-pub trait ControllerClone {
-    /// Returns an owned clone with the same concrete controller type.
-    fn clone_controller(&self) -> Box<dyn Controller>;
-}
-
-impl<T: Controller + Clone> ControllerClone for T {
-    fn clone_controller(&self) -> Box<dyn Controller> {
-        Box::new(self.clone())
-    }
-}
-
-impl Clone for Box<dyn Controller> {
-    fn clone(&self) -> Self {
-        self.clone_controller()
-    }
-}
-
-impl dyn Controller {
-    /// Recovers this controller's concrete type.
-    pub fn downcast_ref<T: Controller>(&self) -> Option<&T> {
-        (self as &dyn Any).downcast_ref()
-    }
-
-    /// Recovers mutable access to this controller's concrete type.
-    pub fn downcast_mut<T: Controller>(&mut self) -> Option<&mut T> {
-        (self as &mut dyn Any).downcast_mut()
-    }
-}
-
-slotmap::new_key_type! {
-/// A handle to one entry in a workspace's [`Controllers`] collection.
-    pub struct ControllerId;
-}
-
-/// Controllers stored in their per-frame update order.
-#[derive(Clone, Debug, Default)]
-pub struct Controllers {
-    entries: slotmap::SlotMap<ControllerId, Option<Box<dyn Controller>>>,
-    order: Vec<ControllerId>,
-}
-
-impl Controllers {
-    /// Adds a controller to the end of the update order.
-    pub fn add(&mut self, controller: impl Controller) -> ControllerId {
-        let id = self.entries.insert(Some(Box::new(controller)));
-        self.order.push(id);
-        id
-    }
-
-    /// Looks up a controller by handle and concrete type.
-    ///
-    /// Returns `None` for a removed handle, a different concrete type, or while
-    /// that controller is executing its update.
-    pub fn get<T: Controller>(&self, id: ControllerId) -> Option<&T> {
-        self.entries.get(id)?.as_ref()?.downcast_ref()
-    }
-
-    /// Looks up a controller mutably by handle and concrete type.
-    ///
-    /// Returns `None` for a removed handle, a different concrete type, or while
-    /// that controller is executing its update.
-    pub fn get_mut<T: Controller>(&mut self, id: ControllerId) -> Option<&mut T> {
-        self.entries.get_mut(id)?.as_mut()?.downcast_mut()
-    }
-
-    /// Removes a controller from the update order and returns its owned value.
-    ///
-    /// Returns `None` if the handle is stale or the controller is currently
-    /// executing its update.
-    pub fn remove(&mut self, id: ControllerId) -> Option<Box<dyn Controller>> {
-        let entry = self.entries.remove(id)?;
-        self.order.retain(|candidate| *candidate != id);
-        entry
-    }
-
-    /// Iterates over registered controllers in update order.
-    ///
-    /// A controller is omitted while it is executing its update.
-    pub fn iter(&self) -> impl Iterator<Item = (ControllerId, &dyn Controller)> {
-        self.order
-            .iter()
-            .filter_map(|id| Some((*id, self.entries.get(*id)?.as_deref()?)))
-    }
-
-    pub(crate) fn process_eframe_input(&mut self, context: &egui::Context) {
-        for id in &self.order {
-            if let Some(Some(controller)) = self.entries.get_mut(*id) {
-                controller.process_eframe_input(context);
-            }
-        }
-    }
-
-    pub(crate) fn process_window_event(&mut self, event: &WindowEvent) -> bool {
-        let mut used = false;
-        for id in &self.order {
-            if let Some(Some(controller)) = self.entries.get_mut(*id) {
-                used |= controller.process_window_event(event);
-            }
-        }
-        used
-    }
-
-    pub(crate) fn process_device_event(&mut self, event: &DeviceEvent) {
-        for id in &self.order {
-            if let Some(Some(controller)) = self.entries.get_mut(*id) {
-                controller.process_device_event(event);
-            }
-        }
-    }
-
-    pub(crate) fn remap_instances(&mut self, map: &dyn Fn(InstanceId) -> Option<InstanceId>) {
-        for controller in self.entries.values_mut().flatten() {
-            controller.remap_instances(map);
-        }
-    }
-
-    pub(crate) fn update(workspace: &mut Workspace, delta_seconds: f32) {
-        for id in workspace.controllers.order.clone() {
-            let Some(mut controller) = workspace
-                .controllers
-                .entries
-                .get_mut(id)
-                .and_then(Option::take)
-            else {
-                continue;
-            };
-            controller.update(workspace, delta_seconds);
-            if let Some(entry) = workspace.controllers.entries.get_mut(id) {
-                *entry = Some(controller);
-            }
-        }
-    }
 }

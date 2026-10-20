@@ -229,14 +229,21 @@ fn controller_focus_uses_custom_movement_bindings() {
             workspace: Workspace::new(),
         };
         let rig = if player_controlled {
-            host.workspace.camera_controller_mut().set_enabled(false);
+            host.workspace
+                .camera_controller_mut()
+                .unwrap()
+                .set_enabled(false);
             let rig = host.workspace.add_child(Rig::new());
             let mut player = PlayerController::new(rig);
             player.key_bindings.forward = vec![KeyCode::ArrowUp];
-            host.workspace.controllers.add(player);
+            host.workspace.add_child(player);
             Some(rig)
         } else {
-            host.workspace.camera_controller_mut().key_bindings.forward = vec![KeyCode::ArrowUp];
+            host.workspace
+                .camera_controller_mut()
+                .unwrap()
+                .key_bindings
+                .forward = vec![KeyCode::ArrowUp];
             None
         };
         let position = |host: &TestDevtoolsHost| {
@@ -275,6 +282,7 @@ fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
         };
         host.workspace
             .camera_controller_mut()
+            .unwrap()
             .set_keyboard_enabled(keyboard_enabled);
         let context = egui::Context::default();
         frame(&context, &mut devtools, &mut host, Vec::new());
@@ -324,6 +332,7 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
                 devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
                 host.workspace
                     .camera_controller_mut()
+                    .unwrap()
                     .input
                     .process_eframe_input(ui.ctx());
                 host.workspace.update(0.1);

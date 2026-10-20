@@ -194,8 +194,11 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
             .with_color(Color3::new(0.2, 0.5, 0.9)),
     );
     let rig = workspace.add_child(rig);
-    workspace.controllers.add(PlayerController::new(rig));
-    workspace.camera_controller_mut().set_enabled(false);
+    workspace.add_child(PlayerController::new(rig));
+    workspace
+        .camera_controller_mut()
+        .unwrap()
+        .set_enabled(false);
     workspace.current_camera = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
         SPAWN + Vec3::Y,
@@ -203,8 +206,8 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     )
     .with_subject(Some(rig))
     .with_zfar(150.0);
-    workspace.camera_controller_mut().subject_offset = Vec3::Y;
-    workspace.camera_controller_mut().subject_distance = 7.6;
+    workspace.camera_controller_mut().unwrap().subject_offset = Vec3::Y;
+    workspace.camera_controller_mut().unwrap().subject_distance = 7.6;
     workspace.update_camera(0.0);
     rig
 }
@@ -410,7 +413,8 @@ mod tests {
         walk_forward(&mut workspace);
         workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
             delta: (
-                (std::f32::consts::FRAC_PI_2 / workspace.camera_controller().sensitivity) as f64,
+                (std::f32::consts::FRAC_PI_2 / workspace.camera_controller().unwrap().sensitivity)
+                    as f64,
                 0.0,
             ),
         });
@@ -454,7 +458,7 @@ mod tests {
         workspace.update(1.0 / 60.0);
         let player = workspace.get::<Rig>(rig).unwrap();
         let orbit = workspace.current_camera.position() - (player.position() + Vec3::Y);
-        let angle = -60.0 * workspace.camera_controller().sensitivity;
+        let angle = -60.0 * workspace.camera_controller().unwrap().sensitivity;
         let expected = terrarium::glam::Quat::from_rotation_y(angle) * offset;
         assert!(orbit.abs_diff_eq(expected, 1e-4), "{orbit:?}");
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
@@ -474,7 +478,8 @@ mod tests {
         walk_forward(&mut workspace);
         workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
             delta: (
-                (170.0_f32.to_radians() / workspace.camera_controller().sensitivity) as f64,
+                (170.0_f32.to_radians() / workspace.camera_controller().unwrap().sensitivity)
+                    as f64,
                 0.0,
             ),
         });

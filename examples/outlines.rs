@@ -93,7 +93,11 @@ fn main() {
                 Vec3::ZERO
             };
             let mesh_part = engine.add_child(MeshPart::new(mesh));
-            engine.workspace.camera_controller_mut().subject_offset = focus_offset;
+            engine
+                .workspace
+                .camera_controller_mut()
+                .unwrap()
+                .subject_offset = focus_offset;
 
             engine.workspace.current_camera.set_subject(Some(mesh_part));
 
