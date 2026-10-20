@@ -100,6 +100,11 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    fn retain_scene_lookup(&mut self, _lookup: Option<Rc<InstanceLookup>>) {
+        // Workspace queries and destruction use its boxed root across moves into Bevy resources.
+        // Parenting a workspace preserves that scene-local index.
+    }
+
     pub(crate) fn render_textures(&self) -> impl Iterator<Item = RenderTexture<'_>> {
         self.textures
             .iter()
@@ -115,7 +120,8 @@ impl Workspace {
     pub fn new() -> Self {
         let mut instance = Box::new(InstanceData::new("Workspace"));
         let lookup = Rc::new(InstanceLookup::default());
-        lookup.set_root(&mut instance);
+        // Root storage remains boxed for the lifetime of the workspace's children.
+        unsafe { lookup.set_root(&mut instance) };
         instance.set_lookup(Some(&lookup));
         Self {
             instance,
@@ -456,7 +462,8 @@ impl Clone for Workspace {
     fn clone(&self) -> Self {
         let lookup = Rc::new(InstanceLookup::default());
         let mut instance = Box::new((*self.instance).clone());
-        lookup.set_root(&mut instance);
+        // Root storage remains boxed for the lifetime of the workspace's children.
+        unsafe { lookup.set_root(&mut instance) };
         instance.set_lookup(Some(&lookup));
         let mut current_camera = self.current_camera.clone();
         if let Some(subject) = current_camera.subject() {
@@ -519,6 +526,7 @@ crate::impl_instance!(
     class_name = "Workspace",
     data = instance,
     inspect = Workspace,
+    set_lookup = retain_scene_lookup,
 );
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ struct PlayerApp {
 
 impl PlayerApp {
     fn respawn(&self, engine: &mut Engine) {
-        if let Some(rig) = engine.get_mut::<Rig>(self.rig) {
+        if let Some(rig) = engine.workspace_mut().get_mut::<Rig>(self.rig) {
             rig.with_position(SPAWN);
         }
     }
@@ -26,6 +26,7 @@ impl App for PlayerApp {
         _frame: &mut terrarium::eframe::Frame,
     ) {
         if engine
+            .workspace()
             .get::<Rig>(self.rig)
             .is_some_and(|rig| rig.position().y < -10.0)
         {
@@ -210,7 +211,7 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
 }
 
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
-    let rig = create_scene(&mut engine.workspace);
+    let rig = create_scene(engine.workspace_mut());
     Ok(PlayerApp { rig })
 }
 
@@ -225,10 +226,10 @@ fn player_example_loads_headlessly() -> Result<(), AppCreationError> {
         .with_headless(Some(2))
         .run(initialize)?
         .expect("native headless runs return the engine");
-    assert_eq!(engine.get_all::<Rig>().count(), 1);
+    assert_eq!(engine.workspace().get_all::<Rig>().count(), 1);
     assert_eq!(
-        engine.current_camera.subject(),
-        Some(engine.get_all::<Rig>().next().unwrap().id())
+        engine.workspace().current_camera.subject(),
+        Some(engine.workspace().get_all::<Rig>().next().unwrap().id())
     );
     Ok(())
 }

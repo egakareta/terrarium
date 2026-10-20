@@ -74,13 +74,13 @@ impl Benchmark {
     fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
         engine.with_clear_color([0.012, 0.019, 0.050, 1.0]);
         let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
-            &mut engine.workspace,
+            engine.workspace_mut(),
             config.parts,
             config.width,
             config.height,
         )?;
-        let base_camera_pivot = engine.current_camera.pivot();
-        let base_parts = engine.get_all::<Part>().cloned().collect();
+        let base_camera_pivot = engine.workspace().current_camera.pivot();
+        let base_parts = engine.workspace().get_all::<Part>().cloned().collect();
         let random_state = 0x4d59_5df4_d0f3_3173;
         let mut app = Self {
             config,
@@ -165,7 +165,7 @@ impl Benchmark {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        (&mut engine.current_camera).with_pose(Mat4::from_rotation_translation(
+        (&mut engine.workspace_mut().current_camera).with_pose(Mat4::from_rotation_translation(
             camera_rotation,
             camera_position * camera_scale,
         ));
@@ -178,7 +178,7 @@ impl Benchmark {
             let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
-            if let Some(part) = engine.get_mut::<Part>(id) {
+            if let Some(part) = engine.workspace_mut().get_mut::<Part>(id) {
                 let (_, base_rotation, base_position) =
                     base.pivot().to_scale_rotation_translation();
                 let position = base_position
@@ -213,7 +213,7 @@ impl Benchmark {
     fn replace_upper_layer(&mut self, engine: &mut Engine) {
         let previous_layer = std::mem::take(&mut self.upper_layer_ids);
         for id in previous_layer {
-            if let Some(instance) = engine.instance_mut(id) {
+            if let Some(instance) = engine.workspace_mut().instance_mut(id) {
                 instance.destroy();
             }
         }
@@ -249,7 +249,7 @@ impl Benchmark {
                 block = block.with_material_slot(slot, material);
             }
             self.upper_layer_ids
-                .push(block.set_parent(&mut engine.workspace));
+                .push(block.set_parent(engine.workspace_mut()));
         }
     }
 
@@ -267,7 +267,7 @@ impl Benchmark {
     fn reset_part(&mut self, engine: &mut Engine, index: usize) {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
-        if let Some(part) = engine.get_mut::<Part>(id) {
+        if let Some(part) = engine.workspace_mut().get_mut::<Part>(id) {
             part.with_pivot(base.pivot()).with_color(base.color());
         }
     }

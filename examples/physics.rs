@@ -13,7 +13,7 @@ struct PhysicsApp {
 impl PhysicsApp {
     fn reset(&self, engine: &mut Engine) {
         for &(id, transform) in &self.initial_transforms {
-            if let Some(part) = engine.get_mut::<Part>(id) {
+            if let Some(part) = engine.workspace_mut().get_mut::<Part>(id) {
                 part.with_pose(transform);
             }
         }
@@ -21,7 +21,7 @@ impl PhysicsApp {
 
     fn kick(&self, engine: &mut Engine) {
         for (index, &id) in self.dynamic_parts.iter().enumerate() {
-            if let Some(body) = engine.physics_mut().body_mut(id) {
+            if let Some(body) = engine.workspace_mut().physics_mut().body_mut(id) {
                 let direction = if index % 2 == 0 { 1.0 } else { -1.0 };
                 body.apply_impulse(
                     terrarium::rapier3d::math::Vector::new(2.5 * direction, 3.0, 0.0),
@@ -38,7 +38,7 @@ impl App for PhysicsApp {
             .resizable(false)
             .default_size(220.0)
             .show(ui, |ui| {
-                let gravity = engine.physics().gravity();
+                let gravity = engine.workspace().physics().gravity();
                 ui.label(format!("Dynamic bodies: {}", self.dynamic_parts.len()));
                 ui.label(format!(
                     "Gravity: ({:.1}, {:.1}, {:.1})",
@@ -57,8 +57,8 @@ impl App for PhysicsApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
-    engine.lighting.with_clock_time(16.5);
-    engine.current_camera = terrarium::Camera::new(
+    engine.workspace_mut().lighting.with_clock_time(16.5);
+    engine.workspace_mut().current_camera = terrarium::Camera::new(
         Vec3::new(10.0, 7.5, 13.0),
         Vec3::new(0.0, 2.2, 0.0),
         16.0 / 9.0,
@@ -66,7 +66,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
     .with_zfar(100.0);
 
     let floor_material = Material::from_color(Color3::new(0.12, 0.16, 0.22)).with_roughness(0.88);
-    engine.add_child(
+    engine.workspace_mut().add_child(
         Part::new()
             .with_name("Floor")
             .with_size(Vec3::new(18.0, 0.5, 18.0))
@@ -78,7 +78,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
         (Vec3::new(-4.0, 0.8, -1.5), Vec3::new(3.0, 1.6, 3.0)),
         (Vec3::new(4.0, 1.2, 1.0), Vec3::new(3.0, 2.4, 3.0)),
     ] {
-        engine.add_child(
+        engine.workspace_mut().add_child(
             Part::new()
                 .with_size(size)
                 .with_position(position)
@@ -86,7 +86,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
         );
     }
 
-    let light_anchor = engine.add_child_ref(
+    let light_anchor = engine.workspace_mut().add_child_ref(
         Part::new()
             .with_can_collide(false)
             .with_size(Vec3::splat(0.1))
@@ -115,7 +115,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
                 _ => PartShape::Cylinder,
             };
             let transform = Mat4::from_translation(position);
-            let id = engine.add_child(
+            let id = engine.workspace_mut().add_child(
                 Part::new()
                     .with_shape(shape)
                     .with_anchored(false)
@@ -154,6 +154,6 @@ fn physics_example_loads_headlessly() -> Result<(), terrarium::AppCreationError>
         .with_headless(Some(2))
         .run(initialize)?
         .expect("native headless runs return the engine");
-    assert_eq!(engine.get_all::<Part>().count(), 24);
+    assert_eq!(engine.workspace().get_all::<Part>().count(), 24);
     Ok(())
 }

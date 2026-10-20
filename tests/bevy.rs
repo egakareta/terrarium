@@ -20,6 +20,30 @@ use terrarium::{
 #[derive(Resource)]
 struct Subject(InstanceId);
 
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
+#[test]
+fn bevy_can_destroy_instances_in_an_engine_parented_workspace() -> Result<(), AppCreationError> {
+    fn destroy_part(mut scene: NonSendMut<Workspace>) {
+        assert!(scene.parent().is_some());
+        let part = scene.add_child(Part::new());
+        assert!(scene.instance_mut(part).unwrap().destroy());
+        assert!(scene.instance(part).is_none());
+    }
+
+    let mut app = App::new();
+    app.add_systems(Startup, destroy_part);
+    let engine = Terrarium::new()
+        .with_bevy(app)
+        .with_size([32, 32])
+        .with_env_logger(false)
+        .with_headless(Some(2))
+        .run(|_| Ok::<(), AppCreationError>(()))?
+        .unwrap();
+    assert_eq!(engine.workspace().parent(), Some(engine.id()));
+    assert_eq!(engine.workspace().get_all::<Part>().count(), 0);
+    Ok(())
+}
+
 #[test]
 fn workspace_tweens_follow_bevy_virtual_time() {
     let mut scene = Workspace::new();
@@ -137,7 +161,10 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             _context: &egui::Context,
             _frame: &mut eframe::Frame,
         ) {
-            let part = engine.get_mut::<Part>(self.subject).unwrap();
+            let part = engine
+                .workspace_mut()
+                .get_mut::<Part>(self.subject)
+                .unwrap();
             let mut position = part.position();
             position.y = 4.0;
             part.with_position(position);
@@ -145,7 +172,10 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
 
         fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
             ui.label("Ordinary Terrarium UI");
-            let part = engine.get_mut::<Part>(self.subject).unwrap();
+            let part = engine
+                .workspace_mut()
+                .get_mut::<Part>(self.subject)
+                .unwrap();
             let mut position = part.position();
             position.z = 8.0;
             part.with_position(position);
@@ -198,7 +228,9 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             .with_env_logger(false)
             .with_headless(Some(10))
             .run(move |engine| {
-                engine.add_child(Part::new().with_name("Initializer part"));
+                engine
+                    .workspace_mut()
+                    .add_child(Part::new().with_name("Initializer part"));
                 engine
                     .bevy_app_mut()
                     .unwrap()
@@ -207,7 +239,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             })?
             .unwrap();
 
-        let scene = &engine.workspace;
+        let scene = engine.workspace();
         assert!(
             scene
                 .get_all::<Part>()
@@ -279,11 +311,13 @@ fn plugin_finalization_can_populate_the_scene_before_startup() -> Result<(), App
             .with_env_logger(false)
             .with_headless(Some(1))
             .run(|engine| {
-                engine.add_child(Part::new().with_name("Initializer part"));
+                engine
+                    .workspace_mut()
+                    .add_child(Part::new().with_name("Initializer part"));
                 Ok::<(), AppCreationError>(())
             })?
             .unwrap();
-        let scene = &engine.workspace;
+        let scene = engine.workspace();
         assert!(
             scene
                 .get_all::<Part>()
@@ -349,14 +383,16 @@ fn pending_plugins_prepare_the_scene_before_systems_run() -> Result<(), AppCreat
         .with_env_logger(false)
         .with_headless(Some(10))
         .run(|engine| {
-            engine.add_child(Part::new().with_name("Initializer part"));
+            engine
+                .workspace_mut()
+                .add_child(Part::new().with_name("Initializer part"));
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
 
     assert!(
         engine
-            .workspace
+            .workspace()
             .get_all::<Part>()
             .any(|part| part.name() == "Prepared scene")
     );

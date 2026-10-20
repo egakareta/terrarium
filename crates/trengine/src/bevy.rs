@@ -12,7 +12,10 @@ use bevy_ecs::prelude::*;
 pub use bevy_time as time;
 use bevy_time::{Time, TimePlugin, TimeUpdateStrategy};
 
-use crate::{AppCreationError, egui, trscene::Workspace};
+use crate::{
+    AppCreationError, egui,
+    trscene::{Instance, Workspace},
+};
 
 /// Integrates an imperative [`Workspace`] into a Bevy app.
 ///
@@ -81,7 +84,15 @@ pub(crate) fn attach_app(
 
     // Preserve any scene supplied by the caller before the initializer runs.
     if supplied_workspace {
-        std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+        let parent = workspace.parent();
+        let sibling_index = workspace.sibling_index();
+        let world = app.world_mut();
+        let mut supplied = world.non_send_mut::<Workspace>();
+        std::mem::swap(workspace, &mut supplied);
+        workspace.set_instance_parent(parent);
+        workspace.set_sibling_index(sibling_index);
+        supplied.set_instance_parent(None);
+        supplied.set_sibling_index(usize::MAX);
     }
     app.world_mut()
         .insert_non_send(EguiContext(context.clone()));

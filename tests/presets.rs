@@ -75,11 +75,13 @@ fn launchers_apply_presets_before_the_initializer() -> Result<(), AppCreationErr
             .with_env_logger(false)
             .with_headless(Some(1))
             .run(move |engine| {
-                assert_preset(&engine.workspace, preset);
+                assert_eq!(engine.workspace().parent(), Some(engine.id()));
+                assert_preset(engine.workspace(), preset);
                 Ok::<(), AppCreationError>(())
             })?
             .unwrap();
-        assert_preset(&engine.workspace, preset);
+        assert_eq!(engine.workspace().parent(), Some(engine.id()));
+        assert_preset(engine.workspace(), preset);
     }
     Ok(())
 }
@@ -96,11 +98,13 @@ fn bevy_without_a_supplied_workspace_uses_the_launcher_preset() -> Result<(), Ap
         .with_env_logger(false)
         .with_headless(Some(1))
         .run(|engine| {
-            assert_preset(&engine.workspace, WorkspacePreset::Baseplate);
+            assert_eq!(engine.workspace().parent(), Some(engine.id()));
+            assert_preset(engine.workspace(), WorkspacePreset::Baseplate);
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
-    assert_preset(&engine.workspace, WorkspacePreset::Baseplate);
+    assert_eq!(engine.workspace().parent(), Some(engine.id()));
+    assert_preset(engine.workspace(), WorkspacePreset::Baseplate);
     Ok(())
 }
 
@@ -118,10 +122,54 @@ fn a_supplied_empty_bevy_workspace_overrides_the_launcher_preset() -> Result<(),
         .with_env_logger(false)
         .with_headless(Some(1))
         .run(|engine| {
-            assert_preset(&engine.workspace, WorkspacePreset::Empty);
+            assert_eq!(engine.workspace().parent(), Some(engine.id()));
+            assert_preset(engine.workspace(), WorkspacePreset::Empty);
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
-    assert_preset(&engine.workspace, WorkspacePreset::Empty);
+    assert_eq!(engine.workspace().parent(), Some(engine.id()));
+    assert_preset(engine.workspace(), WorkspacePreset::Empty);
+    Ok(())
+}
+
+#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
+#[test]
+fn engine_hierarchy_supports_instance_queries_and_edits() -> Result<(), AppCreationError> {
+    let mut engine = Terrarium::new()
+        .with_size([32, 32])
+        .with_env_logger(false)
+        .with_headless(Some(0))
+        .run(|engine| {
+            engine
+                .workspace_mut()
+                .add_child(Part::new().with_name("Scene part"));
+            Ok::<(), AppCreationError>(())
+        })?
+        .unwrap()
+        .with_typed_attribute("version", 1_u32)?;
+
+    let workspace_id = engine.workspace().id();
+    let part_id = engine.workspace().get_all::<Part>().next().unwrap().id();
+    let sibling = engine.add_child(Part::new().with_name("Engine child"));
+    assert!(engine.workspace().instance(sibling).is_none());
+    assert_eq!(engine.get_typed_attribute::<u32>("version").unwrap()?, 1);
+
+    let root: &mut dyn Instance = &mut engine;
+    assert_eq!(root.class_name(), "Engine");
+    root.set_name("Application".to_owned());
+    assert_eq!(root.name(), "Application");
+    let workspace = root.find_descendant(workspace_id).unwrap();
+    assert!(workspace.is::<Workspace>());
+    assert_eq!(workspace.parent(), Some(root.id()));
+    root.find_descendant_mut(part_id)
+        .unwrap()
+        .set_name("Renamed".to_owned());
+    assert_eq!(root.find_descendant(part_id).unwrap().name(), "Renamed");
+    assert!(root.find_descendant_mut(part_id).unwrap().destroy());
+    assert!(root.find_descendant(part_id).is_none());
+    assert!(root.find_descendant_mut(sibling).unwrap().destroy());
+    assert!(root.find_descendant(sibling).is_none());
+    assert!(engine.workspace().instance(part_id).is_none());
+    assert_eq!(engine.workspace().id(), workspace_id);
     Ok(())
 }

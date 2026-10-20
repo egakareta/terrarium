@@ -25,6 +25,7 @@ impl SoundApp {
     fn unlock_output(&mut self, engine: &Engine) {
         // Opening browser audio requires a recent user gesture, not startup.
         self.output_error = engine
+            .workspace()
             .soundscape()
             .ensure_output()
             .err()
@@ -46,6 +47,7 @@ impl App for SoundApp {
         // Move before Engine::update so audio receives this frame's transform
         // and derives the emitter velocity used for Doppler.
         engine
+            .workspace_mut()
             .get_mut::<Part>(self.emitter)
             .unwrap()
             .with_position(Vec3::new(
@@ -69,30 +71,30 @@ impl App for SoundApp {
                 ui.horizontal(|ui| {
                     if ui.button("Play / resume").clicked() {
                         self.unlock_output(engine);
-                        engine.get_mut::<Sound>(self.sound).unwrap().play();
+                        engine.workspace_mut().get_mut::<Sound>(self.sound).unwrap().play();
                     }
                     if ui.button("Pause").clicked() {
-                        engine.get_mut::<Sound>(self.sound).unwrap().pause();
+                        engine.workspace_mut().get_mut::<Sound>(self.sound).unwrap().pause();
                     }
                 });
                 ui.horizontal(|ui| {
                     if ui.button("Replay").clicked() {
                         self.unlock_output(engine);
-                        engine.get_mut::<Sound>(self.sound).unwrap().replay();
+                        engine.workspace_mut().get_mut::<Sound>(self.sound).unwrap().replay();
                     }
                     if ui.button("Stop").clicked() {
-                        engine.get_mut::<Sound>(self.sound).unwrap().stop();
+                        engine.workspace_mut().get_mut::<Sound>(self.sound).unwrap().stop();
                     }
                 });
                 if ui.add(egui::Slider::new(&mut self.volume, 0.0..=1.0).text("Volume")).changed() {
-                    engine.get_mut::<Sound>(self.sound).unwrap().with_volume(self.volume);
+                    engine.workspace_mut().get_mut::<Sound>(self.sound).unwrap().with_volume(self.volume);
                 }
                 ui.separator();
                 ui.checkbox(&mut self.moving, "Orbit the emitter");
                 ui.add(egui::Slider::new(&mut self.radius, 1.0..=12.0).text("Radius (m)"));
                 ui.add(egui::Slider::new(&mut self.orbit_speed, 0.0..=3.0).text("Speed (rad/s)"));
                 if ui.checkbox(&mut self.occluded, "Simulate wall occlusion").changed() {
-                    let sound = engine.get_mut::<Sound>(self.sound).unwrap();
+                    let sound = engine.workspace_mut().get_mut::<Sound>(self.sound).unwrap();
                     let settings = sound.spatial_settings();
                     sound.with_spatial_settings(SpatialSound {
                         occlusion: if self.occluded {
@@ -106,7 +108,7 @@ impl App for SoundApp {
                 ui.label("Occlusion is supplied explicitly; no geometry raycasts are used.");
                 ui.separator();
 
-                let sound = engine.get::<Sound>(self.sound).unwrap();
+                let sound = engine.workspace().get::<Sound>(self.sound).unwrap();
                 match sound.playback_state() {
                     Ok(state) => { ui.label(format!("Playback: {state:?}")); }
                     Err(error) => { ui.colored_label(egui::Color32::LIGHT_RED, error.to_string()); }
@@ -114,8 +116,8 @@ impl App for SoundApp {
                 if let Ok(position) = sound.time_position() {
                     ui.label(format!("Loop position: {:.2} s", position.as_secs_f32()));
                 }
-                let position = engine.get::<Part>(self.emitter).unwrap().position();
-                let distance = position.distance(engine.current_camera.position());
+                let position = engine.workspace().get::<Part>(self.emitter).unwrap().position();
+                let distance = position.distance(engine.workspace().current_camera.position());
                 ui.label(format!("Emitter: ({:.1}, {:.1}, {:.1}) m", position.x, position.y, position.z));
                 ui.label(format!("Distance: {distance:.1} m"));
                 ui.label("HRTF, distance attenuation, and Doppler are enabled.");
@@ -128,15 +130,15 @@ impl App for SoundApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<SoundApp, AppCreationError> {
-    engine.current_camera = Camera::new(Vec3::new(0.0, 1.5, 9.0), Vec3::Y, 1.0);
-    engine.add_child(
+    engine.workspace_mut().current_camera = Camera::new(Vec3::new(0.0, 1.5, 9.0), Vec3::Y, 1.0);
+    engine.workspace_mut().add_child(
         Part::new()
             .with_name("Ground")
             .with_size(Vec3::new(32.0, 0.2, 32.0))
             .with_position(Vec3::new(0.0, -0.1, 0.0))
             .with_color(Color3::new(0.16, 0.2, 0.25)),
     );
-    let emitter = engine.add_child_ref(
+    let emitter = engine.workspace_mut().add_child_ref(
         Part::new()
             .with_name("Emitter")
             .with_shape(PartShape::Ball)

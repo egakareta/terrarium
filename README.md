@@ -17,7 +17,7 @@ use terrarium::*;
 fn main() {
     Terrarium::new()
         .run(|engine| {
-            engine.add_child(Part::new());
+            engine.workspace_mut().add_child(Part::new());
             Ok::<(), AppCreationError>(())
         })
         .unwrap();

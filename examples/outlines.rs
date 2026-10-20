@@ -14,7 +14,7 @@ struct OutlinesApp {
 impl OutlinesApp {
     fn set_mode(&mut self, engine: &mut Engine, mode: OutlineMode) {
         if let Some(outline) = self.outline {
-            let Some(outline) = engine.get_mut::<Outline>(outline) else {
+            let Some(outline) = engine.workspace_mut().get_mut::<Outline>(outline) else {
                 return;
             };
             if !outline.destroy() {
@@ -22,7 +22,7 @@ impl OutlinesApp {
             };
         };
 
-        let Some(mesh_part) = engine.get_mut::<MeshPart>(self.mesh_part) else {
+        let Some(mesh_part) = engine.workspace_mut().get_mut::<MeshPart>(self.mesh_part) else {
             return;
         };
         self.outline = Some(
@@ -68,7 +68,7 @@ impl App for OutlinesApp {
         if focus_on_duck != self.focus_on_duck {
             self.focus_on_duck = focus_on_duck;
             engine
-                .workspace
+                .workspace_mut()
                 .current_camera
                 .set_subject(focus_on_duck.then_some(self.mesh_part));
         }
@@ -78,7 +78,9 @@ impl App for OutlinesApp {
 fn main() {
     Terrarium::new()
         .run(|engine| {
-            let mesh = engine.add_mesh(include_bytes!("../crates/trscene/fixtures/Duck.glb"))?;
+            let mesh = engine
+                .workspace_mut()
+                .add_mesh(include_bytes!("../crates/trscene/fixtures/Duck.glb"))?;
 
             // the mesh is bounded Y +0.86, lets apply an offset
             let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
@@ -92,10 +94,16 @@ fn main() {
             } else {
                 Vec3::ZERO
             };
-            let mesh_part = engine.add_child(MeshPart::new(mesh));
-            engine.workspace.camera_controller_mut().subject_offset = focus_offset;
+            let mesh_part = engine.workspace_mut().add_child(MeshPart::new(mesh));
+            engine
+                .workspace_mut()
+                .camera_controller_mut()
+                .subject_offset = focus_offset;
 
-            engine.workspace.current_camera.set_subject(Some(mesh_part));
+            engine
+                .workspace_mut()
+                .current_camera
+                .set_subject(Some(mesh_part));
 
             let mut app = OutlinesApp {
                 mesh_part,

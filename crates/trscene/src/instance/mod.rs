@@ -96,7 +96,9 @@ impl InstanceLookup {
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 
-    pub(crate) fn unregister(&self, id: InstanceId) {
+    /// Removes an instance from this lookup index.
+    #[doc(hidden)]
+    pub fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
         self.generation.set(self.generation.get().wrapping_add(1));
     }
@@ -114,7 +116,12 @@ impl InstanceLookup {
         self.instances.borrow().get(&id).copied()
     }
 
-    pub(crate) fn set_root(&self, root: &mut InstanceData) {
+    /// Registers root storage whose address remains stable when its owner moves.
+    ///
+    /// # Safety
+    /// `root` must remain at the same address while its children can use this index.
+    #[doc(hidden)]
+    pub unsafe fn set_root(&self, root: &mut InstanceData) {
         self.root.set(Some((root.id(), NonNull::from(root))));
     }
 
@@ -131,7 +138,7 @@ impl InstanceLookup {
             return false;
         }
 
-        // The workspace root is boxed so this pointer remains valid when Workspace moves.
+        // Root storage stays boxed when its owning instance moves.
         unsafe { root.as_mut().remove_child(child_id) }
     }
 }
@@ -141,12 +148,17 @@ impl InstanceLookup {
 /// storage locations.
 ///
 /// Types implementing [`Spatial`] automatically expose their spatial capability.
+/// Root types may supply `set_lookup` and `set_parent` methods to customize
+/// registration and parenting.
 #[macro_export]
 macro_rules! impl_instance {
     (
         $type:ty,
         class_name = $class_name:literal,
-        data = $data:ident $(.$data_tail:ident)* $(, inspect = $inspect:ty)? $(,)?
+        data = $data:ident $(.$data_tail:ident)*
+        $(, inspect = $inspect:ty)?
+        $(, set_lookup = $set_lookup:ident)?
+        $(, set_parent = $set_parent:ident)? $(,)?
     ) => {
         impl $crate::Instance for $type {
             $(
@@ -210,7 +222,7 @@ macro_rules! impl_instance {
             }
 
             fn set_instance_parent(&mut self, parent: Option<$crate::InstanceId>) {
-                self.$data $(.$data_tail)*.set_parent(parent);
+                $crate::impl_instance!(@set_parent self, parent, $data $(.$data_tail)* $(, $set_parent)?);
             }
 
             fn sibling_index(&self) -> usize {
@@ -258,22 +270,34 @@ macro_rules! impl_instance {
                 &mut self,
                 lookup: Option<::std::rc::Rc<$crate::InstanceLookup>>,
             ) {
-                if let Some(lookup) = &lookup {
-                    lookup.register(self);
-                } else if let Some(lookup) = self.instance_lookup() {
-                    lookup.unregister(self.id());
-                }
-
-                self.$data $(.$data_tail)*.set_lookup(lookup.as_ref());
-
-                for child in self.children_mut() {
-                    child.set_instance_lookup(lookup.clone());
-                }
+                $crate::impl_instance!(@set_lookup self, lookup, $data $(.$data_tail)* $(, $set_lookup)?);
             }
 
             fn instance_lookup(&self) -> Option<::std::rc::Rc<$crate::InstanceLookup>> {
                 self.$data $(.$data_tail)*.lookup()
             }
+        }
+    };
+    (@set_parent $this:ident, $parent:ident, $data:ident $(.$tail:ident)*, $setter:ident) => {
+        $this.$setter($parent);
+    };
+    (@set_parent $this:ident, $parent:ident, $data:ident $(.$tail:ident)*) => {
+        $this.$data $(.$tail)*.set_parent($parent);
+    };
+    (@set_lookup $this:ident, $lookup:ident, $data:ident $(.$tail:ident)*, $setter:ident) => {
+        $this.$setter($lookup);
+    };
+    (@set_lookup $this:ident, $lookup:ident, $data:ident $(.$tail:ident)*) => {
+        if let Some(lookup) = &$lookup {
+            lookup.register($this);
+        } else if let Some(lookup) = $this.instance_lookup() {
+            lookup.unregister($this.id());
+        }
+
+        $this.$data $(.$tail)*.set_lookup($lookup.as_ref());
+
+        for child in $this.children_mut() {
+            child.set_instance_lookup($lookup.clone());
         }
     };
 }
@@ -364,9 +388,11 @@ impl InstanceId {
     }
 }
 
+/// Common identity, attributes, and owned children of an [`Instance`].
+#[doc(hidden)]
 #[derive(Debug)]
 #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub(crate) struct InstanceData {
+pub struct InstanceData {
     name: String,
     #[cfg_attr(feature = "devtools", inspect(readonly))]
     id: InstanceId,
@@ -382,7 +408,8 @@ pub(crate) struct InstanceData {
 }
 
 impl InstanceData {
-    pub(crate) fn new(name: impl Into<String>) -> Self {
+    /// Creates isolated instance storage with the supplied name.
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             id: InstanceId::new(),
@@ -394,71 +421,88 @@ impl InstanceData {
         }
     }
 
-    pub(crate) fn name(&self) -> &str {
+    /// Returns the display name.
+    pub fn name(&self) -> &str {
         &self.name
     }
 
-    pub(crate) fn set_name(&mut self, name: String) {
+    /// Sets the display name.
+    pub fn set_name(&mut self, name: String) {
         self.name = name;
     }
 
-    pub(crate) fn id(&self) -> InstanceId {
+    /// Returns the stable identifier.
+    pub fn id(&self) -> InstanceId {
         self.id
     }
 
-    pub(crate) fn parent(&self) -> Option<InstanceId> {
+    /// Returns the parent identifier.
+    pub fn parent(&self) -> Option<InstanceId> {
         self.parent
     }
 
-    pub(crate) fn set_parent(&mut self, parent: Option<InstanceId>) {
+    /// Sets the parent identifier while ownership changes.
+    pub fn set_parent(&mut self, parent: Option<InstanceId>) {
         self.parent = parent;
     }
 
-    pub(crate) fn sibling_index(&self) -> usize {
+    /// Returns the position in the parent child storage.
+    pub fn sibling_index(&self) -> usize {
         self.sibling_index
     }
 
-    pub(crate) fn set_sibling_index(&mut self, index: usize) {
+    /// Sets the position in the parent child storage.
+    pub fn set_sibling_index(&mut self, index: usize) {
         self.sibling_index = index;
     }
 
-    pub(crate) fn lookup(&self) -> Option<Rc<InstanceLookup>> {
+    /// Returns the lookup associated with this storage.
+    pub fn lookup(&self) -> Option<Rc<InstanceLookup>> {
         self.lookup.upgrade()
     }
 
-    pub(crate) fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
+    /// Sets the lookup associated with this storage.
+    pub fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
         self.lookup = lookup.map_or_else(Weak::new, Rc::downgrade);
     }
 
-    pub(crate) fn children(&self) -> &[Box<dyn Instance>] {
+    /// Returns the owned children.
+    pub fn children(&self) -> &[Box<dyn Instance>] {
         &self.children
     }
 
-    pub(crate) fn children_mut(&mut self) -> ChildrenMut<'_> {
+    /// Iterates over mutable access to the owned children.
+    pub fn children_mut(&mut self) -> ChildrenMut<'_> {
         ChildrenMut::new(self.children.iter_mut())
     }
 
-    pub(crate) fn set_attribute(&mut self, name: String, value: serde_json::Value) {
+    /// Sets a named metadata value.
+    pub fn set_attribute(&mut self, name: String, value: serde_json::Value) {
         self.attributes.insert(name, value);
     }
 
-    pub(crate) fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
+    /// Returns a named metadata value.
+    pub fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
         self.attributes.get(name)
     }
 
-    pub(crate) fn attributes(&self) -> &Attributes {
+    /// Returns all metadata in key order.
+    pub fn attributes(&self) -> &Attributes {
         &self.attributes
     }
 
-    pub(crate) fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
+    /// Removes a named metadata value.
+    pub fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
         self.attributes.remove(name)
     }
 
-    pub(crate) fn clear_attributes(&mut self) {
+    /// Removes all metadata.
+    pub fn clear_attributes(&mut self) {
         self.attributes.clear();
     }
 
-    pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
+    /// Parents an owned child to this instance and returns its identifier.
+    pub fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
         child.set_instance_parent(Some(self.id));
         child.set_sibling_index(self.children.len());
         let child_id = child.id();
@@ -472,7 +516,8 @@ impl InstanceData {
         child_id
     }
 
-    pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
+    /// Removes and destroys a direct child by identifier.
+    pub fn remove_child(&mut self, id: InstanceId) -> bool {
         let indexed_position = self.lookup().and_then(|lookup| {
             let instance = lookup.get(id)?;
             // Registered instances remain boxed at stable addresses while parented.
