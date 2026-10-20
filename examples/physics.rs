@@ -12,16 +12,18 @@ struct PhysicsApp {
 
 impl PhysicsApp {
     fn reset(&self, engine: &mut Engine) {
+        let workspace = engine.workspace_mut();
         for &(id, transform) in &self.initial_transforms {
-            if let Some(part) = engine.workspace_mut().get_mut::<Part>(id) {
+            if let Some(part) = workspace.get_mut::<Part>(id) {
                 part.with_pose(transform);
             }
         }
     }
 
     fn kick(&self, engine: &mut Engine) {
+        let workspace = engine.workspace_mut();
         for (index, &id) in self.dynamic_parts.iter().enumerate() {
-            if let Some(body) = engine.workspace_mut().physics_mut().body_mut(id) {
+            if let Some(body) = workspace.physics_mut().body_mut(id) {
                 let direction = if index % 2 == 0 { 1.0 } else { -1.0 };
                 body.apply_impulse(
                     terrarium::rapier3d::math::Vector::new(2.5 * direction, 3.0, 0.0),
@@ -34,17 +36,18 @@ impl PhysicsApp {
 
 impl App for PhysicsApp {
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let gravity = engine.workspace().physics().gravity();
+        let fps = engine.renderer().fps();
         egui::Panel::left("physics_controls")
             .resizable(false)
             .default_size(220.0)
             .show(ui, |ui| {
-                let gravity = engine.workspace().physics().gravity();
                 ui.label(format!("Dynamic bodies: {}", self.dynamic_parts.len()));
                 ui.label(format!(
                     "Gravity: ({:.1}, {:.1}, {:.1})",
                     gravity.x, gravity.y, gravity.z
                 ));
-                ui.label(format!("FPS: {:.0}", engine.renderer().fps()));
+                ui.label(format!("FPS: {:.0}", fps));
                 ui.separator();
                 if ui.button("Reset stack").clicked() {
                     self.reset(engine);
@@ -57,8 +60,9 @@ impl App for PhysicsApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
-    engine.workspace_mut().lighting.with_clock_time(16.5);
-    engine.workspace_mut().current_camera = terrarium::Camera::new(
+    let workspace = engine.workspace_mut();
+    workspace.lighting.with_clock_time(16.5);
+    workspace.current_camera = terrarium::Camera::new(
         Vec3::new(10.0, 7.5, 13.0),
         Vec3::new(0.0, 2.2, 0.0),
         16.0 / 9.0,
@@ -66,7 +70,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
     .with_zfar(100.0);
 
     let floor_material = Material::from_color(Color3::new(0.12, 0.16, 0.22)).with_roughness(0.88);
-    engine.workspace_mut().add_child(
+    workspace.add_child(
         Part::new()
             .with_name("Floor")
             .with_size(Vec3::new(18.0, 0.5, 18.0))
@@ -78,7 +82,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
         (Vec3::new(-4.0, 0.8, -1.5), Vec3::new(3.0, 1.6, 3.0)),
         (Vec3::new(4.0, 1.2, 1.0), Vec3::new(3.0, 2.4, 3.0)),
     ] {
-        engine.workspace_mut().add_child(
+        workspace.add_child(
             Part::new()
                 .with_size(size)
                 .with_position(position)
@@ -86,7 +90,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
         );
     }
 
-    let light_anchor = engine.workspace_mut().add_child_ref(
+    let light_anchor = workspace.add_child_ref(
         Part::new()
             .with_can_collide(false)
             .with_size(Vec3::splat(0.1))
@@ -115,7 +119,7 @@ fn initialize(engine: &mut Engine) -> Result<PhysicsApp, RendererError> {
                 _ => PartShape::Cylinder,
             };
             let transform = Mat4::from_translation(position);
-            let id = engine.workspace_mut().add_child(
+            let id = workspace.add_child(
                 Part::new()
                     .with_shape(shape)
                     .with_anchored(false)
@@ -154,6 +158,7 @@ fn physics_example_loads_headlessly() -> Result<(), terrarium::AppCreationError>
         .with_headless(Some(2))
         .run(initialize)?
         .expect("native headless runs return the engine");
-    assert_eq!(engine.workspace().get_all::<Part>().count(), 24);
+    let workspace = engine.workspace();
+    assert_eq!(workspace.get_all::<Part>().count(), 24);
     Ok(())
 }

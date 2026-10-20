@@ -10,8 +10,9 @@ struct RigApp {
 
 impl App for RigApp {
     fn ui(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let workspace = engine.workspace_mut();
         egui::Panel::left("rig_controls").show(ui, |ui| {
-            let rig = engine.workspace_mut().get_mut::<Rig>(self.rig).unwrap();
+            let rig = workspace.get_mut::<Rig>(self.rig).unwrap();
             let mut x = rig.position().x;
             if ui
                 .add(egui::Slider::new(&mut x, -3.0..=3.0).text("Rig position"))
@@ -88,8 +89,9 @@ fn initialize(engine: &mut Engine) -> Result<RigApp, AppCreationError> {
         ));
     }
     rig.play_animation(AnimationPlayer::new(AnimationClip::new(tracks)).with_looping(true))?;
-    let rig = engine.workspace_mut().add_child(rig);
-    engine.workspace_mut().current_camera =
+    let workspace = engine.workspace_mut();
+    let rig = workspace.add_child(rig);
+    workspace.current_camera =
         terrarium::Camera::new(Vec3::new(5.0, 3.0, 7.0), Vec3::Y, 16.0 / 9.0);
     Ok(RigApp { rig })
 }
@@ -105,7 +107,8 @@ fn rig_example_loads_headlessly() -> Result<(), AppCreationError> {
         .with_headless(Some(2))
         .run(initialize)?
         .expect("native headless runs return the engine");
-    assert_eq!(engine.workspace().get_all::<Rig>().count(), 1);
-    assert_eq!(engine.workspace().get_all::<Part>().count(), 4);
+    let workspace = engine.workspace();
+    assert_eq!(workspace.get_all::<Rig>().count(), 1);
+    assert_eq!(workspace.get_all::<Part>().count(), 4);
     Ok(())
 }

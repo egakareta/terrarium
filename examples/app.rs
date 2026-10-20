@@ -13,7 +13,8 @@ impl App for SceneApp {
 
     fn ui(&mut self, engine: &mut Engine, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let fps = engine.renderer().fps();
-        let mut clock_time = engine.workspace().lighting.clock_time();
+        let workspace = engine.workspace_mut();
+        let mut clock_time = workspace.lighting.clock_time();
         Panel::top("options").resizable(false).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(format!("FPS: {fps:.0}"));
@@ -22,14 +23,14 @@ impl App for SceneApp {
                     ui.style_mut().override_font_id = Some(egui::FontId::monospace(14.0));
 
                     ui.label(
-                        RichText::new(engine.workspace().lighting.time_of_day())
+                        RichText::new(workspace.lighting.time_of_day())
                             .font(FontId::monospace(14.0)),
                     );
                     if ui
                         .add(Slider::new(&mut clock_time, 0.0..=24.0).suffix("h"))
                         .changed()
                     {
-                        engine.workspace_mut().lighting.with_clock_time(clock_time);
+                        workspace.lighting.with_clock_time(clock_time);
                     }
                 });
             });
@@ -38,32 +39,33 @@ impl App for SceneApp {
 }
 
 fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
-    engine.workspace_mut().lighting.with_clock_time(18.0);
+    let workspace = engine.workspace_mut();
+    workspace.lighting.with_clock_time(18.0);
 
-    let dirt = engine.workspace_mut().add_texture(Texture::from_bytes(
+    let dirt = workspace.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let cobblestone = engine.workspace_mut().add_texture(Texture::from_bytes(
+    let cobblestone = workspace.add_texture(Texture::from_bytes(
         include_bytes!("../assets/cobblestone.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let grass_top = engine.workspace_mut().add_texture(Texture::from_bytes(
+    let grass_top = workspace.add_texture(Texture::from_bytes(
         include_bytes!("../assets/grass_top.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let grass_side = engine.workspace_mut().add_texture(
+    let grass_side = workspace.add_texture(
         Texture::from_bytes(
             include_bytes!("../assets/grass_side.png"),
             TextureColorSpace::Srgb,
         )?
         .rotate180(),
     )?;
-    let festival_lantern = engine.workspace_mut().add_texture(Texture::from_bytes(
+    let festival_lantern = workspace.add_texture(Texture::from_bytes(
         include_bytes!("../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let ground = engine.workspace_mut().add_child_ref(
+    let ground = workspace.add_child_ref(
         Part::new()
             .with_name("Ground")
             .with_shape(PartShape::Block)
@@ -91,7 +93,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_material(Material::brick()),
     );
 
-    let tower = engine.workspace_mut().add_child_with(
+    let tower = workspace.add_child_with(
         Part::new()
             .with_shape(PartShape::Cylinder)
             .with_position(Vec3::new(-3.4, 1.0, -1.8))
@@ -114,7 +116,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         },
     );
 
-    engine.workspace_mut().add_child(
+    workspace.add_child(
         Part::new()
             .with_name("GrassBlock")
             .with_shape(PartShape::Block)
@@ -140,7 +142,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             ),
     );
 
-    let platform = engine.workspace_mut().add_child(
+    let platform = workspace.add_child(
         Part::new()
             .with_shape(PartShape::Block)
             .with_position(Vec3::new(-1.0, 0.55, 1.6))
@@ -149,7 +151,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_material(Material::textured(festival_lantern).with_roughness(0.82)),
     );
 
-    let orb = engine.workspace_mut().add_child_with(
+    let orb = workspace.add_child_with(
         Part::new()
             .with_shape(PartShape::Ball)
             .with_position(Vec3::new(3.3, 2.8, 0.0))
@@ -168,7 +170,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         },
     );
 
-    engine.workspace_mut().add_child(
+    workspace.add_child(
         Part::new()
             .with_shape(PartShape::Wedge)
             .with_position(Vec3::new(2.7, 1.5, 2.2))
@@ -177,7 +179,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_orientation(Vec3::new(0.0, 26.0, 0.0)),
     );
 
-    engine.workspace_mut().add_child(
+    workspace.add_child(
         Part::new()
             .with_shape(PartShape::CornerWedge)
             .with_position(Vec3::new(-4.7, 0.6, 3.1))
@@ -186,7 +188,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_orientation(Vec3::new(0.0, -46.0, 0.0)),
     );
 
-    engine.workspace_mut().add_child(
+    workspace.add_child(
         Part::new()
             .with_name("CyanGlass")
             .with_position(Vec3::new(0.0, 1.45, -10.15))
@@ -195,7 +197,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_transparency(0.45)
             .with_can_collide(false),
     );
-    engine.workspace_mut().add_child(
+    workspace.add_child(
         Part::new()
             .with_name("AmberGlass")
             .with_position(Vec3::new(0.0, 1.45, -10.75))
@@ -217,16 +219,15 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
     )
     .easing(Easing::EaseInOut)
     .repeat(Repeat::Forever);
-    engine
-        .workspace_mut()
+    workspace
         .tweens_mut()
         .add_position(platform, platform_position);
-    engine.workspace_mut().tweens_mut().add_orientation(
+    workspace.tweens_mut().add_orientation(
         platform,
         Tween::new(Vec3::ZERO, Vec3::new(0.0, 6480.0, 0.0), 6.0).repeat_forever(),
     );
 
-    engine.workspace_mut().tweens_mut().add_position(
+    workspace.tweens_mut().add_position(
         tower,
         Tween::path(
             [
@@ -239,7 +240,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         .easing(Easing::EaseInOut)
         .repeat_forever(),
     );
-    engine.workspace_mut().tweens_mut().add_orientation(
+    workspace.tweens_mut().add_orientation(
         tower,
         Tween::new(Vec3::new(0.0, -33.0, 0.0), Vec3::new(0.0, 273.0, 0.0), 8.4)
             .easing(Easing::Linear)
@@ -255,13 +256,13 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             angle.sin() * 3.3,
         )
     });
-    engine.workspace_mut().tweens_mut().add_position(
+    workspace.tweens_mut().add_position(
         orb,
         Tween::path(orbit_points, std::f32::consts::TAU / 0.8)
             .easing(Easing::EaseInOut)
             .repeat_forever(),
     );
-    engine.workspace_mut().tweens_mut().add_orientation(
+    workspace.tweens_mut().add_orientation(
         orb,
         Tween::new(
             Vec3::ZERO,

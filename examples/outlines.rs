@@ -13,8 +13,9 @@ struct OutlinesApp {
 
 impl OutlinesApp {
     fn set_mode(&mut self, engine: &mut Engine, mode: OutlineMode) {
+        let workspace = engine.workspace_mut();
         if let Some(outline) = self.outline {
-            let Some(outline) = engine.workspace_mut().get_mut::<Outline>(outline) else {
+            let Some(outline) = workspace.get_mut::<Outline>(outline) else {
                 return;
             };
             if !outline.destroy() {
@@ -22,7 +23,7 @@ impl OutlinesApp {
             };
         };
 
-        let Some(mesh_part) = engine.workspace_mut().get_mut::<MeshPart>(self.mesh_part) else {
+        let Some(mesh_part) = workspace.get_mut::<MeshPart>(self.mesh_part) else {
             return;
         };
         self.outline = Some(
@@ -78,8 +79,8 @@ impl App for OutlinesApp {
 fn main() {
     Terrarium::new()
         .run(|engine| {
-            let mesh = engine
-                .workspace_mut()
+            let workspace = engine.workspace_mut();
+            let mesh = workspace
                 .add_mesh(include_bytes!("../crates/trscene/fixtures/Duck.glb"))?;
 
             // the mesh is bounded Y +0.86, lets apply an offset
@@ -94,16 +95,9 @@ fn main() {
             } else {
                 Vec3::ZERO
             };
-            let mesh_part = engine.workspace_mut().add_child(MeshPart::new(mesh));
-            engine
-                .workspace_mut()
-                .camera_controller_mut()
-                .subject_offset = focus_offset;
-
-            engine
-                .workspace_mut()
-                .current_camera
-                .set_subject(Some(mesh_part));
+            let mesh_part = workspace.add_child(MeshPart::new(mesh));
+            workspace.camera_controller_mut().subject_offset = focus_offset;
+            workspace.current_camera.set_subject(Some(mesh_part));
 
             let mut app = OutlinesApp {
                 mesh_part,

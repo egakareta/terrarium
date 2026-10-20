@@ -73,32 +73,32 @@ struct Benchmark {
 impl Benchmark {
     fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
         engine.with_clear_color([0.012, 0.019, 0.050, 1.0]);
-        let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
-            engine.workspace_mut(),
-            config.parts,
-            config.width,
-            config.height,
-        )?;
-        let base_camera_pivot = engine.workspace().current_camera.pivot();
-        let base_parts = engine.workspace().get_all::<Part>().cloned().collect();
-        let random_state = 0x4d59_5df4_d0f3_3173;
-        let mut app = Self {
-            config,
-            base_camera_pivot,
-            part_ids,
-            base_parts,
-            upper_layer_extent,
-            upper_layer_ids: Vec::new(),
-            benchmark_materials,
-            random_state,
-            animation_frame: 0,
-            animation_pool_start: 0,
-            warmup_remaining: config.warmup_frames,
-            samples: Vec::with_capacity(config.measured_frames),
-            logic_started: None,
-            frame_started: None,
-            cpu_submission: None,
-            finished: false,
+        let mut app = {
+            let workspace = engine.workspace_mut();
+            let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
+                workspace,
+                config.parts,
+                config.width,
+                config.height,
+            )?;
+            Self {
+                config,
+                base_camera_pivot: workspace.current_camera.pivot(),
+                part_ids,
+                base_parts: workspace.get_all::<Part>().cloned().collect(),
+                upper_layer_extent,
+                upper_layer_ids: Vec::new(),
+                benchmark_materials,
+                random_state: 0x4d59_5df4_d0f3_3173,
+                animation_frame: 0,
+                animation_pool_start: 0,
+                warmup_remaining: config.warmup_frames,
+                samples: Vec::with_capacity(config.measured_frames),
+                logic_started: None,
+                frame_started: None,
+                cpu_submission: None,
+                finished: false,
+            }
         };
         app.replace_upper_layer(engine);
         Ok(app)
@@ -165,7 +165,8 @@ impl Benchmark {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        (&mut engine.workspace_mut().current_camera).with_pose(Mat4::from_rotation_translation(
+        let workspace = engine.workspace_mut();
+        (&mut workspace.current_camera).with_pose(Mat4::from_rotation_translation(
             camera_rotation,
             camera_position * camera_scale,
         ));
@@ -178,7 +179,7 @@ impl Benchmark {
             let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
-            if let Some(part) = engine.workspace_mut().get_mut::<Part>(id) {
+            if let Some(part) = workspace.get_mut::<Part>(id) {
                 let (_, base_rotation, base_position) =
                     base.pivot().to_scale_rotation_translation();
                 let position = base_position
@@ -211,9 +212,10 @@ impl Benchmark {
     }
 
     fn replace_upper_layer(&mut self, engine: &mut Engine) {
+        let workspace = engine.workspace_mut();
         let previous_layer = std::mem::take(&mut self.upper_layer_ids);
         for id in previous_layer {
-            if let Some(instance) = engine.workspace_mut().instance_mut(id) {
+            if let Some(instance) = workspace.instance_mut(id) {
                 instance.destroy();
             }
         }
@@ -249,7 +251,7 @@ impl Benchmark {
                 block = block.with_material_slot(slot, material);
             }
             self.upper_layer_ids
-                .push(block.set_parent(engine.workspace_mut()));
+                .push(block.set_parent(workspace));
         }
     }
 

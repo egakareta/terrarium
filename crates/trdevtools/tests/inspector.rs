@@ -27,7 +27,7 @@ impl DevtoolsHost for TestDevtoolsHost {
         "Sample Application"
     }
 
-    fn workspace(&mut self) -> &mut Workspace {
+    fn root(&mut self) -> &mut dyn Instance {
         &mut self.workspace
     }
 
@@ -72,7 +72,7 @@ fn frame(
             ..Default::default()
         },
         |ui| {
-            devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
+            devtools.focus_scene_on_camera_input(ui.ctx(), host.root());
             host.workspace.process_eframe_input(ui.ctx());
             host.workspace.update(0.1);
             devtools.show_docked(ui, host);
@@ -321,7 +321,7 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
                 ..Default::default()
             },
             |ui| {
-                devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
+                devtools.focus_scene_on_camera_input(ui.ctx(), host.root());
                 host.workspace
                     .camera_controller_mut()
                     .input

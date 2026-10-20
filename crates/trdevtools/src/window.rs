@@ -25,19 +25,14 @@ pub trait DevtoolsHost {
     /// Returns the title used for the scene tab.
     fn scene_title(&self) -> &str;
 
-    /// Returns mutable access to the workspace being inspected.
-    fn workspace(&mut self) -> &mut Workspace;
-
     /// Returns the root shown at the top of the Explorer hierarchy.
-    fn root(&mut self) -> &mut dyn Instance {
-        self.workspace()
-    }
+    fn root(&mut self) -> &mut dyn Instance;
 
     /// Renders the application's scene content with the current DevTools selection.
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]);
 }
 
-/// A full-window workspace inspector dock with a persistent selection.
+/// A full-window instance hierarchy inspector dock with a persistent selection.
 ///
 /// Engines create one automatically with the `devtools` feature enabled. F12
 /// toggles visibility; while hidden, only the scene is rendered. Ctrl-click
@@ -104,7 +99,7 @@ impl Devtools {
         self.base_font_definitions = Some(fonts);
     }
 
-    /// Selects a row using the same modifiers as the workspace tree.
+    /// Selects a row using the same modifiers as the Explorer tree.
     ///
     /// `visible_order` lists expanded rows from top to bottom.
     pub fn select(
@@ -151,32 +146,32 @@ impl Devtools {
     }
 
     /// Returns properties common to every selected instance, marking mixed values.
-    pub fn properties(&self, workspace: &dyn Instance) -> Vec<SelectionProperty> {
-        properties_for_selection(&self.selected, workspace)
+    pub fn properties(&self, root: &dyn Instance) -> Vec<SelectionProperty> {
+        properties_for_selection(&self.selected, root)
     }
 
     /// Applies an edit to a common editable field of the selection.
     pub fn edit_property(
         &mut self,
-        workspace: &mut dyn Instance,
+        root: &mut dyn Instance,
         path: &str,
         value: PropertyValue,
     ) -> Result<(), PropertyError> {
-        self.prune(workspace);
-        edit_selection_property(workspace, &self.selected, path, value)
+        self.prune(root);
+        edit_selection_property(root, &self.selected, path, value)
     }
 
-    /// Destroys selected instances and their descendants; hierarchy and workspace roots are retained.
-    pub fn destroy_selection(&mut self, workspace: &mut dyn Instance) {
+    /// Destroys selected instances and their descendants while retaining hierarchy roots.
+    pub fn destroy_selection(&mut self, root: &mut dyn Instance) {
         for id in self.selected.clone() {
-            if id != workspace.id()
-                && let Some(instance) = resolve_mut(workspace, id)
+            if id != root.id()
+                && let Some(instance) = resolve_mut(root, id)
                 && !instance.is::<Workspace>()
             {
                 instance.destroy();
             }
         }
-        self.prune(workspace);
+        self.prune(root);
         self.error = None;
     }
 
@@ -184,7 +179,10 @@ impl Devtools {
     ///
     /// Call before processing camera input to release keyboard capture in the same frame.
     /// [`Self::show_docked`] also calls this for standalone integrations.
-    pub fn focus_scene_on_camera_input(&mut self, context: &egui::Context, workspace: &Workspace) {
+    pub fn focus_scene_on_camera_input(&mut self, context: &egui::Context, root: &dyn Instance) {
+        let Some(workspace) = find_workspace(root) else {
+            return;
+        };
         if context.text_edit_focused()
             || !context.input(|input| workspace.has_eframe_movement_input(input))
         {
@@ -216,9 +214,10 @@ impl Devtools {
             }
         }
         let scene_title = host.scene_title().to_owned();
-        let root_id = host.root().id();
-        self.prune(host.root());
-        self.focus_scene_on_camera_input(&context, host.workspace());
+        let root = host.root();
+        let root_id = root.id();
+        self.prune(root);
+        self.focus_scene_on_camera_input(&context, root);
 
         if !self.visible {
             host.render_scene(ui, &self.selected);
@@ -308,8 +307,8 @@ impl Devtools {
         }
     }
 
-    fn show_toggle_button(&mut self, context: &egui::Context, workspace_id: InstanceId) {
-        egui::Area::new(egui::Id::new(("terrarium_devtools_toggle", workspace_id)))
+    fn show_toggle_button(&mut self, context: &egui::Context, root_id: InstanceId) {
+        egui::Area::new(egui::Id::new(("terrarium_devtools_toggle", root_id)))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0))
             .show(context, |ui| {
@@ -326,11 +325,11 @@ impl Devtools {
             });
     }
 
-    fn prune(&mut self, workspace: &dyn Instance) {
-        self.selected.retain(|&id| resolve(workspace, id).is_some());
+    fn prune(&mut self, root: &dyn Instance) {
+        self.selected.retain(|&id| resolve(root, id).is_some());
         if self
             .anchor
-            .is_some_and(|id| resolve(workspace, id).is_none())
+            .is_some_and(|id| resolve(root, id).is_none())
         {
             self.anchor = None;
         }
@@ -550,9 +549,9 @@ fn default_dock_state() -> DockState<DevtoolsTab> {
 
 fn properties_for_selection(
     selected: &[InstanceId],
-    workspace: &dyn Instance,
+    root: &dyn Instance,
 ) -> Vec<SelectionProperty> {
-    let mut instances = selected.iter().filter_map(|&id| resolve(workspace, id));
+    let mut instances = selected.iter().filter_map(|&id| resolve(root, id));
     let Some(first) = instances.next() else {
         return Vec::new();
     };
@@ -582,12 +581,12 @@ fn properties_for_selection(
 }
 
 fn edit_selection_property(
-    workspace: &mut dyn Instance,
+    root: &mut dyn Instance,
     selected: &[InstanceId],
     path: &str,
     value: PropertyValue,
 ) -> Result<(), PropertyError> {
-    let Some(property) = properties_for_selection(selected, workspace)
+    let Some(property) = properties_for_selection(selected, root)
         .into_iter()
         .find(|property| property.property.path == path && property.property.editable)
     else {
@@ -597,12 +596,12 @@ fn edit_selection_property(
         return Err(PropertyError::InvalidValue);
     }
     for &id in selected {
-        resolve(workspace, id)
+        resolve(root, id)
             .ok_or(PropertyError::NotFound)?
             .validate_property(path, &value)?;
     }
     for &id in selected {
-        resolve_mut(workspace, id)
+        resolve_mut(root, id)
             .ok_or(PropertyError::NotFound)?
             .set_property(path, value.clone())?;
     }
@@ -651,6 +650,15 @@ fn resolve_mut(root: &mut dyn Instance, id: InstanceId) -> Option<&mut dyn Insta
         return root.downcast_mut::<Workspace>()?.instance_mut(id);
     }
     root.children_mut().find_map(|child| resolve_mut(child, id))
+}
+
+fn find_workspace(root: &dyn Instance) -> Option<&Workspace> {
+    if let Some(workspace) = root.downcast_ref::<Workspace>() {
+        return Some(workspace);
+    }
+    root.children()
+        .iter()
+        .find_map(|child| find_workspace(child.as_ref()))
 }
 
 fn compatible(a: &PropertyValue, b: &PropertyValue) -> bool {

@@ -226,10 +226,11 @@ fn player_example_loads_headlessly() -> Result<(), AppCreationError> {
         .with_headless(Some(2))
         .run(initialize)?
         .expect("native headless runs return the engine");
-    assert_eq!(engine.workspace().get_all::<Rig>().count(), 1);
+    let workspace = engine.workspace();
+    assert_eq!(workspace.get_all::<Rig>().count(), 1);
     assert_eq!(
-        engine.workspace().current_camera.subject(),
-        Some(engine.workspace().get_all::<Rig>().next().unwrap().id())
+        workspace.current_camera.subject(),
+        Some(workspace.get_all::<Rig>().next().unwrap().id())
     );
     Ok(())
 }

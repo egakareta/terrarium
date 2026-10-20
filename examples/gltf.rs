@@ -3,11 +3,12 @@ use terrarium::{AppCreationError, HasPVInstance as _, Instance, MeshPart, Terrar
 fn main() {
     Terrarium::new()
         .run(|engine| {
-            let helmet_mesh = engine.workspace_mut().add_mesh(include_bytes!(
+            let workspace = engine.workspace_mut();
+            let helmet_mesh = workspace.add_mesh(include_bytes!(
                 "../crates/trscene/fixtures/DamagedHelmet.glb"
             ))?;
 
-            engine.workspace_mut().add_child(
+            workspace.add_child(
                 MeshPart::new(helmet_mesh)
                     .with_name("DamagedHelmet")
                     .with_position(Vec3::new(0.0, 0.75, 0.0)),

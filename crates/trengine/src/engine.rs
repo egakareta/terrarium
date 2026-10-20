@@ -715,10 +715,6 @@ impl trdevtools::DevtoolsHost for Engine {
         &self.title
     }
 
-    fn workspace(&mut self) -> &mut Workspace {
-        self.workspace_mut()
-    }
-
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
         self.with_devtools_render_selection(selected, |engine| {
             if let Err(error) = engine.render(ui) {
@@ -826,10 +822,6 @@ impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
 
     fn scene_title(&self) -> &str {
         &self.engine.title
-    }
-
-    fn workspace(&mut self) -> &mut Workspace {
-        self.engine.workspace_mut()
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
