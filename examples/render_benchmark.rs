@@ -75,12 +75,8 @@ impl Benchmark {
         engine.with_clear_color([0.012, 0.019, 0.050, 1.0]);
         let mut app = {
             let workspace = engine.workspace_mut();
-            let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
-                workspace,
-                config.parts,
-                config.width,
-                config.height,
-            )?;
+            let (part_ids, upper_layer_extent, benchmark_materials) =
+                create_benchmark_workspace(workspace, config.parts, config.width, config.height)?;
             Self {
                 config,
                 base_camera_pivot: workspace.current_camera.pivot(),
@@ -250,8 +246,7 @@ impl Benchmark {
                 let material = self.benchmark_materials[material_index];
                 block = block.with_material_slot(slot, material);
             }
-            self.upper_layer_ids
-                .push(block.set_parent(workspace));
+            self.upper_layer_ids.push(block.set_parent(workspace));
         }
     }
 

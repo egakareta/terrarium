@@ -80,8 +80,7 @@ fn main() {
     Terrarium::new()
         .run(|engine| {
             let workspace = engine.workspace_mut();
-            let mesh = workspace
-                .add_mesh(include_bytes!("../crates/trscene/fixtures/Duck.glb"))?;
+            let mesh = workspace.add_mesh(include_bytes!("../crates/trscene/fixtures/Duck.glb"))?;
 
             // the mesh is bounded Y +0.86, lets apply an offset
             let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));

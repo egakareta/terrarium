@@ -327,10 +327,7 @@ impl Devtools {
 
     fn prune(&mut self, root: &dyn Instance) {
         self.selected.retain(|&id| resolve(root, id).is_some());
-        if self
-            .anchor
-            .is_some_and(|id| resolve(root, id).is_none())
-        {
+        if self.anchor.is_some_and(|id| resolve(root, id).is_none()) {
             self.anchor = None;
         }
     }
