@@ -6,8 +6,8 @@
     <title>this is terrarium</title>
     
 <script type="module">
-import init, * as bindings from '/terrarium/pr-preview/pr-25/physics/terrarium-8cb629a56951b539.js';
-const wasm = await init({ module_or_path: '/terrarium/pr-preview/pr-25/physics/terrarium-8cb629a56951b539_bg.wasm' });
+import init, * as bindings from '/terrarium/pr-preview/pr-25/physics/terrarium-a2c6c03bb010c86d.js';
+const wasm = await init({ module_or_path: '/terrarium/pr-preview/pr-25/physics/terrarium-a2c6c03bb010c86d_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/pr-preview/pr-25/physics/terrarium-8cb629a56951b539.js" crossorigin="anonymous" integrity="sha384-9MiAciTTYVlf/522Z9tspNoYrxN0MnSzE1iUnMcm+/AXaU+x2OMZ2pailvkFqE83"><link rel="modulepreload" href="/terrarium/pr-preview/pr-25/physics/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/pr-preview/pr-25/physics/terrarium-8cb629a56951b539_bg.wasm" crossorigin="anonymous" integrity="sha384-EjmZtS/llLgLwiUuUS1mlx50sDXlZX7Ha98DHUKeiAxwQvNPZv5Kd10kMJ6YoTna" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/pr-preview/pr-25/physics/terrarium-a2c6c03bb010c86d.js" crossorigin="anonymous" integrity="sha384-qVVTVJd8vx8VgmOa8IUqBh1wnwvmQT9NlAYx/GGXKxdyv1pv6B1I2RVnZyj1Pdwg"><link rel="modulepreload" href="/terrarium/pr-preview/pr-25/physics/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/pr-preview/pr-25/physics/terrarium-a2c6c03bb010c86d_bg.wasm" crossorigin="anonymous" integrity="sha384-i/nNJ1uelyq/FwroHmFAMsQu0NtLmMjr+76xOnE7wj0aMqXnM7lYX1TbO2vQd8YM" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
