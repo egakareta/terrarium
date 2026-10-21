@@ -2,11 +2,34 @@
 
 use std::any::{Any, TypeId};
 
-use super::Instance;
+use super::{Instance, InstanceData};
 
 /// Shared and mutable access to a composed storage type.
 ///
 /// Implementations are generated from composition fields by [`crate::instance!`].
+/// Identity storage is excluded from safe projections:
+///
+/// ```compile_fail,E0277
+/// use trscene::{InstanceData, Part, Project};
+/// let mut part = Part::new();
+/// let _ = <Part as Project<InstanceData>>::project_mut(&mut part);
+/// ```
+///
+/// Direct identity mutation requires an unsafe internal hook:
+///
+/// ```compile_fail,E0133
+/// use trscene::{Part, __InstanceDataAccess};
+/// let mut part = Part::new();
+/// let _ = part.__instance_data_mut();
+/// ```
+///
+/// Bookkeeping mutators are private even on standalone identity storage:
+///
+/// ```compile_fail,E0624
+/// use trscene::InstanceData;
+/// let mut data = InstanceData::default();
+/// data.set_lookup(None);
+/// ```
 pub trait Project<T: ?Sized> {
     /// Returns the storage provided by this receiver.
     fn project(&self) -> &T;
@@ -29,6 +52,23 @@ impl<T: ?Sized, R: Project<T> + ?Sized> Project<T> for &mut R {
     fn project_mut(&mut self) -> &mut T {
         (**self).project_mut()
     }
+}
+
+/// Internal identity storage supplied by generated instances.
+///
+/// # Safety
+/// Both methods must return the same identity provider owned by this receiver.
+#[doc(hidden)]
+pub unsafe trait __InstanceDataAccess {
+    /// Returns this receiver's identity storage.
+    fn __instance_data(&self) -> &InstanceData;
+
+    /// Returns mutable identity storage for runtime operations.
+    ///
+    /// # Safety
+    /// The caller must preserve tree registration, parent links, and sibling indices,
+    /// and must not move or replace registered storage.
+    unsafe fn __instance_data_mut(&mut self) -> &mut InstanceData;
 }
 
 /// Access to the owning instance, including through a borrowed API view.

@@ -83,7 +83,7 @@ fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
 /// Internal index used to resolve instances by their stable identifier.
 #[doc(hidden)]
 #[derive(Debug, Default)]
-pub struct InstanceLookup {
+pub(crate) struct InstanceLookup {
     instances: RefCell<InstanceMap<NonNull<dyn Instance>>>,
     root: Cell<Option<(InstanceId, NonNull<InstanceData>)>>,
     generation: Cell<u64>,
@@ -92,7 +92,7 @@ pub struct InstanceLookup {
 impl InstanceLookup {
     /// Registers an instance pointer in this lookup index.
     #[doc(hidden)]
-    pub fn register(&self, instance: &mut dyn Instance) {
+    pub(crate) fn register(&self, instance: &mut dyn Instance) {
         self.instances
             .borrow_mut()
             .insert(instance.id(), NonNull::from(instance));
@@ -101,7 +101,7 @@ impl InstanceLookup {
 
     /// Removes an instance from the lookup index.
     #[doc(hidden)]
-    pub fn unregister(&self, id: InstanceId) {
+    pub(crate) fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
         self.generation.set(self.generation.get().wrapping_add(1));
     }
@@ -269,107 +269,93 @@ impl InstanceData {
         }
     }
 
-    #[doc(hidden)]
-    pub fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc(hidden)]
-    pub fn set_name(&mut self, name: String) {
+    pub(crate) fn set_name(&mut self, name: String) {
         self.name = name;
     }
 
-    #[doc(hidden)]
-    pub fn id(&self) -> InstanceId {
+    pub(crate) fn id(&self) -> InstanceId {
         self.id
     }
 
-    #[doc(hidden)]
-    pub fn parent(&self) -> Option<InstanceId> {
+    pub(crate) fn parent(&self) -> Option<InstanceId> {
         self.parent
     }
 
-    #[doc(hidden)]
-    pub fn set_parent(&mut self, parent: Option<InstanceId>) {
+    pub(crate) fn set_parent(&mut self, parent: Option<InstanceId>) {
         self.parent = parent;
     }
 
-    #[doc(hidden)]
-    pub fn sibling_index(&self) -> usize {
+    pub(crate) fn sibling_index(&self) -> usize {
         self.sibling_index
     }
 
-    #[doc(hidden)]
-    pub fn set_sibling_index(&mut self, index: usize) {
+    pub(crate) fn set_sibling_index(&mut self, index: usize) {
         self.sibling_index = index;
     }
 
-    #[doc(hidden)]
-    pub fn lookup(&self) -> Option<Rc<InstanceLookup>> {
+    pub(crate) fn lookup(&self) -> Option<Rc<InstanceLookup>> {
         self.lookup.upgrade()
     }
 
-    #[doc(hidden)]
-    pub fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
+    pub(crate) fn set_lookup(&mut self, lookup: Option<&Rc<InstanceLookup>>) {
         self.lookup = lookup.map_or_else(Weak::new, Rc::downgrade);
     }
 
-    #[doc(hidden)]
-    pub fn children(&self) -> &[Box<dyn Instance>] {
+    pub(crate) fn children(&self) -> &[Box<dyn Instance>] {
         &self.children
     }
 
-    #[doc(hidden)]
-    pub fn children_mut(&mut self) -> ChildrenMut<'_> {
+    pub(crate) fn children_mut(&mut self) -> ChildrenMut<'_> {
         ChildrenMut::new(self.children.iter_mut())
     }
 
-    #[doc(hidden)]
-    pub fn set_attribute(&mut self, name: String, value: serde_json::Value) {
+    pub(crate) fn set_attribute(&mut self, name: String, value: serde_json::Value) {
         self.attributes.insert(name, value);
     }
 
-    #[doc(hidden)]
-    pub fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
+    pub(crate) fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
         self.attributes.get(name)
     }
 
-    #[doc(hidden)]
-    pub fn attributes(&self) -> &Attributes {
+    pub(crate) fn attributes(&self) -> &Attributes {
         &self.attributes
     }
 
-    #[doc(hidden)]
-    pub fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
+    pub(crate) fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
         self.attributes.remove(name)
     }
 
-    #[doc(hidden)]
-    pub fn clear_attributes(&mut self) {
+    pub(crate) fn clear_attributes(&mut self) {
         self.attributes.clear();
     }
 
-    #[doc(hidden)]
-    pub fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
-        child.set_instance_parent(Some(self.id));
-        child.set_sibling_index(self.children.len());
+    pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
+        let data = instance_data_mut(child.as_mut());
+        data.set_parent(Some(self.id));
+        data.set_sibling_index(self.children.len());
         let child_id = child.id();
         self.children.push(child);
         if let Some(lookup) = self.lookup() {
-            self.children
-                .last_mut()
-                .expect("just pushed child")
-                .set_instance_lookup(Some(lookup));
+            set_instance_lookup(
+                self.children
+                    .last_mut()
+                    .expect("just pushed child")
+                    .as_mut(),
+                Some(lookup),
+            );
         }
         child_id
     }
 
-    #[doc(hidden)]
-    pub fn remove_child(&mut self, id: InstanceId) -> bool {
+    pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
         let indexed_position = self.lookup().and_then(|lookup| {
             let instance = lookup.get(id)?;
             // Registered instances remain boxed at stable addresses while parented.
-            Some(unsafe { instance.as_ref().sibling_index() })
+            Some(unsafe { instance.as_ref().__instance_data().sibling_index() })
         });
         let Some(index) = indexed_position
             .filter(|&index| {
@@ -383,11 +369,12 @@ impl InstanceData {
         };
         let mut child = self.children.swap_remove(index);
         if let Some(moved_child) = self.children.get_mut(index) {
-            moved_child.set_sibling_index(index);
+            instance_data_mut(moved_child.as_mut()).set_sibling_index(index);
         }
-        child.set_instance_parent(None);
-        child.set_sibling_index(usize::MAX);
-        child.set_instance_lookup(None);
+        let data = instance_data_mut(child.as_mut());
+        data.set_parent(None);
+        data.set_sibling_index(usize::MAX);
+        set_instance_lookup(child.as_mut(), None);
         true
     }
 }
@@ -412,12 +399,30 @@ impl Clone for InstanceData {
     }
 }
 
+fn instance_data_mut<T: __InstanceDataAccess + ?Sized>(instance: &mut T) -> &mut InstanceData {
+    // SAFETY: Runtime callers update fields in place without moving registered identity storage.
+    unsafe { instance.__instance_data_mut() }
+}
+
+fn set_instance_lookup(instance: &mut dyn Instance, lookup: Option<Rc<InstanceLookup>>) {
+    if let Some(previous) = instance.__instance_data().lookup() {
+        previous.unregister(instance.id());
+    }
+    if let Some(lookup) = &lookup {
+        lookup.register(instance);
+    }
+    instance_data_mut(instance).set_lookup(lookup.as_ref());
+    for child in instance.children_mut() {
+        set_instance_lookup(child, lookup.clone());
+    }
+}
+
 /// A node in the object hierarchy.
 ///
 /// Implementors expose their concrete type through [`Any`], which allows a
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
-pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + InstanceReceiver {
+pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + InstanceReceiver {
     /// Returns the generated composition descriptor, when available.
     fn instance_class(&self) -> Option<&'static InstanceClass> {
         None
@@ -483,14 +488,14 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
     crate::__instance_property! {
         self;
         /// The display name, which defaults to the concrete class name.
-        getter name() -> &str { self.project().name() }
-        setter set_name(name: String) { self.project_mut().set_name(name); }
+        getter name() -> &str { self.__instance_data().name() }
+        setter set_name(name: String) { instance_data_mut(self).set_name(name); }
         builder with_name(name: impl Into<String>) { self.set_name(name.into()); }
     }
 
     /// Returns this instance's stable identifier.
     fn id(&self) -> InstanceId {
-        self.project().id()
+        self.__instance_data().id()
     }
 
     /// Stores a custom metadata value under `name`, overwriting any previous
@@ -513,18 +518,18 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
     where
         Self: Sized,
     {
-        self.project_mut().set_attribute(name.into(), value);
+        instance_data_mut(&mut self).set_attribute(name.into(), value);
         self
     }
 
     /// Returns the custom metadata stored under `name`, if any.
     fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
-        self.project().get_attribute(name)
+        self.__instance_data().get_attribute(name)
     }
 
     /// Returns all custom metadata in sorted key order.
     fn attributes(&self) -> &Attributes {
-        self.project().attributes()
+        self.__instance_data().attributes()
     }
 
     /// Reports whether custom metadata is stored under `name`.
@@ -534,33 +539,33 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
 
     /// Removes the custom metadata stored under `name`, returning it when present.
     fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
-        self.project_mut().remove_attribute(name)
+        instance_data_mut(self).remove_attribute(name)
     }
 
     /// Removes all custom metadata from this instance.
     fn clear_attributes(&mut self) {
-        self.project_mut().clear_attributes();
+        instance_data_mut(self).clear_attributes();
     }
 
     /// Returns the parent identifier, or `None` for an isolated instance.
     fn parent(&self) -> Option<InstanceId> {
-        self.project().parent()
+        self.__instance_data().parent()
     }
 
     /// Returns this instance's children in insertion order.
     fn children(&self) -> &[Box<dyn Instance>] {
-        self.project().children()
+        self.__instance_data().children()
     }
 
     /// Iterates over mutable access to this instance's children.
     fn children_mut(&mut self) -> ChildrenMut<'_> {
-        self.project_mut().children_mut()
+        instance_data_mut(self).children_mut()
     }
 
     /// Removes a direct child by its stable identifier.
     #[doc(hidden)]
     fn remove_child(&mut self, id: InstanceId) -> bool {
-        self.project_mut().remove_child(id)
+        instance_data_mut(self).remove_child(id)
     }
 
     /// Removes this instance from its parent and destroys its descendants.
@@ -576,7 +581,7 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
             return false;
         };
         let id = self.id();
-        let Some(lookup) = self.instance_lookup() else {
+        let Some(lookup) = self.__instance_data().lookup() else {
             return false;
         };
 
@@ -585,7 +590,7 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
 
     /// Adds an owned child to this instance.
     fn add_child_box(&mut self, child: Box<dyn Instance>) -> InstanceId {
-        self.project_mut().add_child(child)
+        instance_data_mut(self).add_child(child)
     }
 
     /// Adds an owned child to this instance and returns a mutable reference to it.
@@ -647,23 +652,6 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
         self.add_child_ref(child)
     }
 
-    /// Sets the internal parent link while a parent takes ownership of this instance.
-    fn set_instance_parent(&mut self, parent: Option<InstanceId>) {
-        self.project_mut().set_parent(parent);
-    }
-
-    /// Returns this instance's position in its parent's child storage.
-    #[doc(hidden)]
-    fn sibling_index(&self) -> usize {
-        self.project().sibling_index()
-    }
-
-    /// Updates this instance's position in its parent's child storage.
-    #[doc(hidden)]
-    fn set_sibling_index(&mut self, index: usize) {
-        self.project_mut().set_sibling_index(index);
-    }
-
     /// Returns this value as [`Any`] for downcasting.
     fn as_any(&self) -> &dyn ::std::any::Any {
         self.as_instance()
@@ -672,28 +660,6 @@ pub trait Instance: Any + Debug + InstanceClone + Project<InstanceData> + Instan
     /// Returns this value as mutable [`Any`] for downcasting.
     fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any {
         self.as_instance_mut()
-    }
-
-    /// Internal hook used to register an instance subtree in its workspace index.
-    #[doc(hidden)]
-    fn set_instance_lookup(&mut self, lookup: Option<::std::rc::Rc<InstanceLookup>>) {
-        if let Some(lookup) = &lookup {
-            lookup.register(self.as_instance_mut());
-        } else if let Some(lookup) = self.instance_lookup() {
-            lookup.unregister(self.id());
-        }
-
-        self.project_mut().set_lookup(lookup.as_ref());
-
-        for child in self.children_mut() {
-            child.set_instance_lookup(lookup.clone());
-        }
-    }
-
-    /// Returns the workspace lookup associated with this instance.
-    #[doc(hidden)]
-    fn instance_lookup(&self) -> Option<::std::rc::Rc<InstanceLookup>> {
-        self.project().lookup()
     }
 
     /// Parents an isolated instance to any instance.

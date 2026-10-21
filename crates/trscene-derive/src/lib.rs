@@ -986,9 +986,9 @@ fn expand(
     };
     let data_project = definition.data.as_ref().map(|field| {
         quote! {
-            impl #runtime::Project<#runtime::InstanceData> for #class {
-                fn project(&self) -> &#runtime::InstanceData { &self.#field }
-                fn project_mut(&mut self) -> &mut #runtime::InstanceData { &mut self.#field }
+            unsafe impl #runtime::__InstanceDataAccess for #class {
+                fn __instance_data(&self) -> &#runtime::InstanceData { &self.#field }
+                unsafe fn __instance_data_mut(&mut self) -> &mut #runtime::InstanceData { &mut self.#field }
             }
         }
     });
@@ -1022,9 +1022,11 @@ fn expand(
             .as_ref()
             .unwrap();
         Some(quote! {
-            impl #runtime::Project<#runtime::InstanceData> for #class {
-                fn project(&self) -> &#runtime::InstanceData { <#parent as #runtime::Project<#runtime::InstanceData>>::project(&self.#field) }
-                fn project_mut(&mut self) -> &mut #runtime::InstanceData { <#parent as #runtime::Project<#runtime::InstanceData>>::project_mut(&mut self.#field) }
+            unsafe impl #runtime::__InstanceDataAccess for #class {
+                fn __instance_data(&self) -> &#runtime::InstanceData { <#parent as #runtime::__InstanceDataAccess>::__instance_data(&self.#field) }
+                unsafe fn __instance_data_mut(&mut self) -> &mut #runtime::InstanceData {
+                    unsafe { <#parent as #runtime::__InstanceDataAccess>::__instance_data_mut(&mut self.#field) }
+                }
             }
         })
     } else {
@@ -1203,8 +1205,9 @@ fn expand(
         });
         let inspect_impl = definition.inspect.then(|| {
             let inherited = entries.iter().map(|entry| &entry.inspection).collect::<Vec<_>>();
-            let read_data = is_instance.then(|| quote!(properties.extend(#runtime::devtools::Inspect::properties(#runtime::Project::<#runtime::InstanceData>::project(self)));));
-            let write_data = is_instance.then(|| quote!(return #runtime::devtools::Inspect::set_property(#runtime::Project::<#runtime::InstanceData>::project_mut(self), path, value);));
+            let read_data = is_instance.then(|| quote!(properties.extend(#runtime::devtools::Inspect::properties(#runtime::__InstanceDataAccess::__instance_data(self)));));
+            // InstanceData inspection edits name and attributes; tree fields are readonly or skipped.
+            let write_data = is_instance.then(|| quote!(return #runtime::devtools::Inspect::set_property(unsafe { #runtime::__InstanceDataAccess::__instance_data_mut(self) }, path, value);));
             let no_data = (!is_instance).then(|| quote!(Err(#runtime::devtools::PropertyError::NotFound)));
             quote! {
                 impl #runtime::devtools::Inspect for #class {

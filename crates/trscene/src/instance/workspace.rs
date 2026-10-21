@@ -507,7 +507,7 @@ impl Clone for Workspace {
             lookup: lookup.clone(),
         };
         for child in workspace.instance.children_mut() {
-            child.set_instance_lookup(Some(lookup.clone()));
+            super::set_instance_lookup(child, Some(lookup.clone()));
         }
         workspace.controllers.remap_instances(&|id| {
             cloned_instance_id(self.instance.children(), workspace.instance.children(), id)
