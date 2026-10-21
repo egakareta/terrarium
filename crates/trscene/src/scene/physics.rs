@@ -6,7 +6,7 @@ use rapier3d::prelude::{
 };
 
 use crate::{
-    BasePart, BoxOverlapQuery, HasBasePart, HasPVInstance, Instance, InstanceId, PVInstance, Part,
+    BasePart, BasePartExt, BoxOverlapQuery, Instance, InstanceId, PVInstance, PVInstanceExt, Part,
     PartShape, Rig,
     glam::{Mat4, Quat, Vec3},
 };
@@ -14,7 +14,7 @@ use crate::{
 /// A Rapier-backed physics simulation synchronized with workspace parts.
 ///
 /// [`Workspace`](crate::Workspace) creates one automatically when the `physics` feature is
-/// enabled. Parts with [`HasBasePart::anchored`](crate::HasBasePart::anchored) set to `false`
+/// enabled. Parts with [`BasePartExt::anchored`](crate::BasePartExt::anchored) set to `false`
 /// are simulated as dynamic rigid bodies; anchored parts are fixed rigid bodies.
 /// A [`Rig`] shares one body among all its descendant parts, using the rig's
 /// anchored state and each part's collision shape and flag.
@@ -481,10 +481,10 @@ impl PhysicsPart {
         let shape = instance
             .view::<Part>()
             .map_or(PartShape::Block, |part| part.shape());
-        Some(Self::from_traits(instance.id(), &*part, shape))
+        Some(Self::from_traits(instance.id(), part, shape))
     }
 
-    fn from_traits<T: HasBasePart + HasPVInstance + ?Sized>(
+    fn from_traits<T: BasePartExt + PVInstanceExt + ?Sized>(
         id: InstanceId,
         part: &T,
         shape: PartShape,
@@ -586,7 +586,7 @@ fn vectors_approximately_equal(left: Vec3, right: Vec3) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BoxOverlapQuery, HasPVInstance, HasPart, Workspace};
+    use crate::{BoxOverlapQuery, PVInstanceExt, PartExt, Workspace};
 
     #[test]
     fn dynamic_parts_fall_and_rest_on_anchored_parts() {

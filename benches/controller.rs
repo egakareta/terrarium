@@ -2,7 +2,7 @@
 
 extern crate test;
 
-use terrarium::{Camera, CameraController, HasPVInstance};
+use terrarium::{Camera, CameraController, PVInstanceExt};
 use test::{Bencher, black_box};
 
 #[bench]

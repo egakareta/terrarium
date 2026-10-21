@@ -75,8 +75,8 @@ crate::instance! {
     #[instance(default = false, inspect = false)]
     /// A visible scene object backed by caller-provided or imported mesh data.
     ///
-    /// `MeshPart` exposes [`BasePart`] behavior through [`HasBasePart`] and
-    /// [`crate::PVInstance`] behavior through [`HasPVInstance`], so its hierarchy,
+    /// `MeshPart` exposes [`BasePart`] behavior through [`BasePartExt`] and
+    /// [`crate::PVInstance`] behavior through [`PVInstanceExt`], so its hierarchy,
     /// transform, size, tint, and collision metadata use the same API as
     /// [`crate::Part`].
     #[derive(Clone, Debug)]
@@ -95,16 +95,6 @@ crate::instance! {
         pub(crate) material_slots: MeshMaterialSlots,
     }
     impl MeshPart {
-        /// Returns shared access to the underlying [`MeshPart`].
-        pub fn mesh_part(&self) -> &MeshPart {
-            crate::Project::<MeshPart>::project(self)
-        }
-
-        /// Returns mutable access to the underlying [`MeshPart`].
-        pub fn mesh_part_mut(&mut self) -> &mut MeshPart {
-            crate::Project::<MeshPart>::project_mut(self)
-        }
-
         /// CPU-side geometry rendered by this mesh part. Replacing it updates
         /// the bounds and schedules a new upload before the next frame.
         pub fn mesh(&self) -> &Mesh {
@@ -116,14 +106,6 @@ crate::instance! {
             mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
             mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots.clone());
             mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
-        }
-        /// Returns this value with `mesh` set.
-        pub fn with_mesh(mut self, mesh: Mesh) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_mesh(mesh);
-            self
         }
 
         /// Returns the shared mesh asset used by this part.
@@ -836,9 +818,6 @@ fn append_f32_pixels(rgba: &mut Vec<u8>, pixels: &[u8], channels: usize) {
         }
     }
 }
-
-/// Compatibility name for the generated MeshPart API.
-pub use MeshPartExt as HasMeshPart;
 
 #[cfg(test)]
 mod tests {

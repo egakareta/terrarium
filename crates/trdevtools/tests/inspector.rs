@@ -1,7 +1,7 @@
 use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
 use trscene::{
-    BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance,
-    InstanceId, Part, PartShape, PlayerController, PointLight, Rig, Workspace,
+    BasePart, BasePartExt, Color3, Instance, InstanceId, LightPropertiesExt, MaterialsExt,
+    PVInstanceExt, Part, PartExt, PartShape, PlayerController, PointLight, Rig, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
     winit::keyboard::KeyCode,

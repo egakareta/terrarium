@@ -56,7 +56,7 @@ trscene::instance! {
         #[r#override(PVInstance::set_pivot)]
         fn set_pivot(&mut self, mut pivot: trscene::glam::Mat4) {
             pivot.w_axis.y = 0.0;
-            self.pv_mut().set_pivot(pivot);
+            self.pv_instance_mut().set_pivot(pivot);
         }
 
         #[r#override(BasePart::set_color)]
@@ -92,6 +92,8 @@ fn custom_instances_keep_builders_generic_methods_identity_and_exact_downcasts()
         .with_mass(4.0)
         .with_shape(PartShape::Ball)
         .with_position(Vec3::new(1.0, 2.0, 3.0));
+    part.spring_part_mut().set_stiffness(45.0);
+    assert_eq!(part.spring_part().stiffness(), 45.0);
     let id = part.id();
     paint(&mut part, Color3::BLACK);
     (&mut part).with_transparency(0.5).with_stiffness(50.0);
@@ -337,7 +339,7 @@ fn independent_capabilities_and_new_root_types_keep_one_scene_identity() {
     let group = workspace.add_child(group);
     assert_eq!(workspace.view::<Group>(group).unwrap().label(), "assembly");
     assert_eq!(workspace.instance(part).unwrap().parent(), Some(group));
-    let mut motor = workspace.view_mut::<Motor>(part).unwrap();
+    let motor = workspace.view_mut::<Motor>(part).unwrap();
     assert_eq!(motor.id(), part);
     assert_eq!(motor.class_name(), "MotorPart");
     motor.set_speed(12.0);

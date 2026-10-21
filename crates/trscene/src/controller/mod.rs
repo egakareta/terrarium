@@ -6,7 +6,7 @@
 //! update order; the workspace owns its camera controller separately.
 //!
 //! ```
-//! use trscene::{Controller, ControllerActions, HasPVInstance, Instance, InstanceId, Rig, Workspace};
+//! use trscene::{Controller, ControllerActions, PVInstanceExt, Instance, InstanceId, Rig, Workspace};
 //! use trscene::glam::{Quat, Vec3};
 //!
 //! #[derive(Clone, Debug)]

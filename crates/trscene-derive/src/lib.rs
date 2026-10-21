@@ -1,6 +1,7 @@
 #![deny(missing_docs)]
 //! Field-driven instance composition and API generation.
 
+use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{TokenStream as Tokens, TokenTree};
@@ -17,7 +18,10 @@ use syn::{
 ///
 /// Mark one field `#[extends]` or `#[data]` and additional capabilities
 /// `#[compose]`. `#[property(default = expression)]` generates a getter,
-/// setter, and consuming builder. Public receiver methods in an accompanying
+/// setter, and consuming builder; `borrow` returns a reference and `into`
+/// accepts `Into<T>` in the builder. Type storage accessors (`mesh_part` and
+/// `mesh_part_mut`, for example) are generated from the type name. Public
+/// `set_*` methods also receive a consuming `with_*` builder. Public receiver methods in an accompanying
 /// impl become API methods; `#[r#override(Base::method)]` replaces an inherited
 /// method. `#[default(expression)]` initializes a non-property field.
 /// Methods marked `#[property]` expose computed properties through their
@@ -90,7 +94,6 @@ struct Definition {
     path: Path,
     inspect: bool,
     default: bool,
-    inherent: bool,
 }
 
 impl Parse for Definition {
@@ -105,15 +108,12 @@ impl Parse for Definition {
         let mut path: Path = parse_quote!(crate);
         let mut inspect = true;
         let mut default = true;
-        let mut inherent = false;
         take_attrs(&mut item.attrs, "instance", |attr| {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("path") {
                     path = meta.value()?.parse()?;
                 } else if meta.path.is_ident("inspect") {
                     inspect = meta.value()?.parse::<syn::LitBool>()?.value;
-                } else if meta.path.is_ident("inherent") {
-                    inherent = meta.value()?.parse::<syn::LitBool>()?.value;
                 } else if meta.path.is_ident("default") {
                     default = meta.value()?.parse::<syn::LitBool>()?.value;
                 } else {
@@ -250,7 +250,6 @@ impl Parse for Definition {
             path,
             inspect,
             default,
-            inherent,
         })
     }
 }
@@ -611,28 +610,7 @@ fn expand(
     let view = format_ident!("{class}View");
     let visibility = definition.item.vis.clone();
     let is_instance = definition.data.is_some() || entries.iter().any(|entry| entry.instance);
-    let identities = usize::from(definition.data.is_some())
-        + definition
-            .parents
-            .iter()
-            .filter(|parent| {
-                entries.iter().any(|entry| {
-                    entry
-                        .via
-                        .as_ref()
-                        .is_some_and(|(field, _)| field == &parent.field)
-                        && entry.instance
-                })
-            })
-            .count();
-    if identities > 1 {
-        return Err(syn::Error::new_spanned(
-            &class,
-            "composition supplies more than one instance identity",
-        ));
-    }
     let mut methods: Vec<ImplItemFn> = Vec::new();
-    let mut inherent_names = Vec::new();
     let mut inherent = Vec::new();
     let mut helpers = Vec::new();
     let mut aliases = Vec::new();
@@ -657,6 +635,7 @@ fn expand(
         })?;
         let mut sanitize: Option<Expr> = None;
         let mut borrow = false;
+        let mut into = false;
         take_attrs(&mut field.attrs, "property", |attr| {
             property = true;
             if matches!(attr.meta, syn::Meta::Path(_)) {
@@ -667,10 +646,12 @@ fn expand(
                     default = Some(meta.value()?.parse()?);
                 } else if meta.path.is_ident("sanitize") {
                     sanitize = Some(meta.value()?.parse()?);
+                } else if meta.path.is_ident("into") {
+                    into = true;
                 } else if meta.path.is_ident("borrow") {
                     borrow = true;
                 } else {
-                    return Err(meta.error("expected default, sanitize, or borrow"));
+                    return Err(meta.error("expected default, sanitize, borrow, or into"));
                 }
                 Ok(())
             })
@@ -717,9 +698,19 @@ fn expand(
                 #(#cfg)* #[doc = concat!("Sets `", stringify!(#field_name), "`.")] #(#docs)*
                 fn #setter(&mut self, value: #ty) { #runtime::Project::<#class>::project_mut(self).#field_name = #value; }
             });
+            let builder_ty = if into {
+                quote!(impl Into<#ty>)
+            } else {
+                quote!(#ty)
+            };
+            let builder_value = if into {
+                quote!(value.into())
+            } else {
+                quote!(value)
+            };
             methods.push(parse_quote! {
                 #(#cfg)* #[doc = concat!("Returns this instance with `", stringify!(#field_name), "` set.")] #(#docs)*
-                fn #builder(mut self, value: #ty) -> Self where Self: Sized { self.#setter(value); self }
+                fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized { self.#setter(#builder_value); self }
             });
             property_inspect.push(PropertyApi {
                 getter: field_name.clone(),
@@ -740,10 +731,6 @@ fn expand(
         for item in implementation.items {
             match item {
                 ImplItem::Fn(mut method) => {
-                    take_attrs(&mut method.attrs, "inherent", |_| {
-                        inherent_names.push(method.sig.ident.clone());
-                        Ok(())
-                    })?;
                     let mut inspected = false;
                     let mut flatten = false;
                     let mut validate: Option<Ident> = None;
@@ -912,6 +899,61 @@ fn expand(
             }
         }
     }
+    let storage = format_ident!("{}", class.to_string().to_snake_case());
+    let storage_mut = format_ident!("{storage}_mut");
+    methods.push(parse_quote! {
+        #[doc = concat!("Returns the composed `", stringify!(#class), "` storage.")]
+        fn #storage(&self) -> &#class { #runtime::Project::<#class>::project(self) }
+    });
+    methods.push(parse_quote! {
+        #[doc = concat!("Returns mutable composed `", stringify!(#class), "` storage.")]
+        fn #storage_mut(&mut self) -> &mut #class { #runtime::Project::<#class>::project_mut(self) }
+    });
+    let mut builders = Vec::new();
+    for method in &methods {
+        let signature = &method.sig;
+        let Some(property) = signature
+            .ident
+            .to_string()
+            .strip_prefix("set_")
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if !matches!(signature.output, syn::ReturnType::Default)
+            || signature.receiver().is_none_or(|receiver| {
+                receiver.reference.is_none() || receiver.mutability.is_none()
+            })
+        {
+            continue;
+        }
+        let builder = format_ident!("with_{property}");
+        if methods.iter().any(|method| method.sig.ident == builder) {
+            continue;
+        }
+        let setter = &signature.ident;
+        let args = arguments(signature)?;
+        let mut signature = signature.clone();
+        signature.ident = builder;
+        signature.inputs[0] = parse_quote!(mut self);
+        signature.output = parse_quote!(-> Self);
+        signature
+            .generics
+            .make_where_clause()
+            .predicates
+            .push(parse_quote!(Self: Sized));
+        let cfg: Vec<_> = method
+            .attrs
+            .iter()
+            .filter(|attr| attr.path().is_ident("cfg"))
+            .collect();
+        builders.push(parse_quote! {
+            #(#cfg)*
+            #[doc = concat!("Returns this instance with `", #property, "` set.")]
+            #signature { self.#setter(#(#args),*); self }
+        });
+    }
+    methods.extend(builders);
     let mut promoted = std::collections::HashSet::new();
     for entry in &entries {
         for method in &entry.methods {
@@ -996,20 +1038,6 @@ fn expand(
         } = method;
         quote!(#(#attrs)* #sig #block)
     });
-    for method in methods
-        .iter()
-        .filter(|method| definition.inherent || inherent_names.contains(&method.sig.ident))
-    {
-        let mut signature = method.sig.clone();
-        strip_argument_mutability(&mut signature);
-        let name = &signature.ident;
-        let receiver = Ident::new("self", signature.receiver().unwrap().self_token.span);
-        let arguments = arguments(&signature)?;
-        let attrs = &method.attrs;
-        inherent.push(
-            quote!(#(#attrs)* pub #signature { <Self as #api>::#name(#receiver, #(#arguments),*) }),
-        );
-    }
     let forwarded = methods
         .iter()
         .filter(|method| {
@@ -1058,14 +1086,37 @@ fn expand(
             });
         }
     });
+    let spatial = quote! {
+        fn spatial(&self) -> Option<&dyn #runtime::Spatial> {
+            use #runtime::__DetectSpatial as _;
+            (&&#runtime::__SpatialProbe::<Self>(::core::marker::PhantomData)).get(self)
+        }
+        fn spatial_mut(&mut self) -> Option<&mut dyn #runtime::Spatial> {
+            use #runtime::__DetectSpatial as _;
+            (&&#runtime::__SpatialProbe::<Self>(::core::marker::PhantomData)).get_mut(self)
+        }
+    };
     let instance_impl = is_instance.then(|| quote! {
-        #runtime::impl_instance!(#class, class_name = stringify!(#class), projected, composition, inspect = #class);
-        impl #class {
-            #[doc(hidden)]
-            pub fn __instance_query(target: ::core::any::TypeId) -> Option<&'static dyn ::core::any::Any> {
+        impl #runtime::InstanceReceiver for #class {
+            fn as_instance(&self) -> &dyn #runtime::Instance { self }
+            fn as_instance_mut(&mut self) -> &mut dyn #runtime::Instance { self }
+        }
+        impl #runtime::Instance for #class {
+            fn query(&self, target: ::core::any::TypeId) -> Option<&'static dyn ::core::any::Any> {
                 #(#type_queries)*
                 None
             }
+            fn instance_class(&self) -> Option<&'static #runtime::InstanceClass> {
+                Some(<Self as #runtime::InstanceType>::descriptor())
+            }
+            #runtime::__impl_instance_inspection!(#class);
+
+            #spatial
+
+            fn class_name(&self) -> &'static str {
+                stringify!(#class)
+            }
+
         }
     });
     let parents = definition.parents.iter().map(|parent| &parent.ty);
@@ -1215,8 +1266,8 @@ fn expand(
         impl #api for #class {}
         impl<__Receiver: #api + ?Sized> #api for &mut __Receiver { #(#forwarded)* }
         #[doc = concat!("An instance exposing the `", stringify!(#class), "` API.")]
-        #visibility trait #view: #api + #runtime::InstanceReceiver {}
-        impl<__Receiver: #api + #runtime::InstanceReceiver + ?Sized> #view for __Receiver {}
+        #visibility trait #view: #api + #runtime::Instance {}
+        impl<__Receiver: #api + #runtime::Instance + ?Sized> #view for __Receiver {}
         impl #class { #(#inherent)* #(#helpers)* }
         #default_impl
         #instance_impl

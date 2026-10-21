@@ -3,8 +3,8 @@ use slotmap::Key;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    Camera, HasCamera, HasLight, HasPVInstance, Instance, InstanceId, Outline, Part, PointLight,
-    RenderCamera, RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode,
+    Camera, CameraExt, Instance, InstanceId, LightPropertiesExt, Outline, PVInstanceExt, Part,
+    PointLight, RenderCamera, RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode,
     RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace, glam,
 };
 
@@ -42,7 +42,7 @@ fn render_node<'a>(
 }
 
 fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
-    if let Some(part) = instance.view::<Part>().map(crate::InstanceRef::into_api) {
+    if let Some(part) = instance.view::<Part>() {
         let shape = part.shape();
         return Some(RenderMesh {
             geometry: RenderGeometry::Primitive(shape),
@@ -53,10 +53,7 @@ fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
         });
     }
     #[cfg(feature = "meshpart")]
-    if let Some(part) = instance
-        .view::<MeshPart>()
-        .map(crate::InstanceRef::into_api)
-    {
+    if let Some(part) = instance.view::<MeshPart>() {
         return Some(RenderMesh {
             geometry: RenderGeometry::Custom {
                 mesh: part.mesh(),
@@ -90,7 +87,7 @@ fn render_light(
     instance: &dyn Instance,
 ) -> Option<(RenderLight, glam::Mat4)> {
     let (parent_id, parent_transform) = render_light_parent(workspace, instance)?;
-    let build = |kind, light: &dyn HasLight| RenderLight {
+    let build = |kind, light: &dyn LightPropertiesExt| RenderLight {
         parent_id: render_id(parent_id),
         kind,
         color: light.color(),
@@ -102,7 +99,7 @@ fn render_light(
             RenderLightKind::Point {
                 range: light.range(),
             },
-            &*light,
+            light,
         )
     } else if let Some(light) = instance.view::<SpotLight>() {
         build(
@@ -110,7 +107,7 @@ fn render_light(
                 face: light.face(),
                 angle: light.angle(),
             },
-            &*light,
+            light,
         )
     } else if let Some(light) = instance.view::<SurfaceLight>() {
         build(
@@ -118,7 +115,7 @@ fn render_light(
                 face: light.face(),
                 angle: light.angle(),
             },
-            &*light,
+            light,
         )
     } else {
         return None;
@@ -129,15 +126,15 @@ fn render_light(
 fn render_outlines(workspace: &Workspace) -> Vec<RenderOutline> {
     workspace
         .views::<Outline>()
-        .filter_map(|outline| render_outline(workspace, &outline))
+        .filter_map(|outline| render_outline(workspace, outline))
         .collect()
 }
 
 fn render_outline(
     workspace: &Workspace,
-    outline: &crate::InstanceRef<'_, Outline>,
+    outline: &dyn crate::OutlineView,
 ) -> Option<RenderOutline> {
-    let parent_id = outline.instance().parent()?;
+    let parent_id = outline.parent()?;
     let parent = workspace.instance(parent_id)?;
     let container_id = parent.parent()?;
     let mut targets = vec![render_id(parent_id)];
@@ -193,7 +190,7 @@ fn render_light_parent(
 
 #[cfg(test)]
 mod tests {
-    use crate::{Instance, Outline, Part, Workspace};
+    use crate::{Instance, Outline, OutlineExt, Part, Workspace};
 
     #[test]
     fn render_scene_preserves_outline_always_on_top() {

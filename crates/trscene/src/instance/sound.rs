@@ -6,34 +6,37 @@ use euphorium::{
 
 use crate::{Instance, InstanceData, InstanceId, glam::Vec3, scene::audio::velocity};
 
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-struct SoundSettings {
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    source: SoundSource,
-    volume: f32,
-    playback_speed: f32,
-    looping: bool,
-    spatial_enabled: bool,
-    emitter_offset: Vec3,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    spatial: SpatialSound,
-}
-
-impl Default for SoundSettings {
-    fn default() -> Self {
-        Self {
-            source: SoundSource::empty(),
-            volume: 1.0,
-            playback_speed: 1.0,
-            looping: false,
-            spatial_enabled: true,
-            emitter_offset: Vec3::ZERO,
-            spatial: SpatialSound {
-                doppler: true,
-                ..SpatialSound::default()
-            },
-        }
+crate::instance! {
+    #[instance(inspect = false)]
+    /// Authored audio properties shared by sound instances.
+    #[doc(hidden)]
+    #[derive(Clone, Debug, PartialEq)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct SoundSettings {
+        /// Encoded audio source. Replacing it preserves playback state when possible.
+        #[property(default = SoundSource::empty(), borrow, into)]
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        source: SoundSource,
+        /// Local volume before distance, occlusion, and master multipliers.
+        #[property(default = 1.0)]
+        volume: f32,
+        /// Authored speed before Doppler shifting. Invalid values fail the next update.
+        #[property(default = 1.0)]
+        playback_speed: f32,
+        /// Whether the source repeats when it reaches the end.
+        #[property]
+        looping: bool,
+        /// Whether a part ancestor enables positional playback on the next start.
+        #[property(default = true)]
+        spatial_enabled: bool,
+        /// Offset in the nearest part ancestor's pivot coordinates, without its scale.
+        #[property]
+        emitter_offset: Vec3,
+        /// Attenuation, occlusion, Doppler, and channel settings; scene transforms supply the emitter.
+        #[property(default = SpatialSound { doppler: true, ..SpatialSound::default() },
+                    sanitize = |mut settings: SpatialSound| { settings.emitter = EmitterState::default(); settings })]
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        spatial_settings: SpatialSound,
     }
 }
 
@@ -63,7 +66,7 @@ impl Drop for SoundPlayback {
 }
 
 crate::instance! {
-    #[instance(default = false, inspect = false)]
+    #[instance(inspect = false)]
     /// A scene-tree sound backed by Euphorium.
     ///
     /// Sounds beneath a [`crate::Part`], [`crate::BasePart`], or `MeshPart` use their
@@ -81,6 +84,7 @@ crate::instance! {
         #[data]
         instance: InstanceData,
         #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[compose]
         settings: SoundSettings,
         #[cfg_attr(feature = "devtools", inspect(skip))]
         commands: VecDeque<PlaybackCommand>,
@@ -88,194 +92,38 @@ crate::instance! {
         playback: Option<SoundPlayback>,
     }
     impl Sound {
-        /// Returns the underlying sound.
-        pub fn sound(&self) -> &Sound {
-            crate::Project::<Sound>::project(self)
-        }
-
-        /// Returns mutable access to the underlying sound.
-        pub fn sound_mut(&mut self) -> &mut Sound {
-            crate::Project::<Sound>::project_mut(self)
-        }
-
-        /// Encoded audio source descriptor. Replacing it preserves playback
-        /// state and position when possible.
-        pub fn source(&self) -> &SoundSource {
-            &self.sound().settings.source
-        }
-        /// Sets `source`.
-        pub fn set_source(&mut self, source: SoundSource) {
-            self.sound_mut().settings.source = source;
-        }
-        /// Returns this value with `source` set.
-        pub fn with_source(mut self, source: impl Into<SoundSource>) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_source(source.into());
-            self
-        }
-
-        /// Local volume before distance, occlusion, and master multipliers.
-        /// Invalid values are reported by the next audio update.
-        #[property]
-        pub fn volume(&self) -> f32 {
-            self.sound().settings.volume
-        }
-        /// Sets `volume`.
-        pub fn set_volume(&mut self, volume: f32) {
-            self.sound_mut().settings.volume = volume;
-        }
-        /// Returns this value with `volume` set.
-        pub fn with_volume(mut self, volume: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_volume(volume);
-            self
-        }
-
-        /// Authored playback speed before Doppler pitch shifting. Invalid
-        /// values are reported by the next audio update.
-        #[property]
-        pub fn playback_speed(&self) -> f32 {
-            self.sound().settings.playback_speed
-        }
-        /// Sets `playback_speed`.
-        pub fn set_playback_speed(&mut self, speed: f32) {
-            self.sound_mut().settings.playback_speed = speed;
-        }
-        /// Returns this value with `playback_speed` set.
-        pub fn with_playback_speed(mut self, speed: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_playback_speed(speed);
-            self
-        }
-
-        /// Whether the source repeats when it reaches the end.
-        #[property]
-        pub fn looping(&self) -> bool {
-            self.sound().settings.looping
-        }
-        /// Sets `looping`.
-        pub fn set_looping(&mut self, looping: bool) {
-            self.sound_mut().settings.looping = looping;
-        }
-        /// Returns this value with `looping` set.
-        pub fn with_looping(mut self, looping: bool) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_looping(looping);
-            self
-        }
-
-        /// Whether a part ancestor enables positional playback. Changes take
-        /// effect on the next playback start or replay.
-        #[property]
-        pub fn spatial_enabled(&self) -> bool {
-            self.sound().settings.spatial_enabled
-        }
-        /// Sets `spatial_enabled`.
-        pub fn set_spatial_enabled(&mut self, enabled: bool) {
-            self.sound_mut().settings.spatial_enabled = enabled;
-        }
-        /// Returns this value with `spatial_enabled` set.
-        pub fn with_spatial_enabled(mut self, enabled: bool) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_spatial_enabled(enabled);
-            self
-        }
-
-        /// Emitter offset in the nearest part ancestor's pivot coordinates,
-        /// without part scale. Active sounds follow changes on the next audio update.
-        #[property]
-        pub fn emitter_offset(&self) -> Vec3 {
-            self.sound().settings.emitter_offset
-        }
-        /// Sets `emitter_offset`.
-        pub fn set_emitter_offset(&mut self, offset: Vec3) {
-            self.sound_mut().settings.emitter_offset = offset;
-        }
-        /// Returns this value with `emitter_offset` set.
-        pub fn with_emitter_offset(mut self, offset: Vec3) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_emitter_offset(offset);
-            self
-        }
-
-        /// Attenuation, occlusion, Doppler, and input-channel settings. The
-        /// authored emitter is ignored because scene transforms supply it.
-        /// Occlusion changes apply on the next audio update; other settings
-        /// take effect on playback start or replay. Invalid values are reported
-        /// by the next audio update for positional sounds.
-        pub fn spatial_settings(&self) -> SpatialSound {
-            self.sound().settings.spatial
-        }
-        /// Sets `spatial_settings`.
-        pub fn set_spatial_settings(&mut self, settings: SpatialSound) {
-            let mut settings = settings;
-            settings.emitter = EmitterState::default();
-            self.sound_mut().settings.spatial = settings;
-        }
-        /// Returns this value with `spatial_settings` set.
-        pub fn with_spatial_settings(mut self, settings: SpatialSound) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_spatial_settings(settings);
-            self
-        }
-
         /// Creates an idle sound with no source, unit volume and speed, and spatial
         /// rendering enabled when parented beneath a part.
         pub fn new() -> Self {
-            Self {
-                instance: InstanceData::new("Sound"),
-                settings: SoundSettings::default(),
-                commands: VecDeque::new(),
-                playback: None,
-            }
+            Self::default()
         }
 
         /// Queues playback, resuming a paused sound or restarting an ended sound.
-        #[inherent]
         pub fn play(&mut self) {
             self.commands.push_back(PlaybackCommand::Play);
         }
 
         /// Queues playback from the beginning, even if already playing.
-        #[inherent]
         pub fn replay(&mut self) {
             self.commands.push_back(PlaybackCommand::Replay);
         }
 
         /// Queues a pause while retaining the current playback position.
-        #[inherent]
         pub fn pause(&mut self) {
             self.commands.push_back(PlaybackCommand::Pause);
         }
 
         /// Queues resumption of paused playback without starting an idle sound.
-        #[inherent]
         pub fn resume(&mut self) {
             self.commands.push_back(PlaybackCommand::Resume);
         }
 
         /// Queues stopping playback and resetting the position to zero.
-        #[inherent]
         pub fn stop(&mut self) {
             self.commands.push_back(PlaybackCommand::Stop);
         }
 
         /// Queues a seek without changing the intended pause state.
-        #[inherent]
         pub fn seek(&mut self, position: Duration) {
             self.commands.push_back(PlaybackCommand::Seek(position));
         }
@@ -284,30 +132,26 @@ crate::instance! {
         ///
         /// This provides playback events, loading, effects, and advanced Euphorium
         /// controls. A cloned handle refers to the same voice and is invalidated
-        /// when this instance is destroyed. Prefer [`HasSound`] for authored
+        /// when this instance is destroyed. Prefer [`SoundExt`] for authored
         /// properties so subsequent scene updates and scene clones retain them.
-        #[inherent]
         pub fn playback(&self) -> Option<&euphorium::Sound> {
             self.playback.as_ref().map(|playback| &playback.sound)
         }
 
         /// Returns the live playback state, or [`PlaybackState::Idle`] before the
         /// first audio update. Pending playback requests are not reflected yet.
-        #[inherent]
         pub fn playback_state(&self) -> Result<PlaybackState, SoundscapeError> {
             self.playback()
                 .map_or(Ok(PlaybackState::Idle), euphorium::Sound::playback_state)
         }
 
         /// Returns the live playback position, or zero before the first audio update.
-        #[inherent]
         pub fn time_position(&self) -> Result<Duration, SoundscapeError> {
             self.playback()
                 .map_or(Ok(Duration::ZERO), euphorium::Sound::position)
         }
 
         /// Returns the source duration once known to the backend.
-        #[inherent]
         pub fn duration(&self) -> Result<Option<Duration>, SoundscapeError> {
             self.playback().map_or(Ok(None), euphorium::Sound::duration)
         }
@@ -343,11 +187,13 @@ crate::instance! {
                     )
                     .to_array(),
                 },
-                ..settings.spatial
+                ..settings.spatial_settings
             });
             let previous = playback.applied.as_ref();
 
-            if playback.parent != parent || previous.is_none_or(|old| old.spatial != settings.spatial) {
+            if playback.parent != parent
+                || previous.is_none_or(|old| old.spatial_settings != settings.spatial_settings)
+            {
                 playback.sound.set_spatial(spatial)?;
             }
             if let Some(spatial) = spatial {
@@ -387,12 +233,6 @@ crate::instance! {
     }
 }
 
-impl Default for Sound {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Clone for Sound {
     fn clone(&self) -> Self {
         Self {
@@ -403,6 +243,3 @@ impl Clone for Sound {
         }
     }
 }
-
-/// Compatibility name for the generated Sound API.
-pub use SoundExt as HasSound;

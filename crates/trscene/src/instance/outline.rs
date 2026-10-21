@@ -1,7 +1,7 @@
 use crate::{Color3, InstanceData, OutlineMode};
 
 crate::instance! {
-    #[instance(default = false, inspect = false, inherent = true)]
+    #[instance(default = false, inspect = false)]
     /// A render-only instance that outlines its parent and the parent's siblings.
     ///
     /// An outline is attached to the instance tree just like any other child, but
@@ -14,10 +14,20 @@ crate::instance! {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]
         instance: InstanceData,
+        /// Rendering technique used by the outline.
+        #[property]
         mode: OutlineMode,
+        /// Color of the outline.
+        #[property]
         color: Color3,
+        /// Screen-space line width in pixels.
+        #[property]
         width: f32,
+        /// Edge threshold used by toon and silhouette detection.
+        #[property]
         threshold: f32,
+        /// Whether the outline renders through occluding geometry.
+        #[property]
         always_on_top: bool,
     }
     impl Outline {
@@ -46,96 +56,6 @@ crate::instance! {
         /// Creates a stencil-buffer outline.
         pub fn stencil() -> Self {
             Self::new(OutlineMode::Stencil)
-        }
-
-        /// Rendering technique used by the outline.
-        #[property]
-        pub fn mode(&self) -> OutlineMode {
-            self.mode
-        }
-        /// Sets `mode`.
-        pub fn set_mode(&mut self, mode: OutlineMode) {
-            self.mode = mode;
-        }
-        /// Returns this value with `mode` set.
-        pub fn with_mode(mut self, mode: OutlineMode) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_mode(mode);
-            self
-        }
-
-        /// Color of the outline.
-        #[property]
-        pub fn color(&self) -> Color3 {
-            self.color
-        }
-        /// Sets `color`.
-        pub fn set_color(&mut self, color: Color3) {
-            self.color = color;
-        }
-        /// Returns this value with `color` set.
-        pub fn with_color(mut self, color: Color3) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_color(color);
-            self
-        }
-
-        /// Screen-space line width in pixels.
-        #[property]
-        pub fn width(&self) -> f32 {
-            self.width
-        }
-        /// Sets `width`.
-        pub fn set_width(&mut self, width: f32) {
-            self.width = width;
-        }
-        /// Returns this value with `width` set.
-        pub fn with_width(mut self, width: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_width(width);
-            self
-        }
-
-        /// Edge threshold used by toon and silhouette detection.
-        #[property]
-        pub fn threshold(&self) -> f32 {
-            self.threshold
-        }
-        /// Sets `threshold`.
-        pub fn set_threshold(&mut self, threshold: f32) {
-            self.threshold = threshold;
-        }
-        /// Returns this value with `threshold` set.
-        pub fn with_threshold(mut self, threshold: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_threshold(threshold);
-            self
-        }
-
-        /// Whether the outline renders through occluding geometry.
-        #[property]
-        pub fn always_on_top(&self) -> bool {
-            self.always_on_top
-        }
-        /// Sets `always_on_top`.
-        pub fn set_always_on_top(&mut self, always_on_top: bool) {
-            self.always_on_top = always_on_top;
-        }
-        /// Returns this value with `always_on_top` set.
-        pub fn with_always_on_top(mut self, always_on_top: bool) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_always_on_top(always_on_top);
-            self
         }
     }
 }

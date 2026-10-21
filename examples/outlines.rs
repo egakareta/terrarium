@@ -1,6 +1,6 @@
 use terrarium::{
-    App, AppCreationError, Color3, Engine, Instance, InstanceId, MeshPart, Outline, OutlineMode,
-    Terrarium, eframe, egui, glam::Vec3,
+    App, AppCreationError, Color3, Engine, Instance, InstanceId, MeshPart, Outline, OutlineExt,
+    OutlineMode, Terrarium, eframe, egui, glam::Vec3,
 };
 
 struct OutlinesApp {

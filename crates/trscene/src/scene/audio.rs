@@ -6,7 +6,7 @@ use euphorium::{
 };
 use thiserror::Error;
 
-use crate::{Camera, HasPVInstance, InstanceId, PVInstance, Sound, Workspace, glam::Vec3};
+use crate::{Camera, InstanceId, PVInstance, PVInstanceExt, Sound, Workspace, glam::Vec3};
 
 /// A failure discovered while updating the workspace's audio scene.
 #[derive(Debug, Error)]
@@ -120,11 +120,8 @@ pub(crate) fn velocity(position: Vec3, previous: Option<Vec3>, delta_seconds: f3
     Vec3::ZERO
 }
 
-fn emitter(
-    workspace: &Workspace,
-    sound: &crate::InstanceRef<'_, Sound>,
-) -> Option<(InstanceId, Vec3)> {
-    let mut parent = sound.instance().parent();
+fn emitter(workspace: &Workspace, sound: &dyn crate::SoundView) -> Option<(InstanceId, Vec3)> {
+    let mut parent = sound.parent();
     while let Some(id) = parent {
         let instance = workspace.instance(id)?;
         let pivot = instance.spatial().map(|spatial| spatial.world_pivot());
@@ -176,13 +173,13 @@ impl Workspace {
             .audio
             .instances
             .iter()
-            .filter_map(|&id| Some((id, emitter(self, &self.view::<Sound>(id)?))))
+            .filter_map(|&id| Some((id, emitter(self, self.view::<Sound>(id)?))))
             .collect();
         // Clone only the root owner, never a scene or a voice. This allows typed
         // mutable scene access without moving or recreating the audio runtime.
         let soundscape = Rc::clone(&self.audio.soundscape);
         for (id, emitter) in emitters {
-            if let Some(mut sound) = self.view_mut::<Sound>(id)
+            if let Some(sound) = self.view_mut::<Sound>(id)
                 && let Err(source) =
                     sound
                         .sound_mut()
@@ -224,8 +221,8 @@ mod tests {
 
     use super::*;
     #[cfg(feature = "physics")]
-    use crate::HasBasePart;
-    use crate::{BasePart, HasPVInstance, HasSound, Instance, Part};
+    use crate::BasePartExt;
+    use crate::{BasePart, Instance, PVInstanceExt, Part, SoundExt, SoundSettingsExt};
 
     fn assert_vector(actual: [f32; 3], expected: Vec3) {
         for (actual, expected) in actual.into_iter().zip(expected.to_array()) {

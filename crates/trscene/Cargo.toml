@@ -18,7 +18,7 @@ serde_json = "1"
 slotmap = "1"
 thiserror = "2"
 trrendert = { workspace = true }
-trscene-macros = { workspace = true }
+trscene-derive = { workspace = true }
 winit = { version = "0.30", default-features = false, features = ["rwh_06", "wayland"] }
 
 [dev-dependencies]

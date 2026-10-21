@@ -15,7 +15,7 @@ scene::instance! {
         #[r#override(PVInstance::set_pivot)]
         fn set_pivot(&mut self, mut pivot: Transform) {
             pivot.w_axis.y = 0.0;
-            self.pv_mut().set_pivot(pivot);
+            self.pv_instance_mut().set_pivot(pivot);
         }
     }
 }

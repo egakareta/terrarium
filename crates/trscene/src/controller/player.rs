@@ -1,7 +1,9 @@
 use std::ops::{Deref, DerefMut};
 
+#[cfg(feature = "physics")]
+use crate::RigExt;
 use crate::{
-    Controller, ControllerActions, ControllerInput, HasPVInstance, InstanceId, Rig, Workspace,
+    Controller, ControllerActions, ControllerInput, InstanceId, PVInstanceExt, Rig, Workspace,
     glam::{Mat4, Quat, Vec3},
 };
 

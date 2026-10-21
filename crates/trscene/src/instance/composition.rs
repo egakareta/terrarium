@@ -1,91 +1,8 @@
-//! Compose scene instances with generated methods and receiver-preserving views.
-//!
-//! ```
-//! use trscene::{Part, BasePart, Workspace, prelude::*};
-//!
-//! trscene::instance! {
-//!     #[derive(Clone, Debug)]
-//!     pub struct SpringPart {
-//!         #[extends]
-//!         part: Part,
-//!         #[property(default = 20.0)]
-//!         stiffness: f32,
-//!     }
-//! }
-//!
-//! let mut workspace = Workspace::new();
-//! let id = workspace.add_child(SpringPart::default().with_stiffness(35.0));
-//! workspace.view_mut::<BasePart>(id).unwrap().set_transparency(0.5);
-//! assert_eq!(workspace.view::<SpringPart>(id).unwrap().stiffness(), 35.0);
-//! assert!(workspace.get::<Part>(id).is_none());
-//! ```
-//!
-//! `#[extends]` chooses the identity provider. Additional `#[compose]` fields
-//! contribute capability APIs. Composition is by value and requires concrete
-//! types. A component without an identity field can be composed into an instance.
-//! Nested public types declare their exported location with
-//! `#[instance(path = crate::module)]`; import the parent type and its same-named
-//! schema macro together. No central type registry is required.
-//!
-//! Public receiver methods in the macro's impl become generated API methods.
-//! Use `#[r#override(Base::method)]` for inherited behavior. Property builders,
-//! other default methods, views, and inspector edits dispatch through these
-//! overrides on the complete receiver. `Project` access deliberately exposes
-//! embedded storage directly. Owned downcasts continue to require an exact type.
-//!
-//! An instance cannot contain two identity providers:
-//!
-//! ```compile_fail
-//! use trscene::{Part, Rig};
-//! trscene::instance! {
-//!     #[derive(Clone, Debug)]
-//!     pub struct Ambiguous {
-//!         #[extends]
-//!         part: Part,
-//!         #[compose]
-//!         rig: Rig,
-//!     }
-//! }
-//! ```
-//!
-//! Repeated providers of the same capability are ambiguous:
-//!
-//! ```compile_fail
-//! use trscene::{Part, PVInstance};
-//! trscene::instance! {
-//!     #[derive(Clone, Debug)]
-//!     pub struct Ambiguous {
-//!         #[extends]
-//!         part: Part,
-//!         #[compose]
-//!         pivot: PVInstance,
-//!     }
-//! }
-//! ```
-//!
-//! Overrides must name an existing composed method:
-//!
-//! ```compile_fail
-//! use trscene::Part;
-//! trscene::instance! {
-//!     #[derive(Clone, Debug)]
-//!     pub struct Invalid {
-//!         #[extends]
-//!         part: Part,
-//!     }
-//!     impl Invalid {
-//!         #[r#override(Part::missing)]
-//!         fn missing(&mut self) {}
-//!     }
-//! }
-//! ```
+//! Receiver-preserving instance views and generated composition metadata.
 
-use std::{
-    any::{Any, TypeId},
-    ops::{Deref, DerefMut},
-};
+use std::any::{Any, TypeId};
 
-use super::{Instance, InstanceId};
+use super::Instance;
 
 /// Shared and mutable access to a composed storage type.
 ///
@@ -134,7 +51,7 @@ impl<T: InstanceReceiver + ?Sized> InstanceReceiver for &mut T {
 /// A generated class or capability and its receiver-preserving API.
 pub trait InstanceType: 'static {
     /// The trait object exposed by a runtime view.
-    type Api: InstanceReceiver + ?Sized + 'static;
+    type Api: Instance + ?Sized + 'static;
     /// Returns this type's composition graph node.
     fn descriptor() -> &'static InstanceClass;
 }
@@ -218,105 +135,21 @@ impl<T: crate::devtools::Inspect> __InspectInstanceProperty<T> for &&__InstanceP
     }
 }
 
-/// A borrowed class API that retains the complete instance's identity.
-pub struct InstanceRef<'a, T: InstanceType> {
-    api: &'a T::Api,
-}
-
-impl<'a, T: InstanceType> InstanceRef<'a, T> {
-    /// Returns the API with the original instance borrow's lifetime.
-    pub fn into_api(self) -> &'a T::Api {
-        self.api
-    }
-    /// Returns the owning instance's stable identifier.
-    pub fn id(&self) -> InstanceId {
-        self.api.as_instance().id()
-    }
-    /// Returns the owning instance's name.
-    pub fn name(&self) -> &str {
-        self.api.as_instance().name()
-    }
-    /// Returns the owning instance's concrete class name.
-    pub fn class_name(&self) -> &'static str {
-        self.api.as_instance().class_name()
-    }
-    /// Returns the complete instance.
-    pub fn instance(&self) -> &dyn Instance {
-        self.api.as_instance()
-    }
-}
-
-impl<T: InstanceType> Deref for InstanceRef<'_, T> {
-    type Target = T::Api;
-    fn deref(&self) -> &Self::Target {
-        self.api
-    }
-}
-
-/// A mutable class API whose methods dispatch on the complete instance.
-pub struct InstanceMut<'a, T: InstanceType> {
-    api: &'a mut T::Api,
-}
-
-impl<'a, T: InstanceType> InstanceMut<'a, T> {
-    /// Returns the mutable API with the original instance borrow's lifetime.
-    pub fn into_api(self) -> &'a mut T::Api {
-        self.api
-    }
-    /// Returns the owning instance's stable identifier.
-    pub fn id(&self) -> InstanceId {
-        self.api.as_instance().id()
-    }
-    /// Returns the owning instance's name.
-    pub fn name(&self) -> &str {
-        self.api.as_instance().name()
-    }
-    /// Returns the owning instance's concrete class name.
-    pub fn class_name(&self) -> &'static str {
-        self.api.as_instance().class_name()
-    }
-    /// Returns the complete instance.
-    pub fn instance(&self) -> &dyn Instance {
-        self.api.as_instance()
-    }
-    /// Returns the complete mutable instance.
-    pub fn instance_mut(&mut self) -> &mut dyn Instance {
-        self.api.as_instance_mut()
-    }
-}
-
-impl<T: InstanceType> Deref for InstanceMut<'_, T> {
-    type Target = T::Api;
-    fn deref(&self) -> &Self::Target {
-        self.api
-    }
-}
-
-impl<T: InstanceType> DerefMut for InstanceMut<'_, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.api
-    }
-}
-
 impl dyn Instance {
     /// Borrows an inherited API while preserving this instance's identity.
-    pub fn view<T: InstanceType>(&self) -> Option<InstanceRef<'_, T>> {
+    pub fn view<T: InstanceType>(&self) -> Option<&T::Api> {
         let query = self
             .query(TypeId::of::<T>())?
             .downcast_ref::<InstanceQuery<T::Api>>()?;
-        Some(InstanceRef {
-            api: (query.shared)(self.as_any()),
-        })
+        Some((query.shared)(self.as_any()))
     }
 
     /// Mutably borrows an inherited API with the owning receiver's overrides.
-    pub fn view_mut<T: InstanceType>(&mut self) -> Option<InstanceMut<'_, T>> {
+    pub fn view_mut<T: InstanceType>(&mut self) -> Option<&mut T::Api> {
         let query = self
             .query(TypeId::of::<T>())?
             .downcast_ref::<InstanceQuery<T::Api>>()?;
-        Some(InstanceMut {
-            api: (query.mutable)(self.as_any_mut()),
-        })
+        Some((query.mutable)(self.as_any_mut()))
     }
 
     /// Tests generated class ancestry without changing exact downcast semantics.

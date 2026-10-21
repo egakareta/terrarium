@@ -1,8 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, HasPVInstance,
-    InstanceData, InstanceId, PVInstance, Workspace, glam,
+    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, InstanceData,
+    InstanceId, PVInstance, PVInstanceExt, Workspace, glam,
     glam::{Mat4, Quat, Vec2, Vec3},
 };
 
@@ -21,94 +21,19 @@ crate::instance! {
         #[cfg_attr(feature = "devtools", inspect(readonly))]
         subject: Option<InstanceId>,
         #[cfg_attr(feature = "devtools", inspect(readonly))]
-        aspect: f32,
-        fovy: f32,
-        znear: f32,
-        zfar: f32,
-    }
-    impl Camera {
-        /// Returns shared access to the underlying [`Camera`].
-        pub fn camera(&self) -> &Camera {
-            crate::Project::<Camera>::project(self)
-        }
-
-        /// Returns mutable access to the underlying [`Camera`].
-        pub fn camera_mut(&mut self) -> &mut Camera {
-            crate::Project::<Camera>::project_mut(self)
-        }
-
         /// Viewport width divided by viewport height. Values set through this
         /// API are clamped to at least `0.001`.
-        #[property]
-        pub fn aspect(&self) -> f32 {
-            self.camera().aspect
-        }
-        /// Sets `aspect`.
-        pub fn set_aspect(&mut self, aspect: f32) {
-            self.camera_mut().aspect = aspect.max(0.001);
-        }
-        /// Returns this value with `aspect` set.
-        pub fn with_aspect(mut self, aspect: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_aspect(aspect);
-            self
-        }
-
+        #[property(sanitize = |value: f32| value.max(0.001))]
+        aspect: f32,
         /// Vertical field of view in radians.
         #[property]
-        pub fn fovy(&self) -> f32 {
-            self.camera().fovy
-        }
-        /// Sets `fovy`.
-        pub fn set_fovy(&mut self, fovy: f32) {
-            self.camera_mut().fovy = fovy;
-        }
-        /// Returns this value with `fovy` set.
-        pub fn with_fovy(mut self, fovy: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_fovy(fovy);
-            self
-        }
-
+        fovy: f32,
         /// Near clipping plane distance.
         #[property]
-        pub fn znear(&self) -> f32 {
-            self.camera().znear
-        }
-        /// Sets `znear`.
-        pub fn set_znear(&mut self, znear: f32) {
-            self.camera_mut().znear = znear;
-        }
-        /// Returns this value with `znear` set.
-        pub fn with_znear(mut self, znear: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_znear(znear);
-            self
-        }
-
+        znear: f32,
         /// Far clipping plane distance.
         #[property]
-        pub fn zfar(&self) -> f32 {
-            self.camera().zfar
-        }
-        /// Sets `zfar`.
-        pub fn set_zfar(&mut self, zfar: f32) {
-            self.camera_mut().zfar = zfar;
-        }
-        /// Returns this value with `zfar` set.
-        pub fn with_zfar(mut self, zfar: f32) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_zfar(zfar);
-            self
-        }
+        zfar: f32,
     }
 }
 
@@ -479,9 +404,6 @@ impl Controller for CameraController {
         self.update_camera(&mut workspace.current_camera, subject, delta_seconds);
     }
 }
-
-/// Compatibility name for the generated Camera API.
-pub use CameraExt as HasCamera;
 
 #[cfg(test)]
 mod tests {

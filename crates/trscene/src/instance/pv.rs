@@ -4,43 +4,26 @@ use crate::{
 };
 
 crate::instance! {
-    #[instance(default = false, inspect = false)]
+    #[instance(inspect = false)]
     /// An object that has a physical location in the world.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
     pub struct PVInstance {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[default(Mat4::IDENTITY)]
         pivot: Mat4,
     }
     impl PVInstance {
-        /// Returns shared access to the underlying [`PVInstance`].
-        pub fn pv(&self) -> &PVInstance {
-            crate::Project::<PVInstance>::project(self)
-        }
-
-        /// Returns mutable access to the underlying [`PVInstance`].
-        pub fn pv_mut(&mut self) -> &mut PVInstance {
-            crate::Project::<PVInstance>::project_mut(self)
-        }
-
         /// World-space transform of the pivot. Changing it updates only this
         /// instance by default; a [`Rig`] also moves its spatial descendants,
         /// preserving their relative transforms.
         #[property(flatten, validate = accepts_pivot)]
         pub fn pivot(&self) -> Mat4 {
-            self.pv().pivot
+            self.pv_instance().pivot
         }
         /// Sets `pivot`.
         pub fn set_pivot(&mut self, pivot: Mat4) {
-            self.pv_mut().pivot = pivot;
-        }
-        /// Returns this value with `pivot` set.
-        pub fn with_pivot(mut self, pivot: Mat4) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_pivot(pivot);
-            self
+            self.pv_instance_mut().pivot = pivot;
         }
 
         /// Reports whether this instance accepts the supplied pivot.
@@ -57,14 +40,6 @@ crate::instance! {
         pub fn set_pose(&mut self, pose: Mat4) {
             self.set_pivot(pivot_with_pose(self.pivot(), pose));
         }
-        /// Returns this value with `pose` set.
-        pub fn with_pose(mut self, pose: Mat4) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_pose(pose);
-            self
-        }
 
         /// Translation component of the pivot. Setting position preserves
         /// orientation and scale.
@@ -74,14 +49,6 @@ crate::instance! {
         /// Sets `position`.
         pub fn set_position(&mut self, position: Vec3) {
             self.set_pivot(pivot_with_position(self.pivot(), position));
-        }
-        /// Returns this value with `position` set.
-        pub fn with_position(mut self, position: Vec3) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_position(position);
-            self
         }
 
         /// XYZ Euler orientation in degrees. Setting orientation preserves
@@ -95,14 +62,6 @@ crate::instance! {
         pub fn set_orientation(&mut self, orientation: Vec3) {
             self.set_pivot(pivot_with_orientation(self.pivot(), orientation));
         }
-        /// Returns this value with `orientation` set.
-        pub fn with_orientation(mut self, orientation: Vec3) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_orientation(orientation);
-            self
-        }
 
         /// Per-axis scale of the pivot. Setting size preserves position and
         /// orientation.
@@ -112,14 +71,6 @@ crate::instance! {
         /// Sets `size`.
         pub fn set_size(&mut self, size: Vec3) {
             self.set_pivot(pivot_with_size(self.pivot(), size));
-        }
-        /// Returns this value with `size` set.
-        pub fn with_size(mut self, size: Vec3) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_size(size);
-            self
         }
 
         /// Returns the normalized world-space direction of local `-Z`.
@@ -138,7 +89,7 @@ crate::instance! {
         /// instance's own transform.
         ///
         /// ```
-        /// use trscene::{HasPVInstance, Instance, Part, glam::{Mat4, Vec3}};
+        /// use trscene::{PVInstanceExt, Instance, Part, glam::{Mat4, Vec3}};
         ///
         /// let mut parent = Part::new();
         /// let child = parent.add_child(Part::new().with_position(Vec3::X));
@@ -160,18 +111,10 @@ crate::instance! {
     }
 }
 
-impl Default for PVInstance {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl PVInstance {
     /// Creates an instance at the identity transform.
     pub fn new() -> Self {
-        Self {
-            pivot: Mat4::IDENTITY,
-        }
+        Self::default()
     }
 
     /// Creates a new instance from a world-space transform.
@@ -284,41 +227,41 @@ pub trait Spatial: Instance {
     fn set_pivot_direct(&mut self, pivot: Mat4);
 }
 
-impl<T: HasPVInstance + Instance> Spatial for T {
+impl<T: PVInstanceExt + Instance> Spatial for T {
     fn world_pivot(&self) -> Mat4 {
-        HasPVInstance::pivot(self)
+        PVInstanceExt::pivot(self)
     }
 
     fn set_world_pivot(&mut self, pivot: Mat4) {
-        HasPVInstance::set_pivot(self, pivot);
+        PVInstanceExt::set_pivot(self, pivot);
     }
 
     fn move_to_world_pivot(&mut self, pivot: Mat4) {
-        HasPVInstance::pivot_to(self, pivot);
+        PVInstanceExt::pivot_to(self, pivot);
     }
 
     fn rigid_pose(&self) -> Mat4 {
-        HasPVInstance::pose(self)
+        PVInstanceExt::pose(self)
     }
 
     fn world_position(&self) -> Vec3 {
-        HasPVInstance::position(self)
+        PVInstanceExt::position(self)
     }
 
     fn world_orientation(&self) -> Vec3 {
-        HasPVInstance::orientation(self)
+        PVInstanceExt::orientation(self)
     }
 
     fn world_forward(&self) -> Vec3 {
-        HasPVInstance::forward(self)
+        PVInstanceExt::forward(self)
     }
 
     fn accepts_world_pivot(&self, pivot: Mat4) -> bool {
-        HasPVInstance::accepts_pivot(self, pivot)
+        PVInstanceExt::accepts_pivot(self, pivot)
     }
 
     fn set_pivot_direct(&mut self, pivot: Mat4) {
-        self.pv_mut().pivot = pivot;
+        self.pv_instance_mut().pivot = pivot;
     }
 }
 
@@ -345,7 +288,7 @@ pub(crate) enum InstanceTransformUpdate {
     Size(Vec3),
 }
 
-pub(crate) fn pivot_hierarchy_to<T: HasPVInstance + ?Sized>(instance: &mut T, pivot: Mat4) {
+pub(crate) fn pivot_hierarchy_to<T: PVInstanceExt + ?Sized>(instance: &mut T, pivot: Mat4) {
     let current = instance.pivot();
     if current == pivot {
         return;
@@ -355,7 +298,7 @@ pub(crate) fn pivot_hierarchy_to<T: HasPVInstance + ?Sized>(instance: &mut T, pi
         transform.is_finite(),
         "pivot_to requires an invertible current pivot and a finite transform delta"
     );
-    instance.pv_mut().pivot = pivot;
+    instance.pv_instance_mut().pivot = pivot;
     if let Some(owner) = crate::Project::<PVInstance>::owner_mut(instance) {
         for child in owner.children_mut() {
             transform_subtree(child, transform);
@@ -371,9 +314,6 @@ fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
         transform_subtree(child, transform);
     }
 }
-
-/// Compatibility name for the generated spatial API.
-pub use PVInstanceExt as HasPVInstance;
 
 #[cfg(test)]
 mod tests {

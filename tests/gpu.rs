@@ -19,7 +19,7 @@ macro_rules! hide_devtools {
 #[test]
 fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
-    use terrarium::HasMaterials as _;
+    use terrarium::MaterialsExt as _;
     let engine = Terrarium::new()
         .with_size([128, 128])
         .with_headless(Some(1))

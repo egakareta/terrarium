@@ -1,4 +1,4 @@
-use terrarium::{AppCreationError, HasPVInstance as _, Instance, MeshPart, Terrarium, glam::Vec3};
+use terrarium::{AppCreationError, Instance, MeshPart, PVInstanceExt as _, Terrarium, glam::Vec3};
 
 fn main() {
     Terrarium::new()

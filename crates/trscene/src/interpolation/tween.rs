@@ -1,5 +1,5 @@
 use crate::{
-    BasePart, Color3, HasBasePart, InstanceId, Workspace,
+    BasePart, BasePartExt, Color3, InstanceId, Workspace,
     glam::{Vec2, Vec3, Vec4},
     instance::{InstanceTransformUpdate, update_instance_transform},
 };
@@ -429,9 +429,9 @@ impl TweenTrack {
 fn with_base_part(
     workspace: &mut Workspace,
     target: InstanceId,
-    apply: impl FnOnce(&mut dyn HasBasePart),
+    apply: impl FnOnce(&mut dyn BasePartExt),
 ) {
-    if let Some(mut part) = workspace.view_mut::<BasePart>(target) {
+    if let Some(part) = workspace.view_mut::<BasePart>(target) {
         apply(&mut *part);
     }
 }
@@ -520,7 +520,7 @@ impl TweenManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HasPVInstance, Instance, Part};
+    use crate::{Instance, PVInstanceExt, Part};
 
     #[test]
     fn tween_interpolates_and_finishes() {

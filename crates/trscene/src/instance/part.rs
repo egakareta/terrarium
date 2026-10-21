@@ -45,14 +45,6 @@ crate::instance! {
         pub fn new() -> Self {
             Self::default()
         }
-        /// Returns shared access to the underlying [`BasePart`].
-        pub fn base_part(&self) -> &BasePart {
-            crate::Project::<BasePart>::project(self)
-        }
-        /// Returns mutable access to the underlying [`BasePart`].
-        pub fn base_part_mut(&mut self) -> &mut BasePart {
-            crate::Project::<BasePart>::project_mut(self)
-        }
     }
 }
 
@@ -162,23 +154,8 @@ crate::instance! {
         pub fn new() -> Self {
             Self::default()
         }
-        /// Returns shared access to the underlying [`Part`].
-        pub fn part(&self) -> &Part {
-            crate::Project::<Part>::project(self)
-        }
-        /// Returns mutable access to the underlying [`Part`].
-        pub fn part_mut(&mut self) -> &mut Part {
-            crate::Project::<Part>::project_mut(self)
-        }
     }
 }
-
-/// Compatibility name for the generated base-part API.
-pub use BasePartExt as HasBasePart;
-/// Compatibility name for the material API.
-pub use MaterialsExt as HasMaterials;
-/// Compatibility name for the generated primitive-part API.
-pub use PartExt as HasPart;
 
 impl crate::Project<MeshMaterialSlots> for MeshMaterialSlots {
     fn project(&self) -> &MeshMaterialSlots {
@@ -190,8 +167,8 @@ impl crate::Project<MeshMaterialSlots> for MeshMaterialSlots {
 }
 impl MaterialsExt for MeshMaterialSlots {}
 /// A scene instance exposing directional material slots.
-pub trait MaterialsView: MaterialsExt + crate::InstanceReceiver {}
-impl<T: MaterialsExt + crate::InstanceReceiver + ?Sized> MaterialsView for T {}
+pub trait MaterialsView: MaterialsExt + crate::Instance {}
+impl<T: MaterialsExt + crate::Instance + ?Sized> MaterialsView for T {}
 impl crate::InstanceType for MeshMaterialSlots {
     type Api = dyn MaterialsView;
     fn descriptor() -> &'static crate::InstanceClass {
@@ -242,7 +219,7 @@ impl __MaterialInspection {
 mod tests {
     use super::*;
     use crate::{
-        HasPVInstance, Instance,
+        Instance, PVInstanceExt,
         glam::{EulerRot, Mat4, Quat, Vec3},
     };
 

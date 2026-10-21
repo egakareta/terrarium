@@ -1,14 +1,14 @@
 use crate::{
-    AnimationError, AnimationPlayer, HasPVInstance, Instance, InstanceData, PVInstance, glam::Mat4,
+    AnimationError, AnimationPlayer, Instance, InstanceData, PVInstance, PVInstanceExt, glam::Mat4,
     pivot_hierarchy_to,
 };
 
 crate::instance! {
-    #[instance(default = false, inspect = false, inherent = true)]
+    #[instance(inspect = false)]
     /// A spatial assembly whose descendants move together when its pivot changes.
     ///
     /// Children retain world-space pivots, as elsewhere in the scene tree. All
-    /// [`HasPVInstance`] setters on a rig carry its spatial descendants with it.
+    /// [`PVInstanceExt`] setters on a rig carry its spatial descendants with it.
     /// With physics enabled, the outermost rig owns a single body with colliders
     /// from its descendant parts. The rig's anchored state controls that body;
     /// descendant parts retain their individual collision flags and shapes.
@@ -18,6 +18,8 @@ crate::instance! {
         instance: InstanceData,
         #[compose]
         pv_instance: PVInstance,
+        /// Whether the rig's physics body is immovable.
+        #[property(default = true)]
         anchored: bool,
         animation: Option<AnimationPlayer>,
     }
@@ -43,36 +45,13 @@ crate::instance! {
 
         /// Creates an anchored rig at the identity transform.
         pub fn new() -> Self {
-            Self {
-                instance: InstanceData::new("Rig"),
-                pv_instance: PVInstance::new(),
-                anchored: true,
-                animation: None,
-            }
-        }
-
-        /// Whether the rig's physics body is immovable.
-        #[property]
-        pub fn anchored(&self) -> bool {
-            self.anchored
-        }
-        /// Sets `anchored`.
-        pub fn set_anchored(&mut self, anchored: bool) {
-            self.anchored = anchored;
-        }
-        /// Returns this value with `anchored` set.
-        pub fn with_anchored(mut self, anchored: bool) -> Self
-        where
-            Self: Sized,
-        {
-            self.set_anchored(anchored);
-            self
+            Self::default()
         }
 
         /// Adds a spatial child, interpreting its pivot relative to this rig.
         ///
         /// [`Instance::add_child`] instead retains the child's existing world pivot.
-        pub fn add_child_local<T: Instance + HasPVInstance>(
+        pub fn add_child_local<T: Instance + PVInstanceExt>(
             &mut self,
             mut child: T,
         ) -> crate::InstanceId {
@@ -190,12 +169,6 @@ fn apply_tracks(
         apply_tracks(child, pivot, path, player);
     }
     path.pop();
-}
-
-impl Default for Rig {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 #[cfg(feature = "devtools")]
