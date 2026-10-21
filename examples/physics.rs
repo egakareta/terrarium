@@ -1,7 +1,7 @@
 use terrarium::{
     App, BasePartExt, CameraExt, Color3, Engine, Instance, InstanceId, LightPropertiesExt,
-    Material, MaterialsExt, PVInstanceExt, Part, PartExt, PartShape, PointLight, PointLightExt,
-    RendererError, Terrarium, eframe, egui,
+    Material, PVInstanceExt, Part, PartExt, PartShape, PointLight, PointLightExt, RendererError,
+    Terrarium, eframe, egui,
     glam::{Mat4, Vec3},
 };
 

@@ -7,8 +7,8 @@ use std::{
 
 use terrarium::{
     App, BasePartExt, Camera, CameraExt, Color3, Engine, Face, Instance, InstanceId, Material,
-    MaterialsExt, PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium, Texture,
-    TextureColorSpace, TextureFilter, Workspace, eframe, egui,
+    PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium, Texture, TextureColorSpace,
+    TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
 };

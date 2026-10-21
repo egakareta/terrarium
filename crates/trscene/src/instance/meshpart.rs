@@ -3,8 +3,8 @@ use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    BasePart, Face, Instance, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots, Texture,
-    TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
+    BasePart, BasePartExt, Face, Instance, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
+    Texture, TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
     glam::{Mat4, Vec2, Vec3},
 };
 
@@ -91,8 +91,6 @@ crate::instance! {
         mesh_revision: u64,
         #[cfg_attr(feature = "devtools", inspect(readonly))]
         bounding_radius: f32,
-        #[compose]
-        pub(crate) material_slots: MeshMaterialSlots,
     }
     impl MeshPart {
         /// CPU-side geometry rendered by this mesh part. Replacing it updates
@@ -104,7 +102,7 @@ crate::instance! {
         pub fn set_mesh(&mut self, mesh: Mesh) {
             let mesh_part = self.mesh_part_mut();
             mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
-            mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots.clone());
+            mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots().clone());
             mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
         }
 
@@ -278,11 +276,12 @@ impl MeshPart {
         let bounding_radius = mesh_bounding_radius(mesh.mesh());
         let material_slots = mesh.0.material_slots.clone();
         Self {
-            basepart: BasePart::new().with_name("MeshPart"),
+            basepart: BasePart::new()
+                .with_name("MeshPart")
+                .with_material_slots(material_slots),
             mesh,
             mesh_revision: 0,
             bounding_radius,
-            material_slots,
         }
     }
 

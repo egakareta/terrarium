@@ -64,9 +64,9 @@ trscene::instance! {
             self.base_part_mut().set_color(Color3::BLACK);
         }
 
-        #[r#override(MeshMaterialSlots::set_material)]
+        #[r#override(BasePart::set_material)]
         fn set_material(&mut self, _material: trscene::Material) {
-            self.material_slots_mut()
+            self.base_part_mut()
                 .set_material(trscene::Material::from_color(Color3::BLACK));
         }
     }
@@ -134,6 +134,96 @@ fn custom_instances_keep_builders_generic_methods_identity_and_exact_downcasts()
     let cloned = workspace.get::<WeightedSpring>(id).unwrap().clone();
     assert_ne!(cloned.id(), id);
     assert_eq!(cloned.mass(), 4.0);
+}
+
+#[test]
+fn spatial_instances_parent_children_in_local_coordinates() {
+    fn check<T: Instance + PVInstanceExt>(mut parent: T) {
+        let pivot = Mat4::from_scale_rotation_translation(
+            Vec3::new(2.0, 3.0, 4.0),
+            trscene::glam::Quat::from_rotation_y(0.6),
+            Vec3::new(10.0, 5.0, -3.0),
+        );
+        let local = Mat4::from_scale_rotation_translation(
+            Vec3::new(1.0, 2.0, 1.0),
+            trscene::glam::Quat::from_rotation_x(0.4),
+            Vec3::new(1.0, 2.0, 3.0),
+        );
+        parent.set_pivot(pivot);
+        let child = parent.add_child_local(Part::new().with_pivot(local));
+        let world_child = parent.add_child(Part::new().with_pivot(local));
+        let parent_id = parent.id();
+        let mut workspace = Workspace::new();
+        workspace.add_child(parent);
+        assert!(
+            workspace
+                .get::<Part>(child)
+                .unwrap()
+                .pivot()
+                .abs_diff_eq(pivot * local, 0.0001)
+        );
+        assert_eq!(
+            workspace.get::<Part>(child).unwrap().parent(),
+            Some(parent_id)
+        );
+        assert_eq!(workspace.get::<Part>(world_child).unwrap().pivot(), local);
+        let mut view = workspace.view_mut::<PVInstance>(parent_id).unwrap();
+        let child_from_view = (&mut view).add_child_local(Part::new().with_pivot(local));
+        assert!(
+            workspace
+                .get::<Part>(child_from_view)
+                .unwrap()
+                .pivot()
+                .abs_diff_eq(pivot * local, 0.0001)
+        );
+        assert_eq!(
+            workspace.get::<Part>(child_from_view).unwrap().parent(),
+            Some(parent_id)
+        );
+    }
+    check(BasePart::new());
+    check(Part::new());
+    check(trscene::Camera::default());
+    check(Rig::new());
+    check(CustomRig::default());
+    check(SpringPart::default());
+    #[cfg(feature = "meshpart")]
+    check(trscene::MeshPart::new(trscene::Mesh::cube(1.0, [1.0; 4])));
+}
+
+#[test]
+fn base_part_materials_are_available_on_every_subtype() {
+    fn check<T: Instance + BasePartExt>(part: T) {
+        let uniform = trscene::Material::from_color(Color3::BLACK);
+        let top = trscene::Material::from_color(Color3::WHITE);
+        assert_eq!(part.material(), Some(&trscene::Material::default()));
+        let mut part = part
+            .with_material(uniform)
+            .with_material_slot(trscene::Face::Top, top);
+        assert_eq!(part.material(), None);
+        assert_eq!(part.material_slot(trscene::Face::Bottom), &uniform);
+        assert_eq!(part.material_slot(trscene::Face::Top), &top);
+        (&mut part).with_material(uniform);
+        assert_eq!(part.material(), Some(&uniform));
+        let mut workspace = Workspace::new();
+        let id = workspace.add_child(part);
+        workspace
+            .view_mut::<BasePart>(id)
+            .unwrap()
+            .set_material_slot(trscene::Face::Top, top);
+        assert_eq!(
+            workspace
+                .view::<BasePart>(id)
+                .unwrap()
+                .material_slot(trscene::Face::Top),
+            &top
+        );
+    }
+    check(BasePart::new());
+    check(Part::new());
+    check(SpringPart::default());
+    #[cfg(feature = "meshpart")]
+    check(trscene::MeshPart::new(trscene::Mesh::cube(1.0, [1.0; 4])));
 }
 
 #[test]

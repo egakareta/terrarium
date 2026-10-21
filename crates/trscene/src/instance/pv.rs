@@ -14,6 +14,21 @@ crate::instance! {
         pivot: Mat4,
     }
     impl PVInstance {
+        /// Adds a spatial child, interpreting its pivot relative to this instance.
+        ///
+        /// [`Instance::add_child`] instead retains the child's existing world pivot.
+        pub fn add_child_local<T: Instance + PVInstanceExt>(
+            &mut self,
+            mut child: T,
+        ) -> crate::InstanceId
+        where
+            Self: crate::InstanceReceiver,
+        {
+            let pivot = self.pivot() * child.pivot();
+            child.set_pivot(pivot);
+            self.as_instance_mut().add_child_box(Box::new(child))
+        }
+
         /// World-space transform of the pivot. Changing it updates only this
         /// instance by default; a [`Rig`] also moves its spatial descendants,
         /// preserving their relative transforms.

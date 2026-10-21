@@ -8,7 +8,7 @@ crate::instance! {
     /// A named, transformable scene node with optional collision metadata.
     ///
     /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
-    /// [`Part`] builds on it with a primitive shape and material.
+    /// [`Part`] builds on it with primitive geometry.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
     pub struct BasePart {
@@ -18,6 +18,9 @@ crate::instance! {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[compose]
         pub(crate) pv_instance: PVInstance,
+        /// Directional materials used when rendering this part.
+        #[property(borrow)]
+        pub(crate) material_slots: MeshMaterialSlots,
         /// Tint applied when rendering this part.
         #[property(default = Color3::WHITE)]
         color: Color3,
@@ -40,6 +43,38 @@ crate::instance! {
     }
 
     impl BasePart {
+        /// Returns mutable directional material storage.
+        pub fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
+            &mut self.material_slots
+        }
+
+        /// Returns a material when all directional slots have the same effective value.
+        /// Unassigned slots use [`Material::default()`].
+        pub fn material(&self) -> Option<&Material> {
+            let material = self.material_slot(Face::ALL[0]);
+            Face::ALL
+                .into_iter()
+                .all(|slot| self.material_slot(slot) == material)
+                .then_some(material)
+        }
+
+        /// Sets every directional material slot.
+        pub fn set_material(&mut self, material: Material) {
+            for slot in Face::ALL {
+                self.material_slots.set(slot, material);
+            }
+        }
+
+        /// Returns the effective material for a directional slot, falling back to the default.
+        pub fn material_slot(&self, slot: Face) -> &Material {
+            self.material_slots().get(slot).unwrap_or(&DEFAULT_MATERIAL)
+        }
+
+        /// Sets the material for a directional slot selected by the mesh.
+        pub fn set_material_slot(&mut self, slot: Face, material: Material) {
+            self.material_slots.set(slot, material);
+        }
+
         /// Creates a base part with identity pose, unit scale, white tint,
         /// opaque rendering, and collision metadata enabled.
         pub fn new() -> Self {
@@ -56,83 +91,6 @@ fn sanitize_transparency(value: f32) -> f32 {
     }
 }
 
-/// Access to directional material slots.
-pub trait MaterialsExt: crate::Project<MeshMaterialSlots> {
-    /// Returns shared access to the directional material slots.
-    fn material_slots(&self) -> &MeshMaterialSlots {
-        self.project()
-    }
-
-    /// Returns mutable access to the directional material slots.
-    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
-        self.project_mut()
-    }
-
-    crate::__instance_property! {
-        self;
-        /// A material is available only when all six directional slots have
-        /// the same effective value. Unassigned slots use [`Material::default()`].
-        getter material() -> Option<&Material> {
-            let material = self.material_slot(Face::ALL[0]);
-            if Face::ALL
-                .into_iter()
-                .skip(1)
-                .all(|slot| self.material_slot(slot) == material)
-            {
-                Some(material)
-            } else {
-                None
-            }
-        }
-        setter set_material(material: Material) {
-            for slot in Face::ALL {
-                self.material_slots_mut().set(slot, material);
-            }
-        }
-        builder with_material;
-    }
-
-    crate::__instance_property! {
-        self;
-        /// Effective material for a directional slot. An unassigned slot uses
-        /// [`Material::default()`]. Slots are mesh-selected, so they work for
-        /// any [`PartShape`].
-        getter material_slot(slot: Face) -> &Material {
-            self.material_slots().get(slot).unwrap_or(&DEFAULT_MATERIAL)
-        }
-        setter set_material_slot(slot: Face, material: Material) {
-            self.material_slots_mut().set(slot, material);
-        }
-        builder with_material_slot;
-    }
-}
-
-impl<T: MaterialsExt + ?Sized> MaterialsExt for &mut T {
-    fn material_slots(&self) -> &MeshMaterialSlots {
-        (**self).material_slots()
-    }
-
-    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
-        (**self).material_slots_mut()
-    }
-
-    fn material(&self) -> Option<&Material> {
-        (**self).material()
-    }
-
-    fn set_material(&mut self, material: Material) {
-        (**self).set_material(material);
-    }
-
-    fn material_slot(&self, slot: Face) -> &Material {
-        (**self).material_slot(slot)
-    }
-
-    fn set_material_slot(&mut self, slot: Face, material: Material) {
-        (**self).set_material_slot(slot, material);
-    }
-}
-
 crate::instance! {
     #[instance(inspect = false)]
     /// A visible scene object rendered with one of the built-in primitive shapes.
@@ -145,8 +103,6 @@ crate::instance! {
         /// Primitive geometry used when the part is rendered.
         #[property(default = PartShape::Block)]
         shape: PartShape,
-        #[compose]
-        pub(crate) material_slots: MeshMaterialSlots,
     }
 
     impl Part {
@@ -154,64 +110,6 @@ crate::instance! {
         pub fn new() -> Self {
             Self::default()
         }
-    }
-}
-
-impl crate::Project<MeshMaterialSlots> for MeshMaterialSlots {
-    fn project(&self) -> &MeshMaterialSlots {
-        self
-    }
-    fn project_mut(&mut self) -> &mut MeshMaterialSlots {
-        self
-    }
-}
-impl MaterialsExt for MeshMaterialSlots {}
-/// A scene instance exposing directional material slots.
-pub trait MaterialsView: MaterialsExt + crate::Instance {}
-impl<T: MaterialsExt + crate::Instance + ?Sized> MaterialsView for T {}
-impl crate::InstanceType for MeshMaterialSlots {
-    type Api = dyn MaterialsView;
-    fn descriptor() -> &'static crate::InstanceClass {
-        &crate::InstanceClass {
-            name: "MeshMaterialSlots",
-            type_id: std::any::TypeId::of::<Self>,
-            bases: &[],
-        }
-    }
-}
-/// Supplies the material capability's schema to composed instances.
-#[doc(hidden)]
-#[macro_export]
-macro_rules! __terrarium_material_slots {
-    ($callback:path, [$($state:tt)*]) => {
-        $callback! { $($state)* [{ MeshMaterialSlots [$crate::MeshMaterialSlots] [$crate::MaterialsExt] [$crate::MaterialsView] [$crate::__MaterialInspection] [material_slots material_slots_mut material set_material with_material material_slot set_material_slot with_material_slot] false [] }] }
-    };
-}
-
-/// Inspector adapter for directional material storage.
-#[doc(hidden)]
-#[cfg(feature = "devtools")]
-pub struct __MaterialInspection;
-#[cfg(feature = "devtools")]
-impl __MaterialInspection {
-    /// Returns fields supplied by directional material storage.
-    pub fn __instance_properties<R: MaterialsExt + ?Sized>(
-        receiver: &R,
-    ) -> Vec<crate::devtools::Property> {
-        crate::devtools::Inspect::properties(receiver.material_slots())
-            .into_iter()
-            .map(|property| property.prefixed("material_slots"))
-            .collect()
-    }
-    /// Applies an edit to directional material storage.
-    pub fn __instance_set_property<R: MaterialsExt + ?Sized>(
-        receiver: &mut R,
-        path: &str,
-        value: &crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
-        let tail = crate::devtools::property_tail(path, "material_slots")
-            .ok_or(crate::devtools::PropertyError::NotFound)?;
-        crate::devtools::Inspect::set_property(receiver.material_slots_mut(), tail, value.clone())
     }
 }
 

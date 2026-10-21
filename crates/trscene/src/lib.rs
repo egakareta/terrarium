@@ -80,8 +80,6 @@ macro_rules! __instance_property {
 
 }
 
-#[doc(hidden)]
-pub use __terrarium_material_slots as MeshMaterialSlots;
 pub use egui;
 #[cfg(feature = "sound")]
 pub use euphorium;
@@ -114,8 +112,8 @@ pub mod prelude {
     pub use crate::MeshPartExt;
     pub use crate::{
         BasePartExt, CameraExt, Instance, InstanceAttributes, InstanceReceiver, LightPropertiesExt,
-        MaterialsExt, OutlineExt, PVInstanceExt, PartExt, PointLightExt, RigExt, SpotLightExt,
-        SurfaceLightExt, instance,
+        OutlineExt, PVInstanceExt, PartExt, PointLightExt, RigExt, SpotLightExt, SurfaceLightExt,
+        instance,
     };
     #[cfg(feature = "sound")]
     pub use crate::{SoundExt, SoundSettingsExt};

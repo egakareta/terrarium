@@ -48,18 +48,6 @@ crate::instance! {
             Self::default()
         }
 
-        /// Adds a spatial child, interpreting its pivot relative to this rig.
-        ///
-        /// [`Instance::add_child`] instead retains the child's existing world pivot.
-        pub fn add_child_local<T: Instance + PVInstanceExt>(
-            &mut self,
-            mut child: T,
-        ) -> crate::InstanceId {
-            let pivot = self.pivot() * child.pivot();
-            child.set_pivot(pivot);
-            self.as_instance_mut().add_child_box(Box::new(child))
-        }
-
         /// Starts an animation and immediately applies its current pose.
         ///
         /// Every target path must resolve unambiguously to a built-in spatial

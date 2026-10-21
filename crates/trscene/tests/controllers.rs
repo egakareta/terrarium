@@ -1,6 +1,8 @@
+#[cfg(feature = "physics")]
+use trscene::RigExt;
 use trscene::{
     Camera, CameraController, Controller, ControllerActions, ControllerId, ControllerInput,
-    Instance, InstanceId, PVInstanceExt, Part, PlayerController, Rig, RigExt, Workspace,
+    Instance, InstanceId, PVInstanceExt, Part, PlayerController, Rig, Workspace,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
