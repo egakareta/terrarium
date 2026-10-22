@@ -6,8 +6,8 @@
     <title>this is terrarium</title>
     
 <script type="module">
-import init, * as bindings from '/terrarium/physics/terrarium-fba3a9eb97b7816c.js';
-const wasm = await init({ module_or_path: '/terrarium/physics/terrarium-fba3a9eb97b7816c_bg.wasm' });
+import init, * as bindings from '/terrarium/physics/terrarium-e80ab62c28117a6e.js';
+const wasm = await init({ module_or_path: '/terrarium/physics/terrarium-f59d984702f4c1c0_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/physics/terrarium-fba3a9eb97b7816c.js" crossorigin="anonymous" integrity="sha384-c2FBRZfwX/91BDPFYic0o3Zx7hWWRr5EcPa97wYtvGjbf1xVzUSqGNnDz+V2VTYA"><link rel="modulepreload" href="/terrarium/physics/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/physics/terrarium-fba3a9eb97b7816c_bg.wasm" crossorigin="anonymous" integrity="sha384-dhIdGl3gB1Dc3tnC6NjVVEU58gITd5USP+pYnd6RrUhWnFXYkxxvT+CfYuWVXOQW" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/physics/terrarium-e80ab62c28117a6e.js" crossorigin="anonymous" integrity="sha384-c2FBRZfwX/91BDPFYic0o3Zx7hWWRr5EcPa97wYtvGjbf1xVzUSqGNnDz+V2VTYA"><link rel="modulepreload" href="/terrarium/physics/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/physics/terrarium-f59d984702f4c1c0_bg.wasm" crossorigin="anonymous" integrity="sha384-HboaToqU3JKzQ6sIHH7746ZeauUBxFrVW6ACRSqpgPt1E7UVmqk6FafxdZdCUCis" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
