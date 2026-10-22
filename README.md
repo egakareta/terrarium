@@ -1,28 +1,18 @@
 <div align="center">
+<img style="width:128px" src="assets/terrarium.png" width="128px">
 
-# Terrarium 🌍
+<a href="https://github.com/egakareta/terrarium/actions/workflows/ci.yml"><img alt="Build Status" src="https://github.com/egakareta/terrarium/actions/workflows/ci.yml/badge.svg?branch=master"/></a>
+<a href="https://crates.io/crates/terrarium"><img alt="crates.io" src="https://img.shields.io/crates/v/terrarium"/></a>
+
+# Terrarium
 
 </div>
 
-`terrarium` is a simple, extensible 3D engine built around two core crates:
+Terrarium is a simple, extensible 3D engine.
 
-- [wgpu](https://github.com/gfx-rs/wgpu) for 3D graphics
-- [eframe](https://github.com/emilk/egui) for 2D graphics
+This will be filled out when the project is further along.
 
-Here's an example of how Terrarium can render a 1x1x1 cube.
+## Docs
 
-```rust,no_run
-use terrarium::*;
-
-fn main() {
-    Terrarium::new()
-        .run(|engine| {
-            engine.add_child(Part::new());
-            Ok::<(), AppCreationError>(())
-        })
-        .unwrap();
-}
-```
-
-Please check out [examples](https://github.com/egakareta/terrarium/tree/master/examples) to
-learn more.
+- TODO 1
+- TODO 2
