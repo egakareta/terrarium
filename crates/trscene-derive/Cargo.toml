@@ -1,0 +1,21 @@
+[package]
+name = "trscene-derive"
+version.workspace = true
+edition.workspace = true
+description = "Instance composition macros for Terrarium."
+documentation.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+heck = "0.5"
+proc-macro-crate = "3"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "visit-mut"] }
+
+[dev-dependencies]
+scene = { package = "trscene", path = "../trscene" }

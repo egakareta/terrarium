@@ -1,7 +1,7 @@
 use terrarium::{
-    App, AppCreationError, Camera, Color3, Engine, HasBasePart, HasCamera, HasPVInstance, HasPart,
-    Instance, InstanceId, Part, PartShape, PlayerController, Rig, Terrarium, Workspace, egui,
-    glam::Vec3,
+    App, AppCreationError, BasePartExt, Camera, CameraExt, Color3, Engine, Instance, InstanceId,
+    PVInstanceExt, Part, PartExt, PartShape, PlayerController, Rig, RigExt, Terrarium, Workspace,
+    egui, glam::Vec3,
 };
 
 const SPAWN: Vec3 = Vec3::new(0.0, 4.0, 22.0);

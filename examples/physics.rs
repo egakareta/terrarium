@@ -1,6 +1,6 @@
 use terrarium::{
-    App, Color3, Engine, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart,
-    HasPointLight, Instance, InstanceId, Material, Part, PartShape, PointLight, RendererError,
+    App, BasePartExt, CameraExt, Color3, Engine, Instance, InstanceId, LightPropertiesExt,
+    Material, PVInstanceExt, Part, PartExt, PartShape, PointLight, PointLightExt, RendererError,
     Terrarium, eframe, egui,
     glam::{Mat4, Vec3},
 };

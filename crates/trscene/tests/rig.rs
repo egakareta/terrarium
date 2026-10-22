@@ -1,6 +1,6 @@
 use trscene::{
     AnimationClip, AnimationError, AnimationPlayer, AnimationTrack, BasePart, Camera, Easing,
-    HasPVInstance, Instance, Keyframe, Part, PointLight, Rig, Tween, Workspace,
+    Instance, Keyframe, PVInstanceExt, Part, PointLight, Rig, RigExt, Tween, Workspace,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -510,7 +510,7 @@ fn inspector_edits_carry_rig_parts_and_reject_singular_scale() {
 #[cfg(feature = "physics")]
 #[test]
 fn dynamic_rig_parts_share_motion_and_keep_their_offsets_under_impulses() {
-    use trscene::{HasBasePart, rapier3d::math::Vector};
+    use trscene::{BasePartExt, rapier3d::math::Vector};
     let mut rig = Rig::new().with_anchored(false);
     let left = rig.add_child(Part::new().with_name("Left").with_pivot(translation(-1.0)));
     let right = rig.add_child(
@@ -569,7 +569,7 @@ fn dynamic_rig_parts_share_motion_and_keep_their_offsets_under_impulses() {
 #[cfg(feature = "physics")]
 #[test]
 fn animated_colliders_follow_local_poses_and_report_child_part_ids() {
-    use trscene::{BoxOverlapQuery, HasBasePart};
+    use trscene::{BasePartExt, BoxOverlapQuery};
     let mut rig = Rig::new();
     let arm_id = rig.add_child(Part::new().with_name("Arm").with_anchored(false));
     let ghost = rig.add_child(

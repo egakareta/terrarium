@@ -1,9 +1,9 @@
 //! Render an arbitrary mesh into a GPU texture and display it in egui.
 
 use terrarium::{
-    App, AppCreationError, Color3, Engine, GltfError, HasBasePart, HasPVInstance, Instance, Mesh,
-    MeshPart, Part, RendererError, Terrarium, Viewport, ViewportTexture, eframe, egui, glam::Vec3,
-    push_triangle,
+    App, AppCreationError, BasePartExt, Color3, Engine, GltfError, Instance, Mesh, MeshPart,
+    PVInstanceExt, Part, RendererError, Terrarium, Viewport, ViewportTexture, eframe, egui,
+    glam::Vec3, push_triangle,
 };
 
 struct ViewportApp {

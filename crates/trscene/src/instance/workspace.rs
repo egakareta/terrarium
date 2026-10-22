@@ -2,13 +2,13 @@ use std::rc::Rc;
 
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
+use crate::{
+    BasePartExt, Camera, CameraController, Color3, Controllers, Instance, InstanceData, InstanceId,
+    InstanceLookup, Lighting, PVInstanceExt, Part, RenderTexture, Rig, Texture, TextureError,
+    TextureHandle, TweenManager, glam::*,
+};
 #[cfg(feature = "default-materials")]
 use crate::{BuiltinMaterial, Material};
-use crate::{
-    Camera, CameraController, Color3, Controllers, HasBasePart, HasPVInstance, Instance,
-    InstanceData, InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Rig, Texture,
-    TextureError, TextureHandle, TweenManager, glam::*,
-};
 #[cfg(feature = "meshpart")]
 use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
 #[cfg(feature = "physics")]
@@ -60,43 +60,47 @@ pub enum WorkspacePreset {
     Baseplate,
 }
 
-/// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
-#[derive(Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Workspace {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    instance: Box<InstanceData>,
-    /// The camera used when this workspace is rendered.
-    pub current_camera: Camera,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    camera_controller: CameraController,
-    /// Additional controllers, updated in registration order before physics and the camera.
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub controllers: Controllers,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    tween_manager: TweenManager,
-    #[cfg(feature = "physics")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    physics: PhysicsWorld,
-    #[cfg(feature = "sound")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub(crate) audio: AudioRuntime,
-    #[cfg(feature = "meshpart")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    meshes: Vec<MeshHandle>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    textures: Vec<Texture>,
-    #[cfg(feature = "default-materials")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    builtin_materials: Vec<Option<Material>>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    texture_revisions: Vec<u64>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    texture_revision: u64,
-    /// Scene-wide lighting configuration.
-    pub lighting: Lighting,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub(crate) lookup: Rc<InstanceLookup>,
+crate::instance! {
+    #[instance(default = false, inspect = false)]
+    /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
+    #[derive(Debug)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct Workspace {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        instance: Box<InstanceData>,
+        /// The camera used when this workspace is rendered.
+        pub current_camera: Camera,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        camera_controller: CameraController,
+        /// Additional controllers, updated in registration order before physics and the camera.
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub controllers: Controllers,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        tween_manager: TweenManager,
+        #[cfg(feature = "physics")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        physics: PhysicsWorld,
+        #[cfg(feature = "sound")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub(crate) audio: AudioRuntime,
+        #[cfg(feature = "meshpart")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        meshes: Vec<MeshHandle>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        textures: Vec<Texture>,
+        #[cfg(feature = "default-materials")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        builtin_materials: Vec<Option<Material>>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        texture_revisions: Vec<u64>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        texture_revision: u64,
+        /// Scene-wide lighting configuration.
+        pub lighting: Lighting,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub(crate) lookup: Rc<InstanceLookup>,
+    }
 }
 
 impl Workspace {
@@ -265,6 +269,22 @@ impl Workspace {
             .filter_map(|instance| instance.downcast_ref::<T>())
     }
 
+    /// Borrows an inherited API from a descendant without losing its identity.
+    pub fn view<T: crate::InstanceType>(&self, id: InstanceId) -> Option<&T::Api> {
+        self.instance(id)?.view::<T>()
+    }
+
+    /// Mutably borrows a descendant's inherited API with its overrides.
+    pub fn view_mut<T: crate::InstanceType>(&mut self, id: InstanceId) -> Option<&mut T::Api> {
+        self.instance_mut(id)?.view_mut::<T>()
+    }
+
+    /// Returns all descendants providing an API, including composed subclasses.
+    pub fn views<T: crate::InstanceType>(&self) -> impl Iterator<Item = &T::Api> {
+        self.descendants()
+            .filter_map(|instance| instance.view::<T>())
+    }
+
     /// Returns parts whose colliders intersect the box in `overlap_params`.
     ///
     /// Results are instance IDs in Rapier query order. Only parts with active
@@ -383,7 +403,7 @@ impl Workspace {
     /// updated parent transforms. This is called automatically by [`Self::update`].
     pub fn update_animations(&mut self, delta_seconds: f32) {
         fn update(instance: &mut dyn Instance, delta_seconds: f32) {
-            if let Some(rig) = instance.downcast_mut::<Rig>() {
+            if let Some(rig) = instance.view_mut::<Rig>() {
                 rig.update_animation(delta_seconds);
             }
             for child in instance.children_mut() {
@@ -487,7 +507,7 @@ impl Clone for Workspace {
             lookup: lookup.clone(),
         };
         for child in workspace.instance.children_mut() {
-            child.set_instance_lookup(Some(lookup.clone()));
+            super::set_instance_lookup(child, Some(lookup.clone()));
         }
         workspace.controllers.remap_instances(&|id| {
             cloned_instance_id(self.instance.children(), workspace.instance.children(), id)
@@ -514,19 +534,12 @@ impl Default for Workspace {
     }
 }
 
-crate::impl_instance!(
-    Workspace,
-    class_name = "Workspace",
-    data = instance,
-    inspect = Workspace,
-);
-
 #[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(feature = "default-materials")]
     use crate::TextureProjection;
-    use crate::{BasePart, Camera, HasPart, Part, PartShape, TextureColorSpace, glam::Vec3};
+    use crate::{BasePart, Camera, Part, PartExt, PartShape, TextureColorSpace, glam::Vec3};
     #[cfg(feature = "meshpart")]
     use crate::{Mesh, MeshPart};
 

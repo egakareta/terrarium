@@ -4769,7 +4769,20 @@ dependencies = [
  "slotmap",
  "thiserror 2.0.21",
  "trrendert",
+ "trscene-derive",
  "winit",
+]
+
+[[package]]
+name = "trscene-derive"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "trscene",
 ]
 
 [[package]]

@@ -1,13 +1,12 @@
 use slotmap::Key;
 
-use crate::{
-    Camera, HasBasePart, HasCamera, HasLight, HasMaterials, HasPVInstance, HasPart, HasPointLight,
-    HasSpotLight, HasSurfaceLight, Instance, InstanceId, Outline, Part, PointLight, RenderCamera,
-    RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode, RenderOutline,
-    RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace, glam,
-};
 #[cfg(feature = "meshpart")]
-use crate::{HasMeshPart, MeshPart};
+use crate::MeshPart;
+use crate::{
+    Camera, CameraExt, Instance, InstanceId, LightPropertiesExt, Outline, PVInstanceExt, Part,
+    PointLight, RenderCamera, RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode,
+    RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace, glam,
+};
 
 fn render_id(id: InstanceId) -> u64 {
     id.data().as_ffi()
@@ -43,7 +42,7 @@ fn render_node<'a>(
 }
 
 fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
-    if let Some(part) = instance.downcast_ref::<Part>() {
+    if let Some(part) = instance.view::<Part>() {
         let shape = part.shape();
         return Some(RenderMesh {
             geometry: RenderGeometry::Primitive(shape),
@@ -54,15 +53,15 @@ fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
         });
     }
     #[cfg(feature = "meshpart")]
-    if let Some(part) = instance.downcast_ref::<MeshPart>() {
+    if let Some(part) = instance.view::<MeshPart>() {
         return Some(RenderMesh {
             geometry: RenderGeometry::Custom {
                 mesh: part.mesh(),
-                revision: part.mesh_revision(),
+                revision: part.mesh_part().mesh_revision(),
             },
             color: part.color(),
             transparency: part.transparency(),
-            bounding_radius: part.bounding_radius(),
+            bounding_radius: part.mesh_part().bounding_radius(),
             materials: part.material_slots(),
         });
     }
@@ -88,53 +87,53 @@ fn render_light(
     instance: &dyn Instance,
 ) -> Option<(RenderLight, glam::Mat4)> {
     let (parent_id, parent_transform) = render_light_parent(workspace, instance)?;
-    let (kind, light): (RenderLightKind, &dyn HasLight) =
-        if let Some(light) = instance.downcast_ref::<PointLight>() {
-            (
-                RenderLightKind::Point {
-                    range: light.range(),
-                },
-                light,
-            )
-        } else if let Some(light) = instance.downcast_ref::<SpotLight>() {
-            (
-                RenderLightKind::Spot {
-                    face: light.face(),
-                    angle: light.angle(),
-                },
-                light,
-            )
-        } else if let Some(light) = instance.downcast_ref::<SurfaceLight>() {
-            (
-                RenderLightKind::Surface {
-                    face: light.face(),
-                    angle: light.angle(),
-                },
-                light,
-            )
-        } else {
-            return None;
-        };
-    Some((
-        RenderLight {
-            parent_id: render_id(parent_id),
-            kind,
-            color: light.color(),
-            brightness: light.brightness(),
-            shadows: light.shadows(),
-        },
-        parent_transform,
-    ))
+    let build = |kind, light: &dyn LightPropertiesExt| RenderLight {
+        parent_id: render_id(parent_id),
+        kind,
+        color: light.color(),
+        brightness: light.brightness(),
+        shadows: light.shadows(),
+    };
+    let light = if let Some(light) = instance.view::<PointLight>() {
+        build(
+            RenderLightKind::Point {
+                range: light.range(),
+            },
+            light,
+        )
+    } else if let Some(light) = instance.view::<SpotLight>() {
+        build(
+            RenderLightKind::Spot {
+                face: light.face(),
+                angle: light.angle(),
+            },
+            light,
+        )
+    } else if let Some(light) = instance.view::<SurfaceLight>() {
+        build(
+            RenderLightKind::Surface {
+                face: light.face(),
+                angle: light.angle(),
+            },
+            light,
+        )
+    } else {
+        return None;
+    };
+    Some((light, parent_transform))
 }
 
 fn render_outlines(workspace: &Workspace) -> Vec<RenderOutline> {
     workspace
-        .get_all::<Outline>()
+        .views::<Outline>()
         .filter_map(|outline| render_outline(workspace, outline))
         .collect()
 }
 
-fn render_outline(workspace: &Workspace, outline: &Outline) -> Option<RenderOutline> {
+fn render_outline(
+    workspace: &Workspace,
+    outline: &dyn crate::OutlineView,
+) -> Option<RenderOutline> {
     let parent_id = outline.parent()?;
     let parent = workspace.instance(parent_id)?;
     let container_id = parent.parent()?;
@@ -191,7 +190,7 @@ fn render_light_parent(
 
 #[cfg(test)]
 mod tests {
-    use crate::{Instance, Outline, Part, Workspace};
+    use crate::{Instance, Outline, OutlineExt, Part, Workspace};
 
     #[test]
     fn render_scene_preserves_outline_always_on_top() {

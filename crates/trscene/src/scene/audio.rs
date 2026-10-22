@@ -6,9 +6,7 @@ use euphorium::{
 };
 use thiserror::Error;
 
-use crate::{
-    Camera, HasPVInstance, HasSound, Instance, InstanceId, PVInstance, Sound, Workspace, glam::Vec3,
-};
+use crate::{Camera, InstanceId, PVInstance, PVInstanceExt, Sound, Workspace, glam::Vec3};
 
 /// A failure discovered while updating the workspace's audio scene.
 #[derive(Debug, Error)]
@@ -122,7 +120,7 @@ pub(crate) fn velocity(position: Vec3, previous: Option<Vec3>, delta_seconds: f3
     Vec3::ZERO
 }
 
-fn emitter(workspace: &Workspace, sound: &Sound) -> Option<(InstanceId, Vec3)> {
+fn emitter(workspace: &Workspace, sound: &dyn crate::SoundView) -> Option<(InstanceId, Vec3)> {
     let mut parent = sound.parent();
     while let Some(id) = parent {
         let instance = workspace.instance(id)?;
@@ -168,21 +166,24 @@ impl Workspace {
         }
         let generation = self.lookup.generation();
         if self.audio.generation != Some(generation) {
-            self.audio.instances = self.get_all::<Sound>().map(Instance::id).collect();
+            self.audio.instances = self.views::<Sound>().map(|sound| sound.id()).collect();
             self.audio.generation = Some(generation);
         }
         let emitters: Vec<_> = self
             .audio
             .instances
             .iter()
-            .filter_map(|&id| Some((id, emitter(self, self.get::<Sound>(id)?))))
+            .filter_map(|&id| Some((id, emitter(self, self.view::<Sound>(id)?))))
             .collect();
         // Clone only the root owner, never a scene or a voice. This allows typed
         // mutable scene access without moving or recreating the audio runtime.
         let soundscape = Rc::clone(&self.audio.soundscape);
         for (id, emitter) in emitters {
-            if let Some(sound) = self.get_mut::<Sound>(id)
-                && let Err(source) = sound.sync_audio(&soundscape, emitter, delta_seconds)
+            if let Some(sound) = self.view_mut::<Sound>(id)
+                && let Err(source) =
+                    sound
+                        .sound_mut()
+                        .sync_audio(&soundscape, emitter, delta_seconds)
             {
                 errors.push(AudioError::Sound {
                     instance: id,
@@ -191,7 +192,7 @@ impl Workspace {
             }
         }
         for failure in soundscape.update() {
-            if let Some(sound) = self.get_all::<Sound>().find(|sound| {
+            if let Some(sound) = self.views::<Sound>().find(|sound| {
                 sound
                     .playback()
                     .is_some_and(|playback| playback.id() == failure.sound)
@@ -220,7 +221,8 @@ mod tests {
 
     use super::*;
     #[cfg(feature = "physics")]
-    use crate::{BasePart, HasBasePart, HasPVInstance, Part};
+    use crate::BasePartExt;
+    use crate::{BasePart, Instance, PVInstanceExt, Part, SoundExt, SoundSettingsExt};
 
     fn assert_vector(actual: [f32; 3], expected: Vec3) {
         for (actual, expected) in actual.into_iter().zip(expected.to_array()) {

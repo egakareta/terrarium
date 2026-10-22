@@ -1,6 +1,7 @@
 use terrarium::{
-    AnimationClip, AnimationPlayer, AnimationTrack, App, AppCreationError, Color3, Easing, Engine,
-    HasBasePart, HasPVInstance, Instance, InstanceId, Keyframe, Part, Rig, Terrarium, eframe, egui,
+    AnimationClip, AnimationPlayer, AnimationTrack, App, AppCreationError, BasePartExt, Color3,
+    Easing, Engine, Instance, InstanceId, Keyframe, PVInstanceExt, Part, Rig, RigExt, Terrarium,
+    eframe, egui,
     glam::{Mat4, Quat, Vec3},
 };
 

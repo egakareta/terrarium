@@ -1,85 +1,39 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, HasPVInstance,
-    InstanceData, InstanceId, PVInstance, Workspace, glam,
+    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, InstanceData,
+    InstanceId, PVInstance, PVInstanceExt, Workspace, glam,
     glam::{Mat4, Quat, Vec2, Vec3},
 };
 
-/// A perspective camera with a world-space pivot.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Camera {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) instance: InstanceData,
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) pv_instance: PVInstance,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    subject: Option<InstanceId>,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-/// Access to a camera's projection properties.
-pub trait HasCamera {
-    /// Returns shared access to the underlying [`Camera`].
-    fn camera(&self) -> &Camera;
-
-    /// Returns mutable access to the underlying [`Camera`].
-    fn camera_mut(&mut self) -> &mut Camera;
-
-    crate::__instance_property! {
-        self;
+crate::instance! {
+    #[instance(default = false, inspect = false)]
+    /// A perspective camera with a world-space pivot.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    pub struct Camera {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        pub(crate) instance: InstanceData,
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[compose]
+        pub(crate) pv_instance: PVInstance,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        subject: Option<InstanceId>,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
         /// Viewport width divided by viewport height. Values set through this
         /// API are clamped to at least `0.001`.
-        getter aspect() -> f32 { self.camera().aspect }
-        setter set_aspect(aspect: f32) {
-            self.camera_mut().aspect = aspect.max(0.001);
-        }
-        builder with_aspect;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property(sanitize = |value: f32| value.max(0.001))]
+        aspect: f32,
         /// Vertical field of view in radians.
-        getter fovy() -> f32 { self.camera().fovy }
-        setter set_fovy(fovy: f32) {
-            self.camera_mut().fovy = fovy;
-        }
-        builder with_fovy;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property]
+        fovy: f32,
         /// Near clipping plane distance.
-        getter znear() -> f32 { self.camera().znear }
-        setter set_znear(znear: f32) {
-            self.camera_mut().znear = znear;
-        }
-        builder with_znear;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property]
+        znear: f32,
         /// Far clipping plane distance.
-        getter zfar() -> f32 { self.camera().zfar }
-        setter set_zfar(zfar: f32) {
-            self.camera_mut().zfar = zfar;
-        }
-        builder with_zfar;
-    }
-}
-
-impl<T: HasCamera + ?Sized> HasCamera for &mut T {
-    fn camera(&self) -> &Camera {
-        (**self).camera()
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        (**self).camera_mut()
+        #[property]
+        zfar: f32,
     }
 }
 
@@ -145,13 +99,6 @@ impl Camera {
         builder with_subject;
     }
 }
-
-crate::impl_instance!(
-    Camera,
-    class_name = "Camera",
-    data = instance,
-    inspect = Camera
-);
 
 /// Physical keyboard keys assigned to camera movement and orbit actions.
 pub type CameraKeyBindings = ControllerKeyBindings;
@@ -455,26 +402,6 @@ impl Controller for CameraController {
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
         self.update_camera(&mut workspace.current_camera, subject, delta_seconds);
-    }
-}
-
-impl HasPVInstance for Camera {
-    fn pv(&self) -> &PVInstance {
-        &self.pv_instance
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        &mut self.pv_instance
-    }
-}
-
-impl HasCamera for Camera {
-    fn camera(&self) -> &Camera {
-        self
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        self
     }
 }
 

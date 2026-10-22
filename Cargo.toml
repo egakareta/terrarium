@@ -24,6 +24,7 @@ members = [
   "crates/trrender/",
   "crates/trrendert/",
   "crates/trscene/",
+  "crates/trscene-derive/",
   "crates/trtask/",
 ]
 default-members = [
@@ -41,6 +42,7 @@ default-members = [
   "crates/trrender/",
   "crates/trrendert/",
   "crates/trscene/",
+  "crates/trscene-derive/",
   "crates/trtask/",
 ]
 
@@ -66,6 +68,7 @@ trpersistence = { path = "crates/trpersistence/", version = "0.1" }
 trrender = { path = "crates/trrender/", version = "0.1" }
 trrendert = { path = "crates/trrendert/", version = "0.1" }
 trscene = { path = "crates/trscene/", version = "0.1" }
+trscene-derive = { path = "crates/trscene-derive/", version = "0.1" }
 trtask = { path = "crates/trtask/", version = "0.1" }
 
 [[example]]

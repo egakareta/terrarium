@@ -1,5 +1,5 @@
 use trscene::{
-    Camera, CameraController, HasPVInstance, Instance,
+    Camera, CameraController, Instance, PVInstanceExt,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },

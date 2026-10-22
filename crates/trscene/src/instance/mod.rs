@@ -14,6 +14,9 @@ use std::{
 use serde::{Serialize, de::DeserializeOwned};
 use slotmap::SlotMap;
 
+pub mod composition;
+pub use composition::*;
+
 mod camera;
 mod light;
 #[cfg(feature = "meshpart")]
@@ -80,7 +83,7 @@ fn instance_ids() -> &'static Mutex<SlotMap<InstanceId, ()>> {
 /// Internal index used to resolve instances by their stable identifier.
 #[doc(hidden)]
 #[derive(Debug, Default)]
-pub struct InstanceLookup {
+pub(crate) struct InstanceLookup {
     instances: RefCell<InstanceMap<NonNull<dyn Instance>>>,
     root: Cell<Option<(InstanceId, NonNull<InstanceData>)>>,
     generation: Cell<u64>,
@@ -89,13 +92,15 @@ pub struct InstanceLookup {
 impl InstanceLookup {
     /// Registers an instance pointer in this lookup index.
     #[doc(hidden)]
-    pub fn register(&self, instance: &mut dyn Instance) {
+    pub(crate) fn register(&self, instance: &mut dyn Instance) {
         self.instances
             .borrow_mut()
             .insert(instance.id(), NonNull::from(instance));
         self.generation.set(self.generation.get().wrapping_add(1));
     }
 
+    /// Removes an instance from the lookup index.
+    #[doc(hidden)]
     pub(crate) fn unregister(&self, id: InstanceId) {
         self.instances.borrow_mut().remove(&id);
         self.generation.set(self.generation.get().wrapping_add(1));
@@ -136,190 +141,52 @@ impl InstanceLookup {
     }
 }
 
-/// Implements the common [`Instance`] plumbing for a type backed by
-/// [`InstanceData`]. The field paths provide the type-specific name and
-/// storage locations.
-///
-/// Types implementing [`Spatial`] automatically expose their spatial capability.
+/// Emits inspector implementations when the runtime enables devtools.
+#[doc(hidden)]
+#[cfg(feature = "devtools")]
 #[macro_export]
-macro_rules! impl_instance {
-    (
-        $type:ty,
-        class_name = $class_name:literal,
-        data = $data:ident $(.$data_tail:ident)* $(, inspect = $inspect:ty)? $(,)?
-    ) => {
-        impl $crate::Instance for $type {
-            $(
-                $crate::__impl_instance_inspection!($inspect);
-            )?
-
-            fn spatial(&self) -> Option<&dyn $crate::Spatial> {
-                use $crate::__DetectSpatial as _;
-
-                (&&$crate::__SpatialProbe::<Self>(::std::marker::PhantomData)).get(self)
-            }
-
-            fn spatial_mut(&mut self) -> Option<&mut dyn $crate::Spatial> {
-                use $crate::__DetectSpatial as _;
-
-                (&&$crate::__SpatialProbe::<Self>(::std::marker::PhantomData)).get_mut(self)
-            }
-
-            fn class_name(&self) -> &'static str {
-                $class_name
-            }
-
-            fn name(&self) -> &str {
-                self.$data $(.$data_tail)*.name()
-            }
-
-            fn set_name(&mut self, name: String) {
-                self.$data $(.$data_tail)*.set_name(name);
-            }
-
-            fn with_name(mut self, name: impl Into<String>) -> Self {
-                self.$data $(.$data_tail)*.set_name(name.into());
-                self
-            }
-
-            fn id(&self) -> $crate::InstanceId {
-                self.$data $(.$data_tail)*.id()
-            }
-
-            fn parent(&self) -> Option<$crate::InstanceId> {
-                self.$data $(.$data_tail)*.parent()
-            }
-
-            fn children(&self) -> &[Box<dyn $crate::Instance>] {
-                self.$data $(.$data_tail)*.children()
-            }
-
-            fn children_mut(&mut self) -> $crate::ChildrenMut<'_> {
-                self.$data $(.$data_tail)*.children_mut()
-            }
-
-            fn remove_child(&mut self, id: $crate::InstanceId) -> bool {
-                self.$data $(.$data_tail)*.remove_child(id)
-            }
-
-            fn add_child_box(
-                &mut self,
-                child: Box<dyn $crate::Instance>,
-            ) -> $crate::InstanceId {
-                self.$data $(.$data_tail)*.add_child(child)
-            }
-
-            fn set_instance_parent(&mut self, parent: Option<$crate::InstanceId>) {
-                self.$data $(.$data_tail)*.set_parent(parent);
-            }
-
-            fn sibling_index(&self) -> usize {
-                self.$data $(.$data_tail)*.sibling_index()
-            }
-
-            fn set_sibling_index(&mut self, index: usize) {
-                self.$data $(.$data_tail)*.set_sibling_index(index);
-            }
-
-            fn with_attribute(
-                mut self,
-                name: impl Into<String>,
-                value: serde_json::Value,
-            ) -> Self {
-                self.$data $(.$data_tail)*.set_attribute(name.into(), value);
-                self
-            }
-
-            fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
-                self.$data $(.$data_tail)*.get_attribute(name)
-            }
-
-            fn attributes(&self) -> &$crate::Attributes {
-                self.$data $(.$data_tail)*.attributes()
-            }
-
-            fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
-                self.$data $(.$data_tail)*.remove_attribute(name)
-            }
-
-            fn clear_attributes(&mut self) {
-                self.$data $(.$data_tail)*.clear_attributes();
-            }
-
-            fn as_any(&self) -> &dyn ::std::any::Any {
-                self
-            }
-
-            fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any {
-                self
-            }
-
-            fn set_instance_lookup(
-                &mut self,
-                lookup: Option<::std::rc::Rc<$crate::InstanceLookup>>,
-            ) {
-                if let Some(lookup) = &lookup {
-                    lookup.register(self);
-                } else if let Some(lookup) = self.instance_lookup() {
-                    lookup.unregister(self.id());
-                }
-
-                self.$data $(.$data_tail)*.set_lookup(lookup.as_ref());
-
-                for child in self.children_mut() {
-                    child.set_instance_lookup(lookup.clone());
-                }
-            }
-
-            fn instance_lookup(&self) -> Option<::std::rc::Rc<$crate::InstanceLookup>> {
-                self.$data $(.$data_tail)*.lookup()
-            }
-        }
-    };
+macro_rules! __instance_inspection_items {
+    ($($items:tt)*) => { $($items)* };
 }
 
-/// Concrete type marker for spatial capability detection in [`impl_instance!`].
+/// Omits inspector implementations when the runtime disables devtools.
 #[doc(hidden)]
-pub struct __SpatialProbe<T>(
-    /// Carries the concrete instance type without storing an instance.
-    pub std::marker::PhantomData<T>,
-);
+#[cfg(not(feature = "devtools"))]
+#[macro_export]
+macro_rules! __instance_inspection_items {
+    ($($items:tt)*) => {};
+}
 
-/// Compile-time spatial capability selection for [`impl_instance!`].
-///
-/// Method resolution on `&&__SpatialProbe<T>` selects the spatial implementation
-/// when its bound holds, otherwise dereferencing to the fallback. These calls
-/// must remain in the concrete macro expansion rather than a generic helper.
+/// Selects spatial support at each concrete expansion site.
+#[doc(hidden)]
+pub struct __SpatialProbe<T>(pub std::marker::PhantomData<T>);
+
+/// Autoref specialization for generated spatial capability access.
 #[doc(hidden)]
 pub trait __DetectSpatial<T> {
-    /// Returns shared spatial access when supported by the concrete type.
+    /// Returns shared spatial access when implemented.
     fn get(self, instance: &T) -> Option<&dyn Spatial>;
-
-    /// Returns mutable spatial access when supported by the concrete type.
+    /// Returns mutable spatial access when implemented.
     fn get_mut(self, instance: &mut T) -> Option<&mut dyn Spatial>;
 }
-
 impl<T> __DetectSpatial<T> for &__SpatialProbe<T> {
-    fn get(self, _instance: &T) -> Option<&dyn Spatial> {
+    fn get(self, _: &T) -> Option<&dyn Spatial> {
         None
     }
-
-    fn get_mut(self, _instance: &mut T) -> Option<&mut dyn Spatial> {
+    fn get_mut(self, _: &mut T) -> Option<&mut dyn Spatial> {
         None
     }
 }
-
 impl<T: Spatial> __DetectSpatial<T> for &&__SpatialProbe<T> {
     fn get(self, instance: &T) -> Option<&dyn Spatial> {
         Some(instance)
     }
-
     fn get_mut(self, instance: &mut T) -> Option<&mut dyn Spatial> {
         Some(instance)
     }
 }
 
-/// Implements the feature-dependent portion of [`impl_instance!`].
+/// Implements the feature-dependent portion of [`crate::instance!`].
 #[doc(hidden)]
 #[cfg(feature = "devtools")]
 #[macro_export]
@@ -347,7 +214,7 @@ macro_rules! __impl_instance_inspection {
     };
 }
 
-/// Implements the feature-dependent portion of [`impl_instance!`].
+/// Implements the feature-dependent portion of [`crate::instance!`].
 #[doc(hidden)]
 #[cfg(not(feature = "devtools"))]
 #[macro_export]
@@ -366,7 +233,8 @@ impl InstanceId {
 
 #[derive(Debug)]
 #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub(crate) struct InstanceData {
+#[doc(hidden)]
+pub struct InstanceData {
     name: String,
     #[cfg_attr(feature = "devtools", inspect(readonly))]
     id: InstanceId,
@@ -381,8 +249,15 @@ pub(crate) struct InstanceData {
     attributes: Attributes,
 }
 
+impl Default for InstanceData {
+    fn default() -> Self {
+        Self::new("Instance")
+    }
+}
+
 impl InstanceData {
-    pub(crate) fn new(name: impl Into<String>) -> Self {
+    #[doc(hidden)]
+    pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             id: InstanceId::new(),
@@ -459,15 +334,19 @@ impl InstanceData {
     }
 
     pub(crate) fn add_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
-        child.set_instance_parent(Some(self.id));
-        child.set_sibling_index(self.children.len());
+        let data = instance_data_mut(child.as_mut());
+        data.set_parent(Some(self.id));
+        data.set_sibling_index(self.children.len());
         let child_id = child.id();
         self.children.push(child);
         if let Some(lookup) = self.lookup() {
-            self.children
-                .last_mut()
-                .expect("just pushed child")
-                .set_instance_lookup(Some(lookup));
+            set_instance_lookup(
+                self.children
+                    .last_mut()
+                    .expect("just pushed child")
+                    .as_mut(),
+                Some(lookup),
+            );
         }
         child_id
     }
@@ -476,7 +355,7 @@ impl InstanceData {
         let indexed_position = self.lookup().and_then(|lookup| {
             let instance = lookup.get(id)?;
             // Registered instances remain boxed at stable addresses while parented.
-            Some(unsafe { instance.as_ref().sibling_index() })
+            Some(unsafe { instance.as_ref().__instance_data().sibling_index() })
         });
         let Some(index) = indexed_position
             .filter(|&index| {
@@ -490,11 +369,12 @@ impl InstanceData {
         };
         let mut child = self.children.swap_remove(index);
         if let Some(moved_child) = self.children.get_mut(index) {
-            moved_child.set_sibling_index(index);
+            instance_data_mut(moved_child.as_mut()).set_sibling_index(index);
         }
-        child.set_instance_parent(None);
-        child.set_sibling_index(usize::MAX);
-        child.set_instance_lookup(None);
+        let data = instance_data_mut(child.as_mut());
+        data.set_parent(None);
+        data.set_sibling_index(usize::MAX);
+        set_instance_lookup(child.as_mut(), None);
         true
     }
 }
@@ -519,12 +399,41 @@ impl Clone for InstanceData {
     }
 }
 
+fn instance_data_mut<T: __InstanceDataAccess + ?Sized>(instance: &mut T) -> &mut InstanceData {
+    // SAFETY: Runtime callers update fields in place without moving registered identity storage.
+    unsafe { instance.__instance_data_mut() }
+}
+
+fn set_instance_lookup(instance: &mut dyn Instance, lookup: Option<Rc<InstanceLookup>>) {
+    if let Some(previous) = instance.__instance_data().lookup() {
+        previous.unregister(instance.id());
+    }
+    if let Some(lookup) = &lookup {
+        lookup.register(instance);
+    }
+    instance_data_mut(instance).set_lookup(lookup.as_ref());
+    for child in instance.children_mut() {
+        set_instance_lookup(child, lookup.clone());
+    }
+}
+
 /// A node in the object hierarchy.
 ///
 /// Implementors expose their concrete type through [`Any`], which allows a
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
-pub trait Instance: Any + Debug + InstanceClone {
+pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + InstanceReceiver {
+    /// Returns the generated composition descriptor, when available.
+    fn instance_class(&self) -> Option<&'static InstanceClass> {
+        None
+    }
+
+    /// Looks up a typed API adapter for this concrete receiver.
+    #[doc(hidden)]
+    fn query(&self, _target: std::any::TypeId) -> Option<&'static dyn Any> {
+        None
+    }
+
     /// Returns this instance's spatial capability, when it has a world-space pivot.
     fn spatial(&self) -> Option<&dyn Spatial> {
         None
@@ -537,9 +446,7 @@ pub trait Instance: Any + Debug + InstanceClone {
 
     /// Returns fields exposed to the devtools inspector.
     ///
-    /// Custom instances expose their name by default. Derive
-    /// [`crate::devtools::Inspect`] and forward the inspection methods to
-    /// expose their fields automatically.
+    /// [`crate::instance!`] exposes annotated properties and inherited APIs.
     #[cfg(feature = "devtools")]
     fn properties(&self) -> Vec<crate::devtools::Property> {
         vec![crate::devtools::Property::new(
@@ -580,15 +487,16 @@ pub trait Instance: Any + Debug + InstanceClone {
 
     crate::__instance_property! {
         self;
-        /// The display name of this instance. This defaults to its class name
-        /// and can be changed independently of the instance type.
-        declare getter name() -> &str;
-        declare setter set_name(name: String);
-        declare builder with_name(name: impl Into<String>);
+        /// The display name, which defaults to the concrete class name.
+        getter name() -> &str { self.__instance_data().name() }
+        setter set_name(name: String) { instance_data_mut(self).set_name(name); }
+        builder with_name(name: impl Into<String>) { self.set_name(name.into()); }
     }
 
     /// Returns this instance's stable identifier.
-    fn id(&self) -> InstanceId;
+    fn id(&self) -> InstanceId {
+        self.__instance_data().id()
+    }
 
     /// Stores a custom metadata value under `name`, overwriting any previous
     /// value.
@@ -606,15 +514,23 @@ pub trait Instance: Any + Debug + InstanceClone {
     ///     .with_attribute("health", serde_json::json!(100));
     /// assert_eq!(part.get_attribute("health"), Some(&serde_json::json!(100)));
     /// ```
-    fn with_attribute(self, name: impl Into<String>, value: serde_json::Value) -> Self
+    fn with_attribute(mut self, name: impl Into<String>, value: serde_json::Value) -> Self
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        instance_data_mut(&mut self).set_attribute(name.into(), value);
+        self
+    }
 
     /// Returns the custom metadata stored under `name`, if any.
-    fn get_attribute(&self, name: &str) -> Option<&serde_json::Value>;
+    fn get_attribute(&self, name: &str) -> Option<&serde_json::Value> {
+        self.__instance_data().get_attribute(name)
+    }
 
     /// Returns all custom metadata in sorted key order.
-    fn attributes(&self) -> &Attributes;
+    fn attributes(&self) -> &Attributes {
+        self.__instance_data().attributes()
+    }
 
     /// Reports whether custom metadata is stored under `name`.
     fn has_attribute(&self, name: &str) -> bool {
@@ -622,25 +538,34 @@ pub trait Instance: Any + Debug + InstanceClone {
     }
 
     /// Removes the custom metadata stored under `name`, returning it when present.
-    fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value>;
+    fn remove_attribute(&mut self, name: &str) -> Option<serde_json::Value> {
+        instance_data_mut(self).remove_attribute(name)
+    }
 
     /// Removes all custom metadata from this instance.
-    fn clear_attributes(&mut self);
+    fn clear_attributes(&mut self) {
+        instance_data_mut(self).clear_attributes();
+    }
 
     /// Returns the parent identifier, or `None` for an isolated instance.
-    fn parent(&self) -> Option<InstanceId>;
+    fn parent(&self) -> Option<InstanceId> {
+        self.__instance_data().parent()
+    }
 
     /// Returns this instance's children in insertion order.
-    fn children(&self) -> &[Box<dyn Instance>];
+    fn children(&self) -> &[Box<dyn Instance>] {
+        self.__instance_data().children()
+    }
 
     /// Iterates over mutable access to this instance's children.
-    fn children_mut(&mut self) -> ChildrenMut<'_>;
+    fn children_mut(&mut self) -> ChildrenMut<'_> {
+        instance_data_mut(self).children_mut()
+    }
 
     /// Removes a direct child by its stable identifier.
     #[doc(hidden)]
     fn remove_child(&mut self, id: InstanceId) -> bool {
-        let _ = id;
-        false
+        instance_data_mut(self).remove_child(id)
     }
 
     /// Removes this instance from its parent and destroys its descendants.
@@ -656,7 +581,7 @@ pub trait Instance: Any + Debug + InstanceClone {
             return false;
         };
         let id = self.id();
-        let Some(lookup) = self.instance_lookup() else {
+        let Some(lookup) = self.__instance_data().lookup() else {
             return false;
         };
 
@@ -664,7 +589,9 @@ pub trait Instance: Any + Debug + InstanceClone {
     }
 
     /// Adds an owned child to this instance.
-    fn add_child_box(&mut self, child: Box<dyn Instance>) -> InstanceId;
+    fn add_child_box(&mut self, child: Box<dyn Instance>) -> InstanceId {
+        instance_data_mut(self).add_child(child)
+    }
 
     /// Adds an owned child to this instance and returns a mutable reference to it.
     ///
@@ -725,39 +652,14 @@ pub trait Instance: Any + Debug + InstanceClone {
         self.add_child_ref(child)
     }
 
-    /// Sets the internal parent link while a parent takes ownership of this instance.
-    fn set_instance_parent(&mut self, parent: Option<InstanceId>);
-
-    /// Returns this instance's position in its parent's child storage.
-    #[doc(hidden)]
-    fn sibling_index(&self) -> usize {
-        usize::MAX
-    }
-
-    /// Updates this instance's position in its parent's child storage.
-    #[doc(hidden)]
-    fn set_sibling_index(&mut self, index: usize) {
-        let _ = index;
-    }
-
     /// Returns this value as [`Any`] for downcasting.
-    fn as_any(&self) -> &dyn Any;
+    fn as_any(&self) -> &dyn ::std::any::Any {
+        self.as_instance()
+    }
 
     /// Returns this value as mutable [`Any`] for downcasting.
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-
-    /// Internal hook used to register an instance subtree in its workspace index.
-    #[doc(hidden)]
-    fn set_instance_lookup(&mut self, lookup: Option<Rc<InstanceLookup>>) {
-        for child in self.children_mut() {
-            child.set_instance_lookup(lookup.clone());
-        }
-    }
-
-    /// Returns the workspace lookup associated with this instance.
-    #[doc(hidden)]
-    fn instance_lookup(&self) -> Option<Rc<InstanceLookup>> {
-        None
+    fn as_any_mut(&mut self) -> &mut dyn ::std::any::Any {
+        self.as_instance_mut()
     }
 
     /// Parents an isolated instance to any instance.
