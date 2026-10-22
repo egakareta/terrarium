@@ -23,6 +23,8 @@
 - Do not add comments that restate requirements, narrate obvious operations, justify parameter choices with vague adjectives, or describe the intended quality of the implementation.
 - Comments are permitted only to explain non-obvious invariants, constraints, mathematical reasoning, or surprising behavior.
 - Do not add explanatory prose unless requested.
+- For Rust doc comments, use separate paragraphs or Markdown sections when documenting distinct concepts. Never compress unrelated behaviors into a single block of prose.
+- Prefer a brief, useful summary over comprehensive documentation that repeats information evident from types, signatures, or code.
 
 ## Test Implementation Rules
 
