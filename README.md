@@ -14,5 +14,5 @@ This will be filled out when the project is further along.
 
 ## Docs
 
-- TODO 1
-- TODO 2
+- [Cookbook](https://egakareta.github.io/terrarium/docs/)
+- [API Reference](https://docs.rs/crate/terrarium/)

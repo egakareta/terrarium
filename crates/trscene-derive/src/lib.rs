@@ -14,23 +14,10 @@ use syn::{
     visit_mut::{self, VisitMut},
 };
 
-/// Defines a composed instance, its method traits, properties, and runtime views.
+/// Defines a composed instance and generates its APIs.
 ///
-/// Mark one field `#[extends]` or `#[data]` and additional capabilities
-/// `#[compose]`. `#[property(default = expression)]` generates a getter,
-/// setter, and consuming builder; `borrow` returns a reference and `into`
-/// accepts `Into<T>` in the builder. Type storage accessors (`mesh_part` and
-/// `mesh_part_mut`, for example) are generated from the type name. Public
-/// `set_*` methods also receive a consuming `with_*` builder. Public receiver methods in an accompanying
-/// impl become API methods; `#[r#override(Base::method)]` replaces an inherited
-/// method. `#[default(expression)]` initializes a non-property field.
-/// Methods marked `#[property]` expose computed properties through their
-/// matching setter; `flatten` and `validate = method` control inspector edits.
-/// Unsupported inspector value types retain their ordinary method APIs.
-/// Use `#[instance(default = false)]` for a manual constructor, or
-/// `#[instance(inspect = false)]` with a separately authored inspector.
-/// Nested definitions specify their public location with
-/// `#[instance(path = crate::module)]` on the struct.
+/// See the [instance composition guide](https://egakareta.github.io/terrarium/docs/instance.html)
+/// for the field roles, property options, generated methods, overrides, and examples.
 #[proc_macro]
 pub fn instance(input: TokenStream) -> TokenStream {
     let input = Tokens::from(input);
