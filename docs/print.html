@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-168ccd0a.js";
+            window.path_to_searchindex_js = "searchindex-32782ff5.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-b355f90e.js"></script>
+        <script src="toc-85d854a6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -258,6 +258,219 @@ fn main() {
 <p>Run the app:</p>
 <pre><code class="language-sh">cargo run
 </code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="instance-composition"><a class="header" href="#instance-composition">Instance composition</a></h1>
+<p>The <code>instance!</code> macro builds instance APIs from named fields and inherent
+methods. It can extend an existing instance, combine independent capabilities,
+and expose stored or computed properties to the devtools inspector.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use trscene::{Part, prelude::*};
+
+trscene::instance! {
+    /// A primitive with a spring.
+    #[derive(Clone, Debug)]
+    pub struct SpringPart {
+        #[extends]
+        part: Part,
+        /// Spring stiffness in newtons per meter.
+        #[property(default = 20.0)]
+        stiffness: f32,
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>This definition inherits <code>Part</code>’s instance identity and APIs. It also generates
+the <code>stiffness</code>, <code>set_stiffness</code>, and <code>with_stiffness</code> methods. The sections
+below describe the field roles and generation rules in detail.</p>
+<h2 id="composition-fields"><a class="header" href="#composition-fields">Composition fields</a></h2>
+<p><code>instance!</code> requires a concrete struct with named fields. Generic instance
+types and conditional composition fields are not supported. Annotate fields
+with one composition role:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Attribute</th><th>Role</th></tr>
+</thead>
+<tbody>
+<tr><td><code>#[extends]</code></td><td>Inherits an instance identity and the composed type’s APIs. An instance can have at most one <code>extends</code> field.</td></tr>
+<tr><td><code>#[compose]</code></td><td>Adds a capability without adding another instance identity. A type can compose multiple capabilities.</td></tr>
+<tr><td><code>#[data]</code></td><td>Provides <code>InstanceData</code> for a new instance type that does not extend another instance.</td></tr>
+</tbody>
+</table>
+</div>
+<p>An instance has at most one identity provider: either an <code>#[extends]</code> field or
+an <code>#[data]</code> field. A type with only <code>#[compose]</code> fields can define a
+capability without an instance identity.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use trscene::{Part, prelude::*};
+
+trscene::instance! {
+    #[derive(Clone, Debug)]
+    pub struct Motor {
+        #[property(default = 2.0)]
+        speed: f32,
+    }
+}
+
+trscene::instance! {
+    #[derive(Clone, Debug)]
+    pub struct MotorPart {
+        #[extends]
+        part: Part,
+        #[compose]
+        motor: Motor,
+    }
+}
+
+trscene::instance! {
+    #[derive(Clone, Debug)]
+    pub struct Group {
+        #[data]
+        data: trscene::InstanceData,
+        #[property(default = String::new(), borrow, into)]
+        label: String,
+    }
+}
+<span class="boring">}</span></code></pre>
+<p><code>Motor</code> is a capability, while <code>MotorPart</code> has the identity and instance APIs
+of <code>Part</code> as well as the APIs provided by <code>Motor</code>. <code>Group</code> declares its own
+identity storage with <code>InstanceData</code>.</p>
+<h2 id="field-properties-and-defaults"><a class="header" href="#field-properties-and-defaults">Field properties and defaults</a></h2>
+<p>Mark a stored field with <code>#[property]</code> to generate a getter named after the
+field, a <code>set_&lt;field&gt;</code> setter, and a consuming <code>with_&lt;field&gt;</code> builder. The
+property attribute accepts these options:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Effect</th></tr>
+</thead>
+<tbody>
+<tr><td><code>default = expression</code></td><td>Uses the expression to initialize the field. Without an explicit initializer, fields use <code>Default::default()</code>.</td></tr>
+<tr><td></td><td></td></tr>
+<tr><td><code>sanitize = expression</code></td><td>Calls the expression as a function on values passed to the setter.</td></tr>
+<tr><td><code>borrow</code></td><td>Makes the getter return <code>&amp;T</code> instead of cloning and returning <code>T</code>.</td></tr>
+<tr><td><code>into</code></td><td>Makes the builder accept <code>impl Into&lt;T&gt;</code> and convert its argument. The setter still accepts <code>T</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<p>For example:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[property(default = String::new(), borrow, into)]
+label: String,
+
+#[property(default = 0.0, sanitize = sanitize_transparency)]
+transparency: f32,
+<span class="boring">}</span></code></pre>
+<h2 id="overrides"><a class="header" href="#overrides">Overrides</a></h2>
+<p>Replace a method inherited from a composed API by annotating a method in the
+type’s inherent <code>impl</code> with <code>#[r#override(Type::method)]</code>. The replacement must
+keep the inherited method’s name and use a borrowed receiver with concrete
+arguments. Its signature must match the inherited method.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>trscene::instance! {
+    #[derive(Clone, Debug)]
+    pub struct PlanarPart {
+        #[extends]
+        part: Part,
+    }
+
+    impl PlanarPart {
+        #[r#override(PVInstance::set_pivot)]
+        pub fn set_pivot(&amp;mut self, mut pivot: trscene::glam::Mat4) {
+            pivot.w_axis.y = 0.0;
+            self.pv_instance_mut().set_pivot(pivot);
+        }
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>The override is dispatched through the inherited API, including when that API
+is accessed through a composed view. Further composed types inherit the
+override unless they replace the same method themselves.</p>
+<h2 id="inspector-properties"><a class="header" href="#inspector-properties">Inspector properties</a></h2>
+<p>With <code>devtools</code> enabled, the macro generates inspector support unless
+<code>#[instance(inspect = false)]</code> is set. Instance identity fields such as the
+name and attributes are included along with annotated properties from the type
+and its composed APIs.</p>
+<p>An inherent getter can also be marked <code>#[property]</code> to expose a computed
+property. The inspector applies edits through the matching <code>set_&lt;getter&gt;</code>
+method. Add options to control how it is presented or validated:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Option</th><th>Effect</th></tr>
+</thead>
+<tbody>
+<tr><td><code>flatten</code></td><td>Exposes the property’s nested inspector fields without prefixing their paths with the getter name.</td></tr>
+<tr><td><code>validate = method</code></td><td>Calls the named method with the proposed property value. The edit is rejected if it returns <code>false</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>trscene::instance! {
+    #[derive(Clone, Debug)]
+    pub struct Transform {
+        #[data]
+        data: trscene::InstanceData,
+        #[default(trscene::glam::Mat4::IDENTITY)]
+        pivot: trscene::glam::Mat4,
+    }
+
+    impl Transform {
+        #[property(flatten, validate = accepts_pivot)]
+        pub fn transform(&amp;self) -&gt; trscene::glam::Mat4 {
+            self.pivot
+        }
+
+        pub fn set_transform(&amp;mut self, transform: trscene::glam::Mat4) {
+            self.pivot = transform;
+        }
+
+        pub fn accepts_pivot(&amp;self, pivot: trscene::glam::Mat4) -&gt; bool {
+            pivot.is_finite()
+        }
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>Without <code>flatten</code>, nested property paths are prefixed by the getter name. For
+example, a nested field under <code>transform</code> is edited at <code>transform.position</code>. With
+<code>flatten</code>, its path is <code>position</code>. Use <code>inspect = false</code> when providing a
+separate inspector implementation.</p>
+<h2 id="nested-definitions"><a class="header" href="#nested-definitions">Nested definitions</a></h2>
+<p>Definitions can be nested in Rust modules and can extend other custom
+definitions. When a type is declared in a module, set
+<code>#[instance(path = crate::module)]</code> to that crate-rooted module path. The
+default is <code>crate</code>.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>mod models {
+    use trscene::Part;
+
+    trscene::instance! {
+        #[instance(path = crate::models)]
+        #[derive(Clone, Debug)]
+        pub struct SpringPart {
+            #[extends]
+            part: Part,
+            #[property(default = 20.0)]
+            stiffness: f32,
+        }
+    }
+}
+
+trscene::instance! {
+    #[derive(Clone, Debug)]
+    pub struct WeightedSpring {
+        #[extends]
+        spring: models::SpringPart,
+        #[property(default = 2.0)]
+        mass: f32,
+    }
+}
+<span class="boring">}</span></code></pre>
 
                     </main>
 
