@@ -39,11 +39,15 @@ jobs:
         id: pages
       - run: |
           mise run build:examples:web
+          mdbook build docs --dest-dir examples/dist/docs
           touch examples/dist/.nojekyll
         env:
           PAGES_BASE_PATH: >-
             ${{ steps.pages.outputs.base_path }}${{ github.event_name == 'pull_request' &&
             format('/pr-preview/pr-{0}', github.event.number) || '' }}
+          MDBOOK_OUTPUT__HTML__SITE_URL: >-
+            ${{ steps.pages.outputs.base_path }}${{ github.event_name == 'pull_request' &&
+            format('/pr-preview/pr-{0}', github.event.number) || '' }}/docs/
       - uses: actions/upload-artifact@v4
         with:
           name: pages
