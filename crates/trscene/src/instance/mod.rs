@@ -536,12 +536,23 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
     /// The concrete class name of this instance.
     fn class_name(&self) -> &'static str;
 
-    crate::__instance_property! {
-        self;
-        /// The display name, which defaults to the concrete class name.
-        getter name() -> &str { self.__instance_data().name() }
-        setter set_name(name: String) { instance_data_mut(self).set_name(name); }
-        builder with_name(name: impl Into<String>) { self.set_name(name.into()); }
+    /// The display name, which defaults to the concrete class name.
+    fn name(&self) -> &str {
+        self.__instance_data().name()
+    }
+
+    /// Sets `name`. The display name, which defaults to the concrete class name.
+    fn set_name(&mut self, name: String) {
+        instance_data_mut(self).set_name(name);
+    }
+
+    /// Returns this instance with `name` set. The display name, which defaults to the concrete class name.
+    fn with_name(mut self, name: impl Into<String>) -> Self
+    where
+        Self: Sized,
+    {
+        self.set_name(name.into());
+        self
     }
 
     /// Returns this instance's stable identifier.

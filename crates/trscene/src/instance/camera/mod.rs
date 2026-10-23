@@ -15,6 +15,7 @@ instance! {
         #[compose]
         pub(crate) pv_instance: PVInstance,
         #[cfg_attr(feature = "devtools", inspect(readonly))]
+        #[property]
         subject: Option<InstanceId>,
         #[cfg_attr(feature = "devtools", inspect(readonly))]
         /// Viewport width divided by viewport height. Values set through this
@@ -81,18 +82,6 @@ impl Camera {
     /// Returns the right-handed DirectX perspective projection matrix.
     pub fn projection_matrix(&self) -> Mat4 {
         glam::camera::rh::proj::directx::perspective(self.fovy, self.aspect, self.znear, self.zfar)
-    }
-
-    crate::__instance_property! {
-        self;
-        /// Instance followed in third-person mode. A missing subject leaves
-        /// the camera in free-moving mode; a supplied ID must belong to a
-        /// spatial instance in the active workspace.
-        pub getter subject() -> Option<InstanceId> { self.subject }
-        setter set_subject(subject: Option<InstanceId>) {
-            self.subject = subject;
-        }
-        builder with_subject;
     }
 }
 
