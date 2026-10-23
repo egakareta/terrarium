@@ -1,16 +1,13 @@
-#[cfg(feature = "physics")]
-use trscene::RigExt;
 use trscene::{
-    Camera, CameraController, Controller, ControllerActions, ControllerId, ControllerInput,
-    Instance, InstanceId, PVInstanceExt, Part, PlayerController, Rig, Workspace,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
-    glam::{Mat4, Quat, Vec2, Vec3},
+    glam::*,
     winit::{
         event::{DeviceEvent, WindowEvent},
         keyboard::KeyCode,
     },
+    *,
 };
 
 fn frame(context: &Context, workspace: &mut Workspace, events: Vec<Event>) {
