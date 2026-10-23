@@ -2,7 +2,7 @@ use std::f32::consts::TAU;
 
 use terrarium::{
     euphorium::{DistanceAttenuation, Occlusion, SpatialSound},
-    glam::Vec3,
+    glam::*,
     *,
 };
 

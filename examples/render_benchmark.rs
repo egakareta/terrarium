@@ -5,13 +5,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use terrarium::{
-    App, BasePartExt, Camera, CameraExt, Color3, Engine, EngineExt, Face, Instance, InstanceExt,
-    InstanceId, Material, PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium,
-    Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
-    glam::{EulerRot, Mat4, Quat, Vec3},
-    wgpu,
-};
+use terrarium::{glam::*, *};
 
 const ANIMATED_PARTS_RATIO: usize = 4;
 const ANIMATION_POOL_CHANGE_INTERVAL: usize = 30;
