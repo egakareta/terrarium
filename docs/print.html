@@ -36,7 +36,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-32782ff5.js";
+            window.path_to_searchindex_js = "searchindex-99b1292f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-85d854a6.js"></script>
@@ -244,13 +244,12 @@ sudo apt install build-essential pkg-config libasound2-dev libjack-jackd2-dev li
 </code></pre>
 <h2 id="3-create-your-first-scene"><a class="header" href="#3-create-your-first-scene">3. Create your first scene</a></h2>
 <p>Replace <code>src/main.rs</code> with:</p>
-<pre class="playground"><code class="language-rust no_run"><span class="boring">extern crate terrarium;
-</span>use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 fn main() {
     Terrarium::new()
         .run(|engine| {
-            engine.add_child(Part::new());
+            engine.workspace_mut().add_child(Part::new());
             Ok::&lt;(), AppCreationError&gt;(())
         })
         .unwrap();
@@ -263,11 +262,9 @@ fn main() {
 <p>The <code>instance!</code> macro builds instance APIs from named fields and inherent
 methods. It can extend an existing instance, combine independent capabilities,
 and expose stored or computed properties to the devtools inspector.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use trscene::{Part, prelude::*};
+<pre class="playground"><code class="language-rust">use terrarium::*;
 
-trscene::instance! {
+instance! {
     /// A primitive with a spring.
     #[derive(Clone, Debug)]
     pub struct SpringPart {
@@ -278,7 +275,10 @@ trscene::instance! {
         stiffness: f32,
     }
 }
-<span class="boring">}</span></code></pre>
+
+fn main() {
+    let spring_part = SpringPart::default().with_stiffness(30.0);
+}</code></pre>
 <p>This definition inherits <code>Part</code>’s instance identity and APIs. It also generates
 the <code>stiffness</code>, <code>set_stiffness</code>, and <code>with_stiffness</code> methods. The sections
 below describe the field roles and generation rules in detail.</p>
@@ -301,11 +301,9 @@ with one composition role:</p>
 <p>An instance has at most one identity provider: either an <code>#[extends]</code> field or
 an <code>#[data]</code> field. A type with only <code>#[compose]</code> fields can define a
 capability without an instance identity.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>use trscene::{Part, prelude::*};
+<pre class="playground"><code class="language-rust">use terrarium::*;
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct Motor {
         #[property(default = 2.0)]
@@ -313,7 +311,7 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct MotorPart {
         #[extends]
@@ -323,16 +321,23 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct Group {
         #[data]
-        data: trscene::InstanceData,
+        data: InstanceData,
         #[property(default = String::new(), borrow, into)]
         label: String,
     }
 }
-<span class="boring">}</span></code></pre>
+
+fn main() {
+    let motor = Motor::default().with_speed(0.0);
+    let motor_part = MotorPart::default()
+        .with_transparency(0.5)
+        .with_speed(0.0);
+    let group = Group::default().with_label("My Group");
+}</code></pre>
 <p><code>Motor</code> is a capability, while <code>MotorPart</code> has the identity and instance APIs
 of <code>Part</code> as well as the APIs provided by <code>Motor</code>. <code>Group</code> declares its own
 identity storage with <code>InstanceData</code>.</p>
@@ -355,22 +360,19 @@ property attribute accepts these options:</p>
 </table>
 </div>
 <p>For example:</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>#[property(default = String::new(), borrow, into)]
+<pre><code class="language-rust ignore">#[property(default = String::new(), borrow, into)]
 label: String,
 
 #[property(default = 0.0, sanitize = sanitize_transparency)]
-transparency: f32,
-<span class="boring">}</span></code></pre>
+transparency: f32,</code></pre>
 <h2 id="overrides"><a class="header" href="#overrides">Overrides</a></h2>
 <p>Replace a method inherited from a composed API by annotating a method in the
 type’s inherent <code>impl</code> with <code>#[r#override(Type::method)]</code>. The replacement must
 keep the inherited method’s name and use a borrowed receiver with concrete
 arguments. Its signature must match the inherited method.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>trscene::instance! {
+<pre class="playground"><code class="language-rust">use terrarium::*;
+
+instance! {
     #[derive(Clone, Debug)]
     pub struct PlanarPart {
         #[extends]
@@ -379,13 +381,18 @@ arguments. Its signature must match the inherited method.</p>
 
     impl PlanarPart {
         #[r#override(PVInstance::set_pivot)]
-        pub fn set_pivot(&amp;mut self, mut pivot: trscene::glam::Mat4) {
+        pub fn set_pivot(&amp;mut self, mut pivot: glam::Mat4) {
             pivot.w_axis.y = 0.0;
             self.pv_instance_mut().set_pivot(pivot);
         }
     }
 }
-<span class="boring">}</span></code></pre>
+
+fn main() {
+    let planar_part = PlanarPart::default()
+        .with_transparency(0.5)
+        .set_pivot(glam::Mat4::IDENTITY);
+}</code></pre>
 <p>The override is dispatched through the inherited API, including when that API
 is accessed through a composed view. Further composed types inherit the
 override unless they replace the same method themselves.</p>
@@ -408,33 +415,36 @@ method. Add options to control how it is presented or validated:</p>
 </tbody>
 </table>
 </div>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>trscene::instance! {
+<pre class="playground"><code class="language-rust">use terrarium::*;
+
+instance! {
     #[derive(Clone, Debug)]
-    pub struct Transform {
+    pub struct TransformData {
         #[data]
-        data: trscene::InstanceData,
-        #[default(trscene::glam::Mat4::IDENTITY)]
-        pivot: trscene::glam::Mat4,
+        data: InstanceData,
+        #[default(glam::Mat4::IDENTITY)]
+        pivot: glam::Mat4,
     }
 
-    impl Transform {
+    impl TransformData {
         #[property(flatten, validate = accepts_pivot)]
-        pub fn transform(&amp;self) -&gt; trscene::glam::Mat4 {
+        pub fn transform(&amp;self) -&gt; glam::Mat4 {
             self.pivot
         }
 
-        pub fn set_transform(&amp;mut self, transform: trscene::glam::Mat4) {
+        pub fn set_transform(&amp;mut self, transform: glam::Mat4) {
             self.pivot = transform;
         }
 
-        pub fn accepts_pivot(&amp;self, pivot: trscene::glam::Mat4) -&gt; bool {
+        pub fn accepts_pivot(&amp;self, pivot: glam::Mat4) -&gt; bool {
             pivot.is_finite()
         }
     }
 }
-<span class="boring">}</span></code></pre>
+
+fn main() {
+    let accepts_pivot = TransformData::default().accepts_pivot(glam::Mat4::IDENTITY);
+}</code></pre>
 <p>Without <code>flatten</code>, nested property paths are prefixed by the getter name. For
 example, a nested field under <code>transform</code> is edited at <code>transform.position</code>. With
 <code>flatten</code>, its path is <code>position</code>. Use <code>inspect = false</code> when providing a
@@ -444,12 +454,12 @@ separate inspector implementation.</p>
 definitions. When a type is declared in a module, set
 <code>#[instance(path = crate::module)]</code> to that crate-rooted module path. The
 default is <code>crate</code>.</p>
-<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
-</span><span class="boring">fn main() {
-</span>mod models {
-    use trscene::Part;
+<pre class="playground"><code class="language-rust">use terrarium::*;
 
-    trscene::instance! {
+mod models {
+    use super::*;
+
+    instance! {
         #[instance(path = crate::models)]
         #[derive(Clone, Debug)]
         pub struct SpringPart {
@@ -461,7 +471,7 @@ default is <code>crate</code>.</p>
     }
 }
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct WeightedSpring {
         #[extends]
@@ -470,7 +480,10 @@ trscene::instance! {
         mass: f32,
     }
 }
-<span class="boring">}</span></code></pre>
+
+fn main() {
+    let spring = WeightedSpring::default().with_mass(1.0);
+}</code></pre>
 
                     </main>
 

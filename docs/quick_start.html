@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-32782ff5.js";
+            window.path_to_searchindex_js = "searchindex-99b1292f.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-85d854a6.js"></script>
@@ -202,13 +202,12 @@ sudo apt install build-essential pkg-config libasound2-dev libjack-jackd2-dev li
 </code></pre>
 <h2 id="3-create-your-first-scene"><a class="header" href="#3-create-your-first-scene">3. Create your first scene</a></h2>
 <p>Replace <code>src/main.rs</code> with:</p>
-<pre class="playground"><code class="language-rust no_run"><span class="boring">extern crate terrarium;
-</span>use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 fn main() {
     Terrarium::new()
         .run(|engine| {
-            engine.add_child(Part::new());
+            engine.workspace_mut().add_child(Part::new());
             Ok::&lt;(), AppCreationError&gt;(())
         })
         .unwrap();
