@@ -1,13 +1,6 @@
 use slotmap::Key;
 
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
-use crate::{
-    Camera, CameraExt, Instance, InstanceExt, InstanceId, LightPropertiesExt, Outline,
-    PVInstanceExt, Part, PointLight, RenderCamera, RenderGeometry, RenderLight, RenderLightKind,
-    RenderMesh, RenderNode, RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight,
-    Workspace, glam,
-};
+use crate::*;
 
 fn render_id(id: InstanceId) -> u64 {
     id.data().as_ffi()
@@ -191,7 +184,7 @@ fn render_light_parent(
 
 #[cfg(test)]
 mod tests {
-    use crate::{Instance, Outline, OutlineExt, Part, Workspace};
+    use super::*;
 
     #[test]
     fn render_scene_preserves_outline_always_on_top() {

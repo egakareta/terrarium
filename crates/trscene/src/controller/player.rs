@@ -1,11 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-#[cfg(feature = "physics")]
-use crate::RigExt;
-use crate::{
-    Controller, ControllerActions, ControllerInput, InstanceId, PVInstanceExt, Rig, Workspace,
-    glam::{Mat4, Quat, Vec3},
-};
+use crate::{glam::*, *};
 
 /// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
 ///

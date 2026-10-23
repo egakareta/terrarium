@@ -89,8 +89,7 @@ pub use rapier3d;
 pub use serde_json;
 pub use trrendert::{glam, *};
 #[doc(hidden)]
-pub use trscene_derive::__instance_expand;
-pub use trscene_derive::instance;
+pub use trscene_derive::*;
 pub use winit;
 
 pub mod controller;

@@ -1,9 +1,6 @@
-use crate::{
-    AnimationError, AnimationPlayer, Instance, InstanceData, PVInstance, PVInstanceExt, glam::Mat4,
-    pivot_hierarchy_to,
-};
+use crate::{glam::*, *};
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// A spatial assembly whose descendants move together when its pivot changes.
     ///
@@ -160,8 +157,8 @@ fn apply_tracks(
 }
 
 #[cfg(feature = "devtools")]
-impl crate::devtools::Inspect for Rig {
-    fn properties(&self) -> Vec<crate::devtools::Property> {
+impl devtools::Inspect for Rig {
+    fn properties(&self) -> Vec<devtools::Property> {
         let mut properties = self.instance.properties();
         properties.extend(self.pivot().properties());
         properties.extend(
@@ -176,13 +173,13 @@ impl crate::devtools::Inspect for Rig {
     fn validate_property(
         &self,
         path: &str,
-        value: &crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
+        value: &devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError> {
         if matches!(path, "position" | "orientation" | "size") {
             let mut pivot = self.pivot();
             pivot.set_property(path, value.clone())?;
             if !pivot.inverse().is_finite() {
-                return Err(crate::devtools::PropertyError::InvalidValue);
+                return Err(devtools::PropertyError::InvalidValue);
             }
             return Ok(());
         }
@@ -195,9 +192,9 @@ impl crate::devtools::Inspect for Rig {
     fn set_property(
         &mut self,
         path: &str,
-        value: crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
-        <Self as crate::devtools::Inspect>::validate_property(self, path, &value)?;
+        value: devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError> {
+        <Self as devtools::Inspect>::validate_property(self, path, &value)?;
         if matches!(path, "position" | "orientation" | "size") {
             let mut pivot = self.pivot();
             pivot.set_property(path, value)?;

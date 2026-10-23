@@ -5,11 +5,7 @@ use rapier3d::prelude::{
     QueryFilter, RigidBody, RigidBodyBuilder, RigidBodyHandle, RigidBodyType,
 };
 
-use crate::{
-    BasePart, BasePartExt, BoxOverlapQuery, Instance, InstanceExt, InstanceId, PVInstance,
-    PVInstanceExt, Part, PartShape, Rig,
-    glam::{Mat4, Quat, Vec3},
-};
+use crate::{glam::*, *};
 
 /// A Rapier-backed physics simulation synchronized with workspace parts.
 ///
@@ -586,7 +582,6 @@ fn vectors_approximately_equal(left: Vec3, right: Vec3) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BoxOverlapQuery, PVInstanceExt, PartExt, Workspace};
 
     #[test]
     fn dynamic_parts_fall_and_rest_on_anchored_parts() {

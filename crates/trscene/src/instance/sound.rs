@@ -1,17 +1,15 @@
 use std::{collections::VecDeque, time::Duration};
 
-use euphorium::{
-    EmitterState, PlaybackState, SoundSource, Soundscape, SoundscapeError, SpatialSound,
-};
+use euphorium::*;
 
-use crate::{Instance, InstanceData, InstanceId, glam::Vec3, scene::audio::velocity};
+use crate::{glam::Vec3, scene::audio::velocity, *};
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// Authored audio properties shared by sound instances.
     #[doc(hidden)]
     #[derive(Clone, Debug, PartialEq)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct SoundSettings {
         /// Encoded audio source. Replacing it preserves playback state when possible.
         #[property(default = SoundSource::empty(), borrow, into)]
@@ -65,7 +63,7 @@ impl Drop for SoundPlayback {
     }
 }
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// A scene-tree sound backed by Euphorium.
     ///
@@ -78,7 +76,7 @@ crate::instance! {
     /// settings, but not playback or queued requests. Destroying a sound removes its
     /// backend voice immediately.
     #[derive(Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Sound {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]

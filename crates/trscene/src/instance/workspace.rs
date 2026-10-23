@@ -2,17 +2,7 @@ use std::rc::Rc;
 
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
-use crate::{
-    BasePartExt, Camera, CameraController, Color3, Controllers, Instance, InstanceData,
-    InstanceExt, InstanceId, InstanceLookup, Lighting, PVInstanceExt, Part, RenderTexture, Rig,
-    Texture, TextureError, TextureHandle, TweenManager, glam::*,
-};
-#[cfg(feature = "default-materials")]
-use crate::{BuiltinMaterial, Material};
-#[cfg(feature = "meshpart")]
-use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
-#[cfg(feature = "physics")]
-use crate::{PhysicsInstance, PhysicsWorld, apply_transform};
+use crate::{glam::*, *};
 
 /// Parameters for querying colliders intersecting a world-space box.
 #[cfg(feature = "physics")]
@@ -60,11 +50,11 @@ pub enum WorkspacePreset {
     Baseplate,
 }
 
-crate::instance! {
+instance! {
     #[instance(default = false, inspect = false)]
     /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
     #[derive(Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Workspace {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]
@@ -516,11 +506,6 @@ impl Default for Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "default-materials")]
-    use crate::TextureProjection;
-    use crate::{BasePart, Camera, Part, PartExt, PartShape, TextureColorSpace, glam::Vec3};
-    #[cfg(feature = "meshpart")]
-    use crate::{Mesh, MeshPart};
 
     #[cfg(feature = "meshpart")]
     #[test]

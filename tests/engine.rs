@@ -1,9 +1,6 @@
 #![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 
-use terrarium::{
-    AppCreationError, Engine, EngineExt, Instance, InstanceClone, InstanceExt, Part, Terrarium,
-    Workspace,
-};
+use terrarium::*;
 
 #[test]
 fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), AppCreationError> {

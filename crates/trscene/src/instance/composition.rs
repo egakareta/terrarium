@@ -2,11 +2,11 @@
 
 use std::any::{Any, TypeId};
 
-use super::{Instance, InstanceData, InstanceId};
+use super::*;
 
 /// Shared and mutable access to a composed storage type.
 ///
-/// Implementations are generated from composition fields by [`crate::instance!`].
+/// Implementations are generated from composition fields by [`instance!`].
 /// Identity storage is excluded from safe projections:
 ///
 /// ```compile_fail,E0277
@@ -193,43 +193,43 @@ pub struct __InstancePropertyProbe<T>(
 #[cfg(feature = "devtools")]
 pub trait __InspectInstanceProperty<T> {
     /// Returns editable fields when the property supports inspection.
-    fn properties(self, value: &T) -> Vec<crate::devtools::Property>;
+    fn properties(self, value: &T) -> Vec<devtools::Property>;
     /// Applies an edit when the property supports inspection.
     fn set_property(
         self,
         value: &mut T,
         path: &str,
-        edit: crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError>;
+        edit: devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError>;
 }
 
 #[cfg(feature = "devtools")]
 impl<T> __InspectInstanceProperty<T> for &__InstancePropertyProbe<T> {
-    fn properties(self, _value: &T) -> Vec<crate::devtools::Property> {
+    fn properties(self, _value: &T) -> Vec<devtools::Property> {
         Vec::new()
     }
     fn set_property(
         self,
         _value: &mut T,
         _path: &str,
-        _edit: crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
-        Err(crate::devtools::PropertyError::NotFound)
+        _edit: devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError> {
+        Err(devtools::PropertyError::NotFound)
     }
 }
 
 #[cfg(feature = "devtools")]
-impl<T: crate::devtools::Inspect> __InspectInstanceProperty<T> for &&__InstancePropertyProbe<T> {
-    fn properties(self, value: &T) -> Vec<crate::devtools::Property> {
-        crate::devtools::Inspect::properties(value)
+impl<T: devtools::Inspect> __InspectInstanceProperty<T> for &&__InstancePropertyProbe<T> {
+    fn properties(self, value: &T) -> Vec<devtools::Property> {
+        devtools::Inspect::properties(value)
     }
     fn set_property(
         self,
         value: &mut T,
         path: &str,
-        edit: crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
-        crate::devtools::Inspect::set_property(value, path, edit)
+        edit: devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError> {
+        devtools::Inspect::set_property(value, path, edit)
     }
 }
 

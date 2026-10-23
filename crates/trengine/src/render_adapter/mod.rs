@@ -6,10 +6,7 @@ use std::sync::{Mutex, OnceLock};
 
 use slotmap::Key;
 
-use crate::{
-    egui_wgpu,
-    trscene::{Color3, Instance, InstanceExt, InstanceId, OutlineMode, RenderOutline, Workspace},
-};
+use crate::{trscene::*, *};
 
 #[cfg(feature = "meshpart")]
 mod viewport;

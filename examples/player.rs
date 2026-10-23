@@ -1,8 +1,4 @@
-use terrarium::{
-    App, AppCreationError, BasePartExt, Camera, CameraExt, Color3, Engine, Instance, InstanceId,
-    PVInstanceExt, Part, PartExt, PartShape, PlayerController, Rig, RigExt, Terrarium, Workspace,
-    egui, glam::Vec3, with_workspace,
-};
+use terrarium::{glam::*, *};
 
 const SPAWN: Vec3 = Vec3::new(0.0, 4.0, 22.0);
 

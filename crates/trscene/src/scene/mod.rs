@@ -6,6 +6,6 @@ pub(crate) mod audio;
 mod physics;
 
 #[cfg(feature = "sound")]
-pub use audio::AudioError;
+pub use audio::*;
 #[cfg(feature = "physics")]
 pub use physics::*;

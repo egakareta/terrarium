@@ -6,10 +6,7 @@ use euphorium::{
 };
 use thiserror::Error;
 
-use crate::{
-    Camera, Instance, InstanceExt, InstanceId, PVInstance, PVInstanceExt, Sound, Workspace,
-    glam::Vec3,
-};
+use crate::{glam::Vec3, *};
 
 /// A failure discovered while updating the workspace's audio scene.
 #[derive(Debug, Error)]
@@ -223,9 +220,6 @@ mod tests {
     use euphorium::{DistanceAttenuation, Occlusion, PlaybackState, SoundSource, SpatialSound};
 
     use super::*;
-    #[cfg(feature = "physics")]
-    use crate::BasePartExt;
-    use crate::{BasePart, Instance, PVInstanceExt, Part, SoundExt, SoundSettingsExt};
 
     fn assert_vector(actual: [f32; 3], expected: Vec3) {
         for (actual, expected) in actual.into_iter().zip(expected.to_array()) {

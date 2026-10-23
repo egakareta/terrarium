@@ -2,9 +2,7 @@ use std::sync::OnceLock;
 
 use thiserror::Error;
 
-#[cfg(feature = "default-materials")]
-use super::BuiltinMaterial;
-use crate::{Color3, Face};
+use crate::*;
 
 /// Number of directional material slots available to a mesh.
 pub const MATERIAL_SLOT_COUNT: usize = Face::ALL.len();
@@ -39,7 +37,7 @@ pub struct TextureSet {
 /// Texture sampling for each slot uses that slot's [`Material::filter`] and
 /// [`Material::projection`].
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
 pub struct Material {
     base_color: [f32; 4],
     metallic: f32,
@@ -344,7 +342,7 @@ pub enum TextureColorSpace {
 
 /// Projection used to sample a material's texture maps.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
 pub enum TextureProjection {
     /// Samples the authored mesh UV coordinates. This is the default and is
     /// appropriate for glTF materials and other UV-authored surfaces.
@@ -361,7 +359,7 @@ pub enum TextureProjection {
 /// `Nearest`/`Bilinear` variants only change whether the closest mip level is
 /// picked (`Nearest`) or two levels are blended (`Linear`).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
 pub enum TextureFilter {
     /// Point sampling for magnification, minification, and mips. Best for
     /// pixel art where texels should stay crisp.

@@ -1,13 +1,10 @@
-use crate::{
-    Instance,
-    glam::{EulerRot, Mat4, Quat, Vec3},
-};
+use crate::{glam::*, *};
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// An object that has a physical location in the world.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct PVInstance {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[default(Mat4::IDENTITY)]
@@ -333,7 +330,6 @@ fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, InstanceExt, Part, Workspace};
 
     #[test]
     fn pivot_to_moves_nested_spatial_descendants_through_non_spatial_nodes() {

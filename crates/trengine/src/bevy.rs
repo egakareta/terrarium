@@ -12,7 +12,7 @@ use bevy_ecs::prelude::*;
 pub use bevy_time as time;
 use bevy_time::{Time, TimePlugin, TimeUpdateStrategy};
 
-use crate::{AppCreationError, egui, trscene::Workspace};
+use crate::{trscene::*, *};
 
 /// Integrates an imperative [`Workspace`] into a Bevy app.
 ///

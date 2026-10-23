@@ -1,4 +1,4 @@
-use crate::glam::{Mat4, Quat, Vec2, Vec3};
+use crate::glam::*;
 
 /// Movement, look, and sprint values independent of any input device.
 ///

@@ -5,9 +5,9 @@ methods. It can extend an existing instance, combine independent capabilities,
 and expose stored or computed properties to the devtools inspector.
 
 ```rust
-use trscene::{Part, prelude::*};
+use terrarium::*;
 
-trscene::instance! {
+instance! {
     /// A primitive with a spring.
     #[derive(Clone, Debug)]
     pub struct SpringPart {
@@ -41,9 +41,9 @@ an `#[data]` field. A type with only `#[compose]` fields can define a
 capability without an instance identity.
 
 ```rust
-use trscene::{Part, prelude::*};
+use terrarium::*;
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct Motor {
         #[property(default = 2.0)]
@@ -51,7 +51,7 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct MotorPart {
         #[extends]
@@ -61,11 +61,11 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct Group {
         #[data]
-        data: trscene::InstanceData,
+        data: InstanceData,
         #[property(default = String::new(), borrow, into)]
         label: String,
     }
@@ -108,7 +108,9 @@ keep the inherited method's name and use a borrowed receiver with concrete
 arguments. Its signature must match the inherited method.
 
 ```rust
-trscene::instance! {
+use terrarium::*;
+
+instance! {
     #[derive(Clone, Debug)]
     pub struct PlanarPart {
         #[extends]
@@ -117,7 +119,7 @@ trscene::instance! {
 
     impl PlanarPart {
         #[r#override(PVInstance::set_pivot)]
-        pub fn set_pivot(&mut self, mut pivot: trscene::glam::Mat4) {
+        pub fn set_pivot(&mut self, mut pivot: glam::Mat4) {
             pivot.w_axis.y = 0.0;
             self.pv_instance_mut().set_pivot(pivot);
         }
@@ -146,26 +148,28 @@ method. Add options to control how it is presented or validated:
 | `validate = method` | Calls the named method with the proposed property value. The edit is rejected if it returns `false`. |
 
 ```rust
-trscene::instance! {
+use terrarium::*;
+
+instance! {
     #[derive(Clone, Debug)]
     pub struct Transform {
         #[data]
-        data: trscene::InstanceData,
-        #[default(trscene::glam::Mat4::IDENTITY)]
-        pivot: trscene::glam::Mat4,
+        data: InstanceData,
+        #[default(glam::Mat4::IDENTITY)]
+        pivot: glam::Mat4,
     }
 
     impl Transform {
         #[property(flatten, validate = accepts_pivot)]
-        pub fn transform(&self) -> trscene::glam::Mat4 {
+        pub fn transform(&self) -> glam::Mat4 {
             self.pivot
         }
 
-        pub fn set_transform(&mut self, transform: trscene::glam::Mat4) {
+        pub fn set_transform(&mut self, transform: glam::Mat4) {
             self.pivot = transform;
         }
 
-        pub fn accepts_pivot(&self, pivot: trscene::glam::Mat4) -> bool {
+        pub fn accepts_pivot(&self, pivot: glam::Mat4) -> bool {
             pivot.is_finite()
         }
     }
@@ -185,10 +189,10 @@ definitions. When a type is declared in a module, set
 default is `crate`.
 
 ```rust
-mod models {
-    use trscene::Part;
+use terrarium::*;
 
-    trscene::instance! {
+mod models {
+    instance! {
         #[instance(path = crate::models)]
         #[derive(Clone, Debug)]
         pub struct SpringPart {
@@ -200,7 +204,7 @@ mod models {
     }
 }
 
-trscene::instance! {
+instance! {
     #[derive(Clone, Debug)]
     pub struct WeightedSpring {
         #[extends]

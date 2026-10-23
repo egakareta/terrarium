@@ -36,8 +36,8 @@
 use std::{any::Any, fmt::Debug};
 
 use crate::{
-    InstanceId, Workspace, egui,
     winit::event::{DeviceEvent, WindowEvent},
+    *,
 };
 
 mod actions;

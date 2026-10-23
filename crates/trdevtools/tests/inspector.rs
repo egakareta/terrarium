@@ -1,10 +1,9 @@
-use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
+use trdevtools::*;
 use trscene::{
-    BasePart, BasePartExt, Color3, Instance, InstanceExt, InstanceId, LightPropertiesExt,
-    PVInstanceExt, Part, PartExt, PartShape, PlayerController, PointLight, Rig, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
     winit::keyboard::KeyCode,
+    *,
 };
 
 #[derive(Clone, Debug, Inspect)]

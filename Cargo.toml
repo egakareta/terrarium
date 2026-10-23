@@ -118,7 +118,6 @@ name = "devtools"
 required-features = ["devtools"]
 
 [dependencies]
-trdevtools = { workspace = true, optional = true }
 trinternal = { workspace = true, optional = true }
 
 [dev-dependencies]

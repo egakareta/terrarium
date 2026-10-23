@@ -4,7 +4,7 @@ use std::{f32::consts::PI, sync::Arc};
 
 use thiserror::Error;
 
-use crate::{Face, Image};
+use crate::*;
 
 /// Errors produced while building a [`Skybox`] from image data.
 #[derive(Debug, Error)]

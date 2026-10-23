@@ -21,8 +21,7 @@ use syn::{
 /// can also select `self` explicitly.
 ///
 /// ```no_run
-/// use trengine::{Engine, with_workspace};
-/// use trengine::trscene::{Instance, Part};
+/// use trengine::{*, trscene::*};
 ///
 /// #[with_workspace]
 /// fn initialize(engine: &mut Engine) {

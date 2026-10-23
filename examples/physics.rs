@@ -1,10 +1,4 @@
-use terrarium::{
-    App, BasePartExt, CameraExt, Color3, Engine, Instance, InstanceId, LightPropertiesExt,
-    Material, PVInstanceExt, Part, PartExt, PartShape, PointLight, PointLightExt, RendererError,
-    Terrarium, eframe, egui,
-    glam::{Mat4, Vec3},
-    with_workspace,
-};
+use terrarium::{glam::*, *};
 
 struct PhysicsApp {
     dynamic_parts: Vec<InstanceId>,

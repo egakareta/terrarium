@@ -1,6 +1,6 @@
-use crate::{Color3, Face, InstanceData};
+use crate::*;
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// Properties shared by all local light types.
     ///
@@ -8,7 +8,7 @@ crate::instance! {
     /// zero, brightness is nonnegative, and angles and ranges are clamped to valid
     /// values.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct LightProperties {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]
@@ -27,7 +27,7 @@ crate::instance! {
     }
 }
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// An omnidirectional light positioned at the center of its nearest physical
     /// ancestor.
@@ -35,7 +35,7 @@ crate::instance! {
     /// A point light renders when it is a descendant of a [`crate::BasePart`],
     /// [`crate::Part`], or `MeshPart` (when that feature is enabled).
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct PointLight {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[extends]
@@ -55,14 +55,14 @@ impl PointLight {
     }
 }
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// A cone light emitted from one face of its nearest physical ancestor.
     ///
     /// The renderer derives a finite influence distance from brightness so spot
     /// lights remain bounded without an additional range property.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct SpotLight {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[extends]
@@ -87,14 +87,14 @@ impl SpotLight {
     }
 }
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// An area light emitted across one face of its nearest physical ancestor.
     ///
     /// Surface lights use the ancestor's face dimensions while shading, producing
     /// softer distance falloff than a point-like spot light without extra draws.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct SurfaceLight {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[extends]
@@ -119,9 +119,6 @@ impl SurfaceLight {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        BasePart, Instance, LightPropertiesExt, PointLightExt, SpotLightExt, SurfaceLightExt,
-    };
 
     #[test]
     fn local_lights_are_instances_with_shared_editable_properties() {

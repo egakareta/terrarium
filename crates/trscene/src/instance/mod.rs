@@ -14,6 +14,8 @@ use std::{
 use serde::{Serialize, de::DeserializeOwned};
 use slotmap::SlotMap;
 
+use crate::*;
+
 pub mod composition;
 pub use composition::*;
 
@@ -206,7 +208,7 @@ impl<T: Spatial> __DetectSpatial<T> for &&__SpatialProbe<T> {
     }
 }
 
-/// Implements the feature-dependent portion of [`crate::instance!`].
+/// Implements the feature-dependent portion of [`instance!`].
 #[doc(hidden)]
 #[cfg(feature = "devtools")]
 #[macro_export]
@@ -234,7 +236,7 @@ macro_rules! __impl_instance_inspection {
     };
 }
 
-/// Implements the feature-dependent portion of [`crate::instance!`].
+/// Implements the feature-dependent portion of [`instance!`].
 #[doc(hidden)]
 #[cfg(not(feature = "devtools"))]
 #[macro_export]
@@ -252,7 +254,7 @@ impl InstanceId {
 }
 
 #[derive(Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
 #[doc(hidden)]
 pub struct InstanceData {
     name: String,
@@ -495,12 +497,12 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
 
     /// Returns fields exposed to the devtools inspector.
     ///
-    /// [`crate::instance!`] exposes annotated properties and inherited APIs.
+    /// [`instance!`] exposes annotated properties and inherited APIs.
     #[cfg(feature = "devtools")]
-    fn properties(&self) -> Vec<crate::devtools::Property> {
-        vec![crate::devtools::Property::new(
+    fn properties(&self) -> Vec<devtools::Property> {
+        vec![devtools::Property::new(
             "name",
-            crate::devtools::PropertyValue::Text(self.name().to_owned()),
+            devtools::PropertyValue::Text(self.name().to_owned()),
         )]
     }
 
@@ -509,8 +511,8 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
     fn validate_property(
         &self,
         path: &str,
-        value: &crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
+        value: &devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError> {
         self.clone_box().set_property(path, value.clone())
     }
 
@@ -519,13 +521,13 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
     fn set_property(
         &mut self,
         path: &str,
-        value: crate::devtools::PropertyValue,
-    ) -> Result<(), crate::devtools::PropertyError> {
+        value: devtools::PropertyValue,
+    ) -> Result<(), devtools::PropertyError> {
         if path != "name" {
-            return Err(crate::devtools::PropertyError::NotFound);
+            return Err(devtools::PropertyError::NotFound);
         }
-        let crate::devtools::PropertyValue::Text(name) = value else {
-            return Err(crate::devtools::PropertyError::InvalidValue);
+        let devtools::PropertyValue::Text(name) = value else {
+            return Err(devtools::PropertyError::InvalidValue);
         };
         self.set_name(name);
         Ok(())
@@ -982,7 +984,6 @@ impl dyn Instance {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, Part, PartShape, Workspace};
 
     #[test]
     fn built_in_objects_implement_instance_and_support_downcasting() {

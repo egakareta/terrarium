@@ -1,16 +1,12 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{
-    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, Instance, InstanceData,
-    InstanceExt, InstanceId, PVInstance, PVInstanceExt, Workspace, glam,
-    glam::{Mat4, Quat, Vec2, Vec3},
-};
+use crate::{glam::*, *};
 
-crate::instance! {
+instance! {
     #[instance(default = false, inspect = false)]
     /// A perspective camera with a world-space pivot.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Camera {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]

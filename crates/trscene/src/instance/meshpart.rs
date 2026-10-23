@@ -2,11 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use thiserror::Error;
 
-use crate::{
-    BasePart, BasePartExt, Face, Instance, MATERIAL_SLOT_COUNT, Material, Mesh, MeshMaterialSlots,
-    Texture, TextureColorSpace, TextureError, TextureFilter, TextureHandle, Vertex, Workspace,
-    glam::{Mat4, Vec2, Vec3},
-};
+use crate::{glam::*, *};
 
 /// Errors produced while decoding a glTF asset or deriving its render view.
 #[derive(Debug, Error)]
@@ -71,7 +67,7 @@ pub enum GltfError {
     Texture(#[from] TextureError),
 }
 
-crate::instance! {
+instance! {
     #[instance(default = false, inspect = false)]
     /// A visible scene object backed by caller-provided or imported mesh data.
     ///
@@ -80,7 +76,7 @@ crate::instance! {
     /// transform, size, tint, and collision metadata use the same API as
     /// [`crate::Part`].
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct MeshPart {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[extends]
@@ -821,7 +817,6 @@ fn append_f32_pixels(rgba: &mut Vec<u8>, pixels: &[u8], channels: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prelude::*;
 
     #[test]
     fn material_returns_only_uniform_effective_slots() {

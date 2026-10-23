@@ -1,16 +1,13 @@
-use crate::{
-    Color3, DEFAULT_MATERIAL, Face, InstanceData, Material, MeshMaterialSlots, PVInstance,
-    PartShape,
-};
+use crate::*;
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// A named, transformable scene node with optional collision metadata.
     ///
     /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
     /// [`Part`] builds on it with primitive geometry.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct BasePart {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]
@@ -91,11 +88,11 @@ fn sanitize_transparency(value: f32) -> f32 {
     }
 }
 
-crate::instance! {
+instance! {
     #[instance(inspect = false)]
     /// A visible scene object rendered with one of the built-in primitive shapes.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Part {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[extends]
@@ -115,11 +112,7 @@ crate::instance! {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        Instance, PVInstanceExt,
-        glam::{EulerRot, Mat4, Quat, Vec3},
-    };
+    use super::{glam::*, *};
 
     #[test]
     fn part_position_and_orientation_accessors_use_the_pivot() {

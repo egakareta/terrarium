@@ -45,7 +45,6 @@ sudo apt install build-essential pkg-config libasound2-dev libjack-jackd2-dev li
 Replace `src/main.rs` with:
 
 ```rust,no_run
-# extern crate terrarium;
 use terrarium::*;
 
 fn main() {

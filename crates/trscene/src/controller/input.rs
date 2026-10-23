@@ -1,10 +1,10 @@
 use crate::{
-    ControllerActions, egui,
-    glam::{Vec2, Vec3},
+    glam::*,
     winit::{
         event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         keyboard::{KeyCode, PhysicalKey},
     },
+    *,
 };
 
 /// Physical key bindings used by [`ControllerInput`].

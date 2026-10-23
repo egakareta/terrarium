@@ -1,13 +1,10 @@
 use glam::Vec3;
 
-use crate::{
-    Face, Vertex, push_quad_with_material_slot, push_quad_with_uv_and_material_slot,
-    push_triangle_with_uv_and_material_slot, triangle_normal,
-};
+use crate::*;
 
 /// Primitive geometry available to a renderable object.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
 pub enum PartShape {
     #[default]
     /// A six-sided box.
@@ -490,7 +487,6 @@ mod tests {
     use glam::Vec3;
 
     use super::*;
-    use crate::Face;
 
     fn assert_face_normal(vertices: &[Vertex], expected: Vec3) {
         let expected = expected.normalize();

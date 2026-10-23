@@ -6,9 +6,9 @@ use tregui::{
     egui_phosphor::regular,
     egui_text_outline,
 };
-use trscene::{Instance, InstanceExt, InstanceId, Workspace};
+use trscene::*;
 
-use super::{Property, PropertyError, PropertyValue};
+use super::*;
 use crate::font_market::FontMarket;
 
 /// Properties shared by the current selection.

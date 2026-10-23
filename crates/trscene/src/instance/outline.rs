@@ -1,6 +1,6 @@
-use crate::{Color3, InstanceData, OutlineMode};
+use crate::*;
 
-crate::instance! {
+instance! {
     #[instance(default = false, inspect = false)]
     /// A render-only instance that outlines its parent and the parent's siblings.
     ///
@@ -9,7 +9,7 @@ crate::instance! {
     /// a part outlines that part and the other renderable children of the part's
     /// parent. Multiple outline instances may select different groups and modes.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Outline {
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]
@@ -63,7 +63,6 @@ crate::instance! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Instance;
 
     #[test]
     fn convenience_constructors_select_each_outline_mode() {

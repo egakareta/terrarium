@@ -1,19 +1,14 @@
 use std::time::Duration;
 
 use approx::assert_abs_diff_eq;
-#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-use terrarium::bevy::{
-    EguiContext,
-    app::{AppExit, Plugin, Startup, Update},
-};
 use terrarium::{
     bevy::{
-        TerrariumPlugin, TerrariumSet,
-        app::{App, PostUpdate},
+        app::{App, *},
         ecs::prelude::*,
-        time::{Time, TimePlugin, TimeUpdateStrategy, Virtual},
+        time::*,
+        *,
     },
-    glam::Vec3,
+    glam::*,
     *,
 };
 

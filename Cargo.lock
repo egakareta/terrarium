@@ -4478,7 +4478,6 @@ dependencies = [
  "js-sys",
  "paste",
  "pollster 1.0.1",
- "trdevtools",
  "trdylib",
  "trinternal",
  "wasm-bindgen-futures",

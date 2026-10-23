@@ -1,8 +1,4 @@
-use crate::{
-    BasePart, BasePartExt, Color3, Instance, InstanceExt, InstanceId, Workspace,
-    glam::{Vec2, Vec3, Vec4},
-    instance::{InstanceTransformUpdate, update_instance_transform},
-};
+use crate::{glam::*, instance::*, *};
 
 /// Interpolates a value between two keyframes.
 pub trait Tweenable: Clone {
@@ -520,7 +516,6 @@ impl TweenManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Instance, PVInstanceExt, Part};
 
     #[test]
     fn tween_interpolates_and_finishes() {

@@ -1,8 +1,4 @@
-use terrarium::{
-    Instance, Part, Workspace,
-    devtools::{Devtools, PropertyValue},
-    egui::Modifiers,
-};
+use terrarium::{egui::Modifiers, trdevtools::*, *};
 
 #[test]
 fn facade_exposes_the_standalone_inspector_crate() {

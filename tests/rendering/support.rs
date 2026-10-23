@@ -1,7 +1,7 @@
 #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 use std::sync::{OnceLock, mpsc};
 
-use terrarium::{glam::Vec3, *};
+use terrarium::{glam::*, *};
 
 const WIDTH: u32 = 128;
 const HEIGHT: u32 = 128;

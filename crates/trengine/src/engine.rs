@@ -11,10 +11,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{
-    trscene::{Instance, InstanceClone, InstanceData, InstanceId, Workspace, WorkspacePreset},
-    *,
-};
+use crate::{trscene::*, *};
 
 #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 #[wasm_bindgen::prelude::wasm_bindgen]

@@ -1,7 +1,4 @@
-use terrarium::{
-    App, AppCreationError, Engine, Terrarium, eframe, egui,
-    egui::{FontId, RichText},
-};
+use terrarium::{egui::*, *};
 
 struct CloseAfterFrames {
     completed: std::sync::Arc<std::sync::atomic::AtomicUsize>,

@@ -1,10 +1,4 @@
-use terrarium::{
-    AnimationClip, AnimationPlayer, AnimationTrack, App, AppCreationError, BasePartExt, Color3,
-    Easing, Engine, Instance, InstanceId, Keyframe, PVInstanceExt, Part, Rig, RigExt, Terrarium,
-    eframe, egui,
-    glam::{Mat4, Quat, Vec3},
-    with_workspace,
-};
+use terrarium::{glam::*, *};
 
 struct RigApp {
     rig: InstanceId,
