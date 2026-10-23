@@ -19,7 +19,7 @@ fn frame(context: &Context, workspace: &mut Workspace, events: Vec<Event>) {
         events,
         ..Default::default()
     };
-    let mut output = context.run_ui(input, |ui| workspace.process_eframe_input(ui.ctx()));
+    let mut output = context.run_ui(input, |ui| workspace.process_input(ui.ctx()));
     output.textures_delta.clear();
 }
 
@@ -384,7 +384,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
                 .get_mut::<PlayerController>(id)
                 .unwrap();
             player.process_mouse_motion((20.0, 0.0));
-            player.process_eframe_input(ui.ctx());
+            player.process_input(ui.ctx());
         },
     );
     output.textures_delta.clear();
@@ -434,7 +434,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
                 .get_mut::<PlayerController>(id)
                 .unwrap();
             player.process_mouse_motion((20.0, 0.0));
-            player.process_eframe_input(ui.ctx());
+            player.process_input(ui.ctx());
         },
     );
     output.textures_delta.clear();

@@ -72,9 +72,9 @@ pub trait Controller: Any + Debug + ControllerClone {
     }
 
     /// Processes one frame of egui input and paints touch controls, if enabled.
-    fn process_eframe_input(&mut self, context: &egui::Context) {
+    fn process_input(&mut self, context: &egui::Context) {
         if let Some(input) = self.input_mut() {
-            input.process_eframe_input(context);
+            input.process_input(context);
         }
     }
 
@@ -194,10 +194,10 @@ impl Controllers {
             .filter_map(|id| Some((*id, self.entries.get(*id)?.as_deref()?)))
     }
 
-    pub(crate) fn process_eframe_input(&mut self, context: &egui::Context) {
+    pub(crate) fn process_input(&mut self, context: &egui::Context) {
         for id in &self.order {
             if let Some(Some(controller)) = self.entries.get_mut(*id) {
-                controller.process_eframe_input(context);
+                controller.process_input(context);
             }
         }
     }

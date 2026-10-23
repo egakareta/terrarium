@@ -530,7 +530,7 @@ fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -
     } else {
         0.0
     };
-    workspace.process_eframe_input(context);
+    workspace.process_input(context);
     delta
 }
 

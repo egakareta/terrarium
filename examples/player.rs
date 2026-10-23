@@ -257,7 +257,7 @@ mod tests {
             events,
             ..Default::default()
         };
-        let mut output = context.run_ui(input, |ui| workspace.process_eframe_input(ui.ctx()));
+        let mut output = context.run_ui(input, |ui| workspace.process_input(ui.ctx()));
         output.textures_delta.clear();
     }
 
