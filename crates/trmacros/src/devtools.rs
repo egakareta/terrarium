@@ -1,14 +1,9 @@
-#![deny(missing_docs)]
-#![doc = include_str!("../README.md")]
-
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
 use quote::{format_ident, quote};
 use syn::{Data, DeriveInput, Fields, parse_macro_input};
 
-/// Derives field inspection for named structs and enums with unit variants.
-#[proc_macro_derive(Inspect, attributes(inspect))]
-pub fn inspect(input: TokenStream) -> TokenStream {
+pub(crate) fn inspect(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand(input)
         .unwrap_or_else(syn::Error::into_compile_error)

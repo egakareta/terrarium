@@ -4633,17 +4633,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trdevtools-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 3.0.9",
- "trdevtools",
-]
-
-[[package]]
 name = "trdylib"
 version = "0.1.0"
 dependencies = [
@@ -4689,8 +4678,8 @@ dependencies = [
  "slotmap",
  "trdevtools",
  "tregui",
- "trengine-derive",
  "trfont",
+ "trmacros",
  "trrender",
  "trscene",
  "wasm-bindgen",
@@ -4698,16 +4687,6 @@ dependencies = [
  "web-sys",
  "wgpu",
  "winit",
-]
-
-[[package]]
-name = "trengine-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
- "trengine",
 ]
 
 [[package]]
@@ -4724,6 +4703,20 @@ dependencies = [
  "trclipboard",
  "trengine",
  "trpersistence",
+]
+
+[[package]]
+name = "trmacros"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+ "trdevtools",
+ "trengine",
+ "trscene",
 ]
 
 [[package]]
@@ -4761,7 +4754,7 @@ dependencies = [
  "image",
  "serde_json",
  "thiserror 2.0.21",
- "trdevtools-derive",
+ "trmacros",
 ]
 
 [[package]]
@@ -4778,21 +4771,9 @@ dependencies = [
  "serde_json",
  "slotmap",
  "thiserror 2.0.21",
+ "trmacros",
  "trrendert",
- "trscene-derive",
  "winit",
-]
-
-[[package]]
-name = "trscene-derive"
-version = "0.1.0"
-dependencies = [
- "heck",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 3.0.9",
- "trscene",
 ]
 
 [[package]]

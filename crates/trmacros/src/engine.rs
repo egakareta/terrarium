@@ -1,6 +1,3 @@
-#![deny(missing_docs)]
-//! Runtime context macros for Terrarium.
-
 use proc_macro::TokenStream;
 use proc_macro2::Ident;
 use quote::quote;
@@ -14,44 +11,7 @@ use syn::{
     visit_mut::{self, VisitMut},
 };
 
-/// Makes `workspace` shorthand for per-use access to an engine's mutable workspace.
-///
-/// The function must have one `&mut Engine` parameter. Use `#[with_workspace(name)]`
-/// to select a parameter explicitly, including when its type is an alias. Methods
-/// can also select `self` explicitly.
-///
-/// ```no_run
-/// use trengine::{*, trscene::*};
-///
-/// #[with_workspace]
-/// fn initialize(engine: &mut Engine) {
-///     workspace.add_child(Part::new());
-///     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-///     workspace.lighting.with_clock_time(18.0);
-/// }
-/// ```
-///
-/// Local `workspace` bindings shadow the shorthand. Nested items are not rewritten.
-/// Standard assertion, formatting, and `vec!` macro expressions are supported;
-/// custom macro syntax and implicit format-string captures are not rewritten.
-/// Normal Rust borrowing rules still apply to references retained across uses.
-///
-/// ```compile_fail
-/// use trengine_derive::with_workspace;
-///
-/// #[with_workspace]
-/// fn missing_engine() {}
-/// ```
-///
-/// ```compile_fail
-/// use trengine_derive::with_workspace;
-/// struct Engine;
-///
-/// #[with_workspace]
-/// fn ambiguous(first: &mut Engine, second: &mut Engine) {}
-/// ```
-#[proc_macro_attribute]
-pub fn with_workspace(attribute: TokenStream, item: TokenStream) -> TokenStream {
+pub(crate) fn with_workspace(attribute: TokenStream, item: TokenStream) -> TokenStream {
     expand(attribute.into(), item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()

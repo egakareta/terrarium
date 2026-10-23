@@ -21,6 +21,11 @@ jobs:
           bootstrap: true
           bootstrap_args: "--update"
       - uses: Swatinem/rust-cache@v2
+      - name: Check macro feature combinations
+        run: |
+          for features in '' scene devtools engine scene,devtools scene,engine devtools,engine scene,devtools,engine; do
+            cargo check -p trmacros --lib --no-default-features --features "$features" --locked
+          done
       - run: mise run check
   test-native:
     runs-on: ubuntu-latest

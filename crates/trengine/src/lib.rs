@@ -6,8 +6,8 @@ pub use eframe::{self, egui, egui_wgpu, wgpu};
 pub use trdevtools;
 #[cfg(feature = "phosphor")]
 pub use tregui::egui_phosphor;
-pub use trengine_derive::*;
 pub use trfont;
+pub use trmacros::with_workspace;
 pub use trrender;
 pub use trscene;
 pub use winit;
