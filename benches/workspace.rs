@@ -2,7 +2,7 @@
 
 extern crate test;
 
-use terrarium::{BasePart, Instance, InstanceId, Part, Workspace};
+use terrarium::{BasePart, Instance, InstanceExt, InstanceId, Part, Workspace};
 use test::{Bencher, black_box};
 
 const FLAT_CHILDREN: usize = 4_096;
@@ -64,7 +64,7 @@ fn workspace_indexed_lookup(bencher: &mut Bencher) {
     bencher.iter(|| {
         let found = ids
             .iter()
-            .filter(|&&id| workspace.instance(id).is_some())
+            .filter(|&&id| workspace.view::<dyn Instance>(id).is_some())
             .count();
         black_box(found);
     });
@@ -90,7 +90,10 @@ fn workspace_destroy_nested_subtrees(bencher: &mut Bencher) {
         let (mut workspace, roots) = build_subtree_workspace(SUBTREE_ROOTS, SUBTREE_CHILDREN);
         let mut destroyed = 0;
         for id in roots {
-            if workspace.instance_mut(id).is_some_and(Instance::destroy) {
+            if workspace
+                .view_mut::<dyn Instance>(id)
+                .is_some_and(Instance::destroy)
+            {
                 destroyed += 1;
             }
         }

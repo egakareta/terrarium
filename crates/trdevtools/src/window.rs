@@ -6,7 +6,7 @@ use tregui::{
     egui_phosphor::regular,
     egui_text_outline,
 };
-use trscene::{Instance, InstanceId, Workspace};
+use trscene::{Instance, InstanceExt, InstanceId, Workspace};
 
 use super::{Property, PropertyError, PropertyValue};
 use crate::font_market::FontMarket;
@@ -27,6 +27,11 @@ pub trait DevtoolsHost {
 
     /// Returns mutable access to the workspace being inspected.
     fn workspace(&mut self) -> &mut Workspace;
+
+    /// Returns the instance-tree root being inspected.
+    fn root(&mut self) -> &mut dyn Instance {
+        self.workspace()
+    }
 
     /// Renders the application's scene content with the current DevTools selection.
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]);
@@ -146,29 +151,31 @@ impl Devtools {
     }
 
     /// Returns properties common to every selected instance, marking mixed values.
-    pub fn properties(&self, workspace: &Workspace) -> Vec<SelectionProperty> {
-        properties_for_selection(&self.selected, workspace)
+    pub fn properties(&self, root: &dyn Instance) -> Vec<SelectionProperty> {
+        properties_for_selection(&self.selected, root)
     }
 
     /// Applies an edit to a common editable field of the selection.
     pub fn edit_property(
         &mut self,
-        workspace: &mut Workspace,
+        root: &mut dyn Instance,
         path: &str,
         value: PropertyValue,
     ) -> Result<(), PropertyError> {
-        self.prune(workspace);
-        edit_selection_property(workspace, &self.selected, path, value)
+        self.prune(root);
+        edit_selection_property(root, &self.selected, path, value)
     }
 
-    /// Destroys selected instances and their descendants; the workspace root is retained.
-    pub fn destroy_selection(&mut self, workspace: &mut Workspace) {
+    /// Destroys selected instances and their descendants, retaining the root and persistent children.
+    pub fn destroy_selection(&mut self, root: &mut dyn Instance) {
         for id in self.selected.clone() {
-            if let Some(instance) = workspace.instance_mut(id) {
+            if id != root.id()
+                && let Some(instance) = resolve_mut(root, id)
+            {
                 instance.destroy();
             }
         }
-        self.prune(workspace);
+        self.prune(root);
         self.error = None;
     }
 
@@ -209,7 +216,7 @@ impl Devtools {
         }
         let scene_title = host.scene_title().to_owned();
         let workspace_id = host.workspace().id();
-        self.prune(host.workspace());
+        self.prune(host.root());
         self.focus_scene_on_camera_input(&context, host.workspace());
 
         if !self.visible {
@@ -290,13 +297,13 @@ impl Devtools {
         if let Some(selection) = context_delete_selection {
             self.selected = selection;
             context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
-            self.destroy_selection(host.workspace());
+            self.destroy_selection(host.root());
         } else if self.active
             && !context.text_edit_focused()
             && pressed(&context, egui::Key::Delete)
         {
             context.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete));
-            self.destroy_selection(host.workspace());
+            self.destroy_selection(host.root());
         }
     }
 
@@ -318,12 +325,9 @@ impl Devtools {
             });
     }
 
-    fn prune(&mut self, workspace: &Workspace) {
-        self.selected.retain(|&id| resolve(workspace, id).is_some());
-        if self
-            .anchor
-            .is_some_and(|id| resolve(workspace, id).is_none())
-        {
+    fn prune(&mut self, root: &dyn Instance) {
+        self.selected.retain(|&id| resolve(root, id).is_some());
+        if self.anchor.is_some_and(|id| resolve(root, id).is_none()) {
             self.anchor = None;
         }
     }
@@ -396,8 +400,8 @@ impl TabViewer for DevtoolsTabViewer<'_> {
 
 impl DevtoolsTabViewer<'_> {
     fn show_explorer(&mut self, ui: &mut egui::Ui) {
-        let workspace = self.host.workspace();
-        let workspace_id = workspace.id();
+        let root = self.host.root();
+        let root_id = root.id();
         let context_delete_selection = &mut *self.context_delete_selection;
         if self.tree_state.selected().as_slice() != self.selected.as_slice() {
             self.tree_state.set_selected(self.selected.clone());
@@ -407,9 +411,12 @@ impl DevtoolsTabViewer<'_> {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let (_, actions) =
-                    TreeView::new(ui.make_persistent_id(("workspace_tree", workspace_id)))
+                    TreeView::new(ui.make_persistent_id(("workspace_tree", root_id)))
                         .fallback_context_menu(|ui, ids| {
-                            let can_delete = ids.iter().any(|&id| id != workspace_id);
+                            let can_delete = ids.iter().any(|&id| {
+                                id != root_id
+                                    && resolve(root, id).is_some_and(Instance::is_destroyable)
+                            });
                             if ui
                                 .add_enabled(
                                     can_delete,
@@ -425,7 +432,7 @@ impl DevtoolsTabViewer<'_> {
                         .set_selection_modifier(egui::Modifiers::COMMAND)
                         .allow_drag_and_drop(false)
                         .show_state(ui, self.tree_state, |builder| {
-                            build_tree(builder, workspace, true);
+                            build_tree(builder, root, true);
                         });
                 for action in actions {
                     if let Action::SetSelected(selection) = action {
@@ -456,7 +463,7 @@ impl DevtoolsTabViewer<'_> {
     }
 
     fn show_properties(&mut self, ui: &mut egui::Ui) {
-        let workspace = self.host.workspace();
+        let root = self.host.root();
         if self.selected.is_empty() {
             ui.label("Select an instance to inspect its properties.");
         }
@@ -467,7 +474,7 @@ impl DevtoolsTabViewer<'_> {
             .id_salt("properties")
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for field in properties_for_selection(self.selected, workspace) {
+                for field in properties_for_selection(self.selected, root) {
                     let mut value = field.property.value.clone();
                     if let PropertyValue::Json(json) = &mut value
                         && let Some(draft) = self.json_drafts.get(&field.property.path)
@@ -496,10 +503,9 @@ impl DevtoolsTabViewer<'_> {
                         if let PropertyValue::Json(json) = &value {
                             self.json_drafts.insert(path.clone(), json.clone());
                         }
-                        *self.error =
-                            edit_selection_property(workspace, self.selected, &path, value)
-                                .err()
-                                .map(|error| error.to_string());
+                        *self.error = edit_selection_property(root, self.selected, &path, value)
+                            .err()
+                            .map(|error| error.to_string());
                         if self.error.is_none() {
                             self.json_drafts.remove(&path);
                         }
@@ -540,9 +546,9 @@ fn default_dock_state() -> DockState<DevtoolsTab> {
 
 fn properties_for_selection(
     selected: &[InstanceId],
-    workspace: &Workspace,
+    root: &dyn Instance,
 ) -> Vec<SelectionProperty> {
-    let mut instances = selected.iter().filter_map(|&id| resolve(workspace, id));
+    let mut instances = selected.iter().filter_map(|&id| resolve(root, id));
     let Some(first) = instances.next() else {
         return Vec::new();
     };
@@ -572,12 +578,12 @@ fn properties_for_selection(
 }
 
 fn edit_selection_property(
-    workspace: &mut Workspace,
+    root: &mut dyn Instance,
     selected: &[InstanceId],
     path: &str,
     value: PropertyValue,
 ) -> Result<(), PropertyError> {
-    let Some(property) = properties_for_selection(selected, workspace)
+    let Some(property) = properties_for_selection(selected, root)
         .into_iter()
         .find(|property| property.property.path == path && property.property.editable)
     else {
@@ -587,12 +593,12 @@ fn edit_selection_property(
         return Err(PropertyError::InvalidValue);
     }
     for &id in selected {
-        resolve(workspace, id)
+        resolve(root, id)
             .ok_or(PropertyError::NotFound)?
             .validate_property(path, &value)?;
     }
     for &id in selected {
-        resolve_mut(workspace, id)
+        resolve_mut(root, id)
             .ok_or(PropertyError::NotFound)?
             .set_property(path, value.clone())?;
     }
@@ -621,20 +627,12 @@ fn show_development_notice(context: &egui::Context) {
         });
 }
 
-fn resolve(workspace: &Workspace, id: InstanceId) -> Option<&dyn Instance> {
-    if id == workspace.id() {
-        Some(workspace)
-    } else {
-        workspace.instance(id)
-    }
+fn resolve(root: &dyn Instance, id: InstanceId) -> Option<&dyn Instance> {
+    root.view::<dyn Instance>(id)
 }
 
-fn resolve_mut(workspace: &mut Workspace, id: InstanceId) -> Option<&mut dyn Instance> {
-    if id == workspace.id() {
-        Some(workspace)
-    } else {
-        workspace.instance_mut(id)
-    }
+fn resolve_mut(root: &mut dyn Instance, id: InstanceId) -> Option<&mut dyn Instance> {
+    root.view_mut::<dyn Instance>(id)
 }
 
 fn compatible(a: &PropertyValue, b: &PropertyValue) -> bool {
@@ -661,7 +659,7 @@ fn build_tree(builder: &mut TreeViewBuilder<'_, InstanceId>, instance: &dyn Inst
     } else {
         let is_open = builder.node(
             NodeBuilder::dir(instance.id())
-                .default_open(root)
+                .default_open(root || instance.is_a::<Workspace>())
                 .icon(|ui| {
                     ui.label(regular::FOLDER);
                 })

@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    trscene::{InstanceId, Workspace, WorkspacePreset},
+    trscene::{Instance, InstanceClone, InstanceData, InstanceId, Workspace, WorkspacePreset},
     *,
 };
 
@@ -144,27 +144,92 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
-/// Owns a [`Workspace`] and renderer integrated with [`eframe`].
-pub struct Engine {
-    renderer: RendererHandle,
-    /// The [`Workspace`] rendered by this engine.
-    pub workspace: Workspace,
-    /// The docked workspace inspector.
-    #[cfg(feature = "devtools")]
-    pub devtools: trdevtools::Devtools,
-    #[cfg(feature = "devtools")]
-    title: String,
-    #[cfg(feature = "devtools")]
-    devtools_render_selection: Option<Vec<InstanceId>>,
-    creation_context: eframe::CreationContext<'static>,
-    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-    renderer_id: usize,
-    clear_color: [f32; 4],
-    #[cfg(feature = "bevy")]
-    bevy_app: Option<bevy_app::App>,
+trscene::instance! {
+    #[instance(default = false, inspect = false)]
+    /// The instance-tree root, owning a [`Workspace`] and renderer integrated with [`eframe`].
+    ///
+    /// Add scene instances through [`Self::workspace_mut`]. The workspace cannot be
+    /// destroyed independently, and the live engine does not support instance cloning.
+    pub struct Engine {
+        #[data]
+        instance: Box<InstanceData>,
+        renderer: RendererHandle,
+        /// The docked workspace inspector.
+        #[cfg(feature = "devtools")]
+        pub devtools: trdevtools::Devtools,
+        #[cfg(feature = "devtools")]
+        title: String,
+        #[cfg(feature = "devtools")]
+        devtools_render_selection: Option<Vec<InstanceId>>,
+        creation_context: eframe::CreationContext<'static>,
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
+        renderer_id: usize,
+        clear_color: [f32; 4],
+        #[cfg(feature = "bevy")]
+        bevy_app: Option<bevy_app::App>,
+    }
+}
+
+trscene::__instance_inspection_items! {
+    impl trscene::devtools::Inspect for Engine {
+        fn properties(&self) -> Vec<trscene::devtools::Property> {
+            trscene::devtools::Inspect::properties(&self.instance)
+        }
+
+        fn validate_property(
+            &self,
+            path: &str,
+            value: &trscene::devtools::PropertyValue,
+        ) -> Result<(), trscene::devtools::PropertyError> {
+            trscene::devtools::Inspect::validate_property(&self.instance, path, value)
+        }
+
+        fn set_property(
+            &mut self,
+            path: &str,
+            value: trscene::devtools::PropertyValue,
+        ) -> Result<(), trscene::devtools::PropertyError> {
+            trscene::devtools::Inspect::set_property(&mut self.instance, path, value)
+        }
+    }
+}
+
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine")
+            .field("instance", &self.instance)
+            .finish_non_exhaustive()
+    }
+}
+
+impl InstanceClone for Engine {
+    fn try_clone_box(&self) -> Option<Box<dyn Instance>> {
+        None
+    }
+}
+
+fn engine_workspace(instance: &mut InstanceData) -> &mut Workspace {
+    instance
+        .children_mut()
+        .next()
+        .expect("engine workspace")
+        .downcast_mut::<Workspace>()
+        .expect("engine workspace")
 }
 
 impl Engine {
+    /// Returns the workspace rendered by this engine.
+    pub fn workspace(&self) -> &Workspace {
+        self.children()[0]
+            .downcast_ref::<Workspace>()
+            .expect("engine workspace")
+    }
+
+    /// Returns mutable access to the workspace rendered by this engine.
+    pub fn workspace_mut(&mut self) -> &mut Workspace {
+        engine_workspace(&mut self.instance)
+    }
+
     #[cfg(feature = "devtools")]
     fn with_devtools_render_selection<R>(
         &mut self,
@@ -215,9 +280,12 @@ impl Engine {
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let renderer_id = register_renderer(&renderer);
 
+        let mut instance = InstanceData::new_root("Engine");
+        instance.add_persistent_child(Box::new(workspace));
+
         Ok(Self {
+            instance,
             renderer,
-            workspace,
             #[cfg(feature = "devtools")]
             devtools: {
                 let mut devtools = trdevtools::Devtools::default();
@@ -299,17 +367,18 @@ impl Engine {
 
     /// Processes controller input, advances the workspace, and requests the next frame.
     pub fn update(&mut self, context: &egui::Context) {
+        let workspace = engine_workspace(&mut self.instance);
         #[cfg(feature = "devtools")]
         self.devtools
-            .focus_scene_on_camera_input(context, &self.workspace);
-        let delta = process_workspace_input(&mut self.workspace, context);
+            .focus_scene_on_camera_input(context, workspace);
+        let delta = process_workspace_input(workspace, context);
         #[cfg(feature = "bevy")]
         if let Some(app) = self.bevy_app.as_mut() {
-            crate::bevy::update_app(app, &mut self.workspace, context, delta);
+            crate::bevy::update_app(app, workspace, context, delta);
             context.request_repaint();
             return;
         }
-        self.workspace.update(delta);
+        workspace.update(delta);
         context.request_repaint();
     }
 
@@ -323,7 +392,12 @@ impl Engine {
             .to_vec();
         #[cfg(not(feature = "devtools"))]
         let selected: Vec<InstanceId> = Vec::new();
-        prepare_workspace(&self.renderer, &mut self.workspace, ui, &selected)
+        prepare_workspace(
+            &self.renderer,
+            engine_workspace(&mut self.instance),
+            ui,
+            &selected,
+        )
     }
 
     /// Registers the paint callback for the workspace prepared with [`Self::prepare`].
@@ -655,7 +729,11 @@ impl trdevtools::DevtoolsHost for Engine {
     }
 
     fn workspace(&mut self) -> &mut Workspace {
-        &mut self.workspace
+        self.workspace_mut()
+    }
+
+    fn root(&mut self) -> &mut dyn Instance {
+        self
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
@@ -764,7 +842,11 @@ impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
     }
 
     fn workspace(&mut self) -> &mut Workspace {
-        &mut self.engine.workspace
+        self.engine.workspace_mut()
+    }
+
+    fn root(&mut self) -> &mut dyn Instance {
+        self.engine
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
@@ -844,19 +926,18 @@ impl Drop for Engine {
 
 /// Convenience access to the owned [`Workspace`].
 ///
-/// Method calls and field accesses that are not found on [`Engine`] itself
-/// resolve to its workspace, so `engine.add_child(part)` works without
-/// spelling out `engine.workspace`.
+/// Methods and fields not provided by [`Engine`] resolve to its workspace.
+/// Instance methods operate on the engine root instead.
 impl Deref for Engine {
     type Target = Workspace;
     fn deref(&self) -> &Self::Target {
-        &self.workspace
+        self.workspace()
     }
 }
 
 impl DerefMut for Engine {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.workspace
+        self.workspace_mut()
     }
 }
 
@@ -1002,7 +1083,18 @@ impl<'a> Terrarium<'a> {
                 creation_context.egui_ctx.set_fonts(font_definitions);
             }
             configure_egui_style(&creation_context.egui_ctx);
-            let engine = Engine::new(creation_context, size, Workspace::preset(preset))?;
+            let workspace = Workspace::preset(preset);
+            #[cfg(feature = "bevy")]
+            let (workspace, bevy_app) = {
+                let mut workspace = workspace;
+                let app = bevy_app
+                    .map(|app| {
+                        crate::bevy::attach_app(app, &mut workspace, &creation_context.egui_ctx)
+                    })
+                    .transpose()?;
+                (workspace, app)
+            };
+            let engine = Engine::new(creation_context, size, workspace)?;
             #[cfg(any(feature = "bevy", feature = "devtools"))]
             let mut engine = engine;
             #[cfg(feature = "devtools")]
@@ -1014,12 +1106,8 @@ impl<'a> Terrarium<'a> {
                 .devtools
                 .set_base_font_definitions(base_font_definitions);
             #[cfg(feature = "bevy")]
-            if let Some(app) = bevy_app {
-                engine.bevy_app = Some(crate::bevy::attach_app(
-                    app,
-                    &mut engine.workspace,
-                    &creation_context.egui_ctx,
-                )?);
+            {
+                engine.bevy_app = bevy_app;
             }
             store_engine(&app_engine_slot, engine);
 
@@ -1028,7 +1116,7 @@ impl<'a> Terrarium<'a> {
             #[cfg(feature = "bevy")]
             with_engine(&app_engine_slot, |engine| {
                 if let Some(app) = engine.bevy_app.as_mut() {
-                    crate::bevy::finalize_app(app, &mut engine.workspace);
+                    crate::bevy::finalize_app(app, engine_workspace(&mut engine.instance));
                 }
             });
             Ok(Box::new(AppAdapter {

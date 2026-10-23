@@ -1,8 +1,8 @@
 use std::ops::{Deref, DerefMut};
 
 use crate::{
-    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, InstanceData,
-    InstanceId, PVInstance, PVInstanceExt, Workspace, glam,
+    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, Instance, InstanceData,
+    InstanceExt, InstanceId, PVInstance, PVInstanceExt, Workspace, glam,
     glam::{Mat4, Quat, Vec2, Vec3},
 };
 
@@ -398,7 +398,7 @@ impl Controller for CameraController {
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
         let subject = workspace.current_camera.subject().and_then(|id| {
             workspace
-                .instance(id)
+                .view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
         self.update_camera(&mut workspace.current_camera, subject, delta_seconds);

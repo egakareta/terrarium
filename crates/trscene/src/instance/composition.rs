@@ -2,7 +2,7 @@
 
 use std::any::{Any, TypeId};
 
-use super::{Instance, InstanceData};
+use super::{Instance, InstanceData, InstanceId};
 
 /// Shared and mutable access to a composed storage type.
 ///
@@ -94,7 +94,65 @@ pub trait InstanceType: 'static {
     type Api: Instance + ?Sized + 'static;
     /// Returns this type's composition graph node.
     fn descriptor() -> &'static InstanceClass;
+
+    /// Projects an instance into this type's receiver-preserving API.
+    #[doc(hidden)]
+    fn __view(instance: &dyn Instance) -> Option<&Self::Api> {
+        let query = instance
+            .query(TypeId::of::<Self>())?
+            .downcast_ref::<InstanceQuery<Self::Api>>()?;
+        Some((query.shared)(instance.as_any()))
+    }
+
+    /// Projects mutable access into this type's receiver-preserving API.
+    #[doc(hidden)]
+    fn __view_mut(instance: &mut dyn Instance) -> Option<&mut Self::Api> {
+        let query = instance
+            .query(TypeId::of::<Self>())?
+            .downcast_ref::<InstanceQuery<Self::Api>>()?;
+        Some((query.mutable)(instance.as_any_mut()))
+    }
 }
+
+impl InstanceType for dyn Instance {
+    type Api = dyn Instance;
+
+    fn descriptor() -> &'static InstanceClass {
+        &InstanceClass {
+            name: "Instance",
+            type_id: TypeId::of::<Self>,
+            bases: &[],
+        }
+    }
+
+    fn __view(instance: &dyn Instance) -> Option<&Self::Api> {
+        Some(instance)
+    }
+
+    fn __view_mut(instance: &mut dyn Instance) -> Option<&mut Self::Api> {
+        Some(instance)
+    }
+}
+
+/// Typed access to an instance and its descendants, including through trait objects.
+pub trait InstanceExt: Instance {
+    /// Borrows an instance by ID, preserving its identity and inherited APIs.
+    ///
+    /// The ID must belong to this instance or one of its descendants. Use
+    /// `view::<dyn Instance>` when no specific class or capability is required.
+    fn view<T: InstanceType + ?Sized>(&self, id: InstanceId) -> Option<&T::Api> {
+        T::__view(super::resolve_instance(self.as_instance(), id)?)
+    }
+
+    /// Mutably borrows an instance by ID with its owning receiver's overrides.
+    ///
+    /// The ID must belong to this instance or one of its descendants.
+    fn view_mut<T: InstanceType + ?Sized>(&mut self, id: InstanceId) -> Option<&mut T::Api> {
+        T::__view_mut(super::resolve_instance_mut(self.as_instance_mut(), id)?)
+    }
+}
+
+impl<T: Instance + ?Sized> InstanceExt for T {}
 
 /// One node in the generated composition graph.
 pub struct InstanceClass {
@@ -108,7 +166,7 @@ pub struct InstanceClass {
 
 impl InstanceClass {
     /// Reports whether this class provides `T`, directly or transitively.
-    pub fn is_a<T: InstanceType>(&self) -> bool {
+    pub fn is_a<T: InstanceType + ?Sized>(&self) -> bool {
         (self.type_id)() == TypeId::of::<T>() || self.bases.iter().any(|base| base().is_a::<T>())
     }
 }
@@ -176,24 +234,8 @@ impl<T: crate::devtools::Inspect> __InspectInstanceProperty<T> for &&__InstanceP
 }
 
 impl dyn Instance {
-    /// Borrows an inherited API while preserving this instance's identity.
-    pub fn view<T: InstanceType>(&self) -> Option<&T::Api> {
-        let query = self
-            .query(TypeId::of::<T>())?
-            .downcast_ref::<InstanceQuery<T::Api>>()?;
-        Some((query.shared)(self.as_any()))
-    }
-
-    /// Mutably borrows an inherited API with the owning receiver's overrides.
-    pub fn view_mut<T: InstanceType>(&mut self) -> Option<&mut T::Api> {
-        let query = self
-            .query(TypeId::of::<T>())?
-            .downcast_ref::<InstanceQuery<T::Api>>()?;
-        Some((query.mutable)(self.as_any_mut()))
-    }
-
     /// Tests generated class ancestry without changing exact downcast semantics.
-    pub fn is_a<T: InstanceType>(&self) -> bool {
-        self.query(TypeId::of::<T>()).is_some()
+    pub fn is_a<T: InstanceType + ?Sized>(&self) -> bool {
+        T::__view(self).is_some()
     }
 }

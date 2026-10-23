@@ -93,10 +93,14 @@ impl InstanceLookup {
     /// Registers an instance pointer in this lookup index.
     #[doc(hidden)]
     pub(crate) fn register(&self, instance: &mut dyn Instance) {
-        self.instances
+        let inserted = self
+            .instances
             .borrow_mut()
-            .insert(instance.id(), NonNull::from(instance));
-        self.generation.set(self.generation.get().wrapping_add(1));
+            .insert(instance.id(), NonNull::from(instance))
+            .is_none();
+        if inserted {
+            self.generation.set(self.generation.get().wrapping_add(1));
+        }
     }
 
     /// Removes an instance from the lookup index.
@@ -117,6 +121,22 @@ impl InstanceLookup {
 
     pub(crate) fn get(&self, id: InstanceId) -> Option<NonNull<dyn Instance>> {
         self.instances.borrow().get(&id).copied()
+    }
+
+    fn descendant(&self, root: InstanceId, id: InstanceId) -> Option<NonNull<dyn Instance>> {
+        if id == root {
+            return None;
+        }
+        let instance = self.get(id)?;
+        // Indexed instances remain boxed while parented; shared indices must stay subtree-local.
+        let mut parent = unsafe { instance.as_ref() }.parent();
+        while let Some(id) = parent {
+            if id == root {
+                return Some(instance);
+            }
+            parent = unsafe { self.get(id)?.as_ref() }.parent();
+        }
+        None
     }
 
     pub(crate) fn set_root(&self, root: &mut InstanceData) {
@@ -246,6 +266,10 @@ pub struct InstanceData {
     sibling_index: usize,
     #[cfg_attr(feature = "devtools", inspect(skip))]
     lookup: Weak<InstanceLookup>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
+    root_lookup: Option<Rc<InstanceLookup>>,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
+    persistent: bool,
     attributes: Attributes,
 }
 
@@ -265,8 +289,28 @@ impl InstanceData {
             children: Vec::new(),
             sibling_index: usize::MAX,
             lookup: Weak::new(),
+            root_lookup: None,
+            persistent: false,
             attributes: Attributes::new(),
         }
+    }
+
+    /// Creates stable identity storage with an owned tree index.
+    #[doc(hidden)]
+    pub fn new_root(name: impl Into<String>) -> Box<Self> {
+        let lookup = Rc::new(InstanceLookup::default());
+        let mut instance = Box::new(Self::new(name));
+        lookup.set_root(&mut instance);
+        instance.set_lookup(Some(&lookup));
+        instance.root_lookup = Some(lookup);
+        instance
+    }
+
+    /// Adds a child that cannot be destroyed independently of its owner.
+    #[doc(hidden)]
+    pub fn add_persistent_child(&mut self, mut child: Box<dyn Instance>) -> InstanceId {
+        instance_data_mut(child.as_mut()).persistent = true;
+        self.add_child(child)
     }
 
     pub(crate) fn name(&self) -> &str {
@@ -309,7 +353,9 @@ impl InstanceData {
         &self.children
     }
 
-    pub(crate) fn children_mut(&mut self) -> ChildrenMut<'_> {
+    /// Iterates over mutable access to the owned children.
+    #[doc(hidden)]
+    pub fn children_mut(&mut self) -> ChildrenMut<'_> {
         ChildrenMut::new(self.children.iter_mut())
     }
 
@@ -367,6 +413,9 @@ impl InstanceData {
         else {
             return false;
         };
+        if self.children[index].__instance_data().persistent {
+            return false;
+        }
         let mut child = self.children.swap_remove(index);
         if let Some(moved_child) = self.children.get_mut(index) {
             instance_data_mut(moved_child.as_mut()).set_sibling_index(index);
@@ -568,11 +617,18 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
         instance_data_mut(self).remove_child(id)
     }
 
+    /// Returns whether this instance can be destroyed independently of its owner.
+    fn is_destroyable(&self) -> bool {
+        self.parent().is_some()
+            && !self.__instance_data().persistent
+            && self.__instance_data().lookup().is_some()
+    }
+
     /// Removes this instance from its parent and destroys its descendants.
     ///
-    /// Returns `true` when the instance was parented in a workspace. An
-    /// isolated instance is already owned by its caller and is destroyed by
-    /// dropping that value instead.
+    /// Returns `true` when the instance was removed from its indexed tree.
+    /// Roots and persistent children are retained. An isolated instance is
+    /// destroyed by dropping its owned value instead.
     ///
     /// This must be the last operation performed through this instance
     /// reference when it returns `true`.
@@ -663,32 +719,6 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
         Descendants::new(self.children())
     }
 
-    /// Finds a descendant by ID.
-    fn find_descendant(&self, id: InstanceId) -> Option<&dyn Instance> {
-        for child in self.children() {
-            if child.id() == id {
-                return Some(child.as_ref());
-            }
-            if let Some(found) = child.find_descendant(id) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
-    /// Finds a mutable descendant by ID.
-    fn find_descendant_mut(&mut self, id: InstanceId) -> Option<&mut dyn Instance> {
-        for child in self.children_mut() {
-            if child.id() == id {
-                return Some(child);
-            }
-            if let Some(found) = child.find_descendant_mut(id) {
-                return Some(found);
-            }
-        }
-        None
-    }
-
     /// Finds the first descendant of type `T` with `name` in depth-first order.
     fn find_first_child<T: Instance>(&mut self, name: &str) -> Option<(InstanceId, &mut T)>
     where
@@ -696,6 +726,38 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
     {
         find_child_mut(self, name)
     }
+}
+
+fn resolve_instance(instance: &dyn Instance, id: InstanceId) -> Option<&dyn Instance> {
+    if instance.id() == id {
+        return Some(instance);
+    }
+    if let Some(lookup) = instance.__instance_data().lookup() {
+        let instance = lookup.descendant(instance.id(), id)?;
+        // The subtree check confines the pointer to descendants owned by this borrow.
+        return Some(unsafe { instance.as_ref() });
+    }
+    instance
+        .children()
+        .iter()
+        .find_map(|child| resolve_instance(child.as_ref(), id))
+}
+
+fn resolve_instance_mut(instance: &mut dyn Instance, id: InstanceId) -> Option<&mut dyn Instance> {
+    if instance.id() == id {
+        return Some(instance);
+    }
+    if let Some(lookup) = instance.__instance_data().lookup() {
+        let mut instance = lookup.descendant(instance.id(), id)?;
+        // The subtree check confines the pointer to descendants owned by this borrow.
+        return Some(unsafe { instance.as_mut() });
+    }
+    for child in instance.children_mut() {
+        if let Some(found) = resolve_instance_mut(child, id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 fn find_child_mut<'a, T: Instance>(
@@ -861,16 +923,25 @@ impl<'a> Iterator for Descendants<'a> {
 
 /// The object-safe portion used to clone heterogeneous instance collections.
 pub trait InstanceClone {
+    /// Clones an instance, or returns `None` when cloning is unsupported.
+    fn try_clone_box(&self) -> Option<Box<dyn Instance>>;
+
     /// Clones an instance behind a trait object.
-    fn clone_box(&self) -> Box<dyn Instance>;
+    ///
+    /// # Panics
+    /// Panics when this instance does not support cloning.
+    fn clone_box(&self) -> Box<dyn Instance> {
+        self.try_clone_box()
+            .expect("instance does not support cloning")
+    }
 }
 
 impl<T> InstanceClone for T
 where
     T: Instance + Clone + 'static,
 {
-    fn clone_box(&self) -> Box<dyn Instance> {
-        Box::new(self.clone())
+    fn try_clone_box(&self) -> Option<Box<dyn Instance>> {
+        Some(Box::new(self.clone()))
     }
 }
 
@@ -961,14 +1032,22 @@ mod tests {
         model.set_parent(&mut workspace);
         assert_eq!(workspace.children().len(), 1);
         assert_eq!(
-            workspace.instance(model_id).unwrap().class_name(),
+            workspace
+                .view::<dyn Instance>(model_id)
+                .unwrap()
+                .class_name(),
             "BasePart"
         );
         assert_eq!(
-            workspace.instance(part_id).unwrap().parent(),
+            workspace.view::<dyn Instance>(part_id).unwrap().parent(),
             Some(model_id)
         );
-        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert!(
+            workspace
+                .view::<dyn Instance>(camera_id)
+                .unwrap()
+                .is::<Camera>()
+        );
         assert_eq!(workspace.get_all::<Part>().count(), 1);
         assert_eq!(workspace.instances().count(), 3);
         assert_eq!(
@@ -994,7 +1073,7 @@ mod tests {
         }
 
         assert!(workspace.remove_child(first_id));
-        assert!(workspace.instance(second_id).is_some());
+        assert!(workspace.view::<dyn Instance>(second_id).is_some());
     }
 
     #[test]
@@ -1094,10 +1173,10 @@ mod tests {
             .with_name("child")
             .with_attribute("health", serde_json::json!(42))
             .set_parent(&mut workspace);
-        assert!(workspace.instance(id).is_none());
+        assert!(workspace.view::<dyn Instance>(id).is_none());
         assert_eq!(
             workspace
-                .instance(child_id)
+                .view::<dyn Instance>(child_id)
                 .unwrap()
                 .get_attribute("health"),
             Some(&serde_json::json!(42))
@@ -1114,7 +1193,7 @@ mod tests {
                 .with_name("child")
                 .with_attribute("role", serde_json::json!("child")),
         );
-        let child = parent.find_descendant_mut(child_id).unwrap();
+        let child = parent.view_mut::<dyn Instance>(child_id).unwrap();
         assert_eq!(
             child.get_attribute("role"),
             Some(&serde_json::json!("child"))
@@ -1128,7 +1207,7 @@ mod tests {
         let cloned_child_id = cloned.children()[0].id();
         assert_eq!(
             cloned
-                .find_descendant(cloned_child_id)
+                .view::<dyn Instance>(cloned_child_id)
                 .unwrap()
                 .get_attribute("role"),
             Some(&serde_json::json!("child"))

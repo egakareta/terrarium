@@ -75,11 +75,11 @@ fn launchers_apply_presets_before_the_initializer() -> Result<(), AppCreationErr
             .with_env_logger(false)
             .with_headless(Some(1))
             .run(move |engine| {
-                assert_preset(&engine.workspace, preset);
+                assert_preset(engine.workspace(), preset);
                 Ok::<(), AppCreationError>(())
             })?
             .unwrap();
-        assert_preset(&engine.workspace, preset);
+        assert_preset(engine.workspace(), preset);
     }
     Ok(())
 }
@@ -96,11 +96,11 @@ fn bevy_without_a_supplied_workspace_uses_the_launcher_preset() -> Result<(), Ap
         .with_env_logger(false)
         .with_headless(Some(1))
         .run(|engine| {
-            assert_preset(&engine.workspace, WorkspacePreset::Baseplate);
+            assert_preset(engine.workspace(), WorkspacePreset::Baseplate);
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
-    assert_preset(&engine.workspace, WorkspacePreset::Baseplate);
+    assert_preset(engine.workspace(), WorkspacePreset::Baseplate);
     Ok(())
 }
 
@@ -118,10 +118,10 @@ fn a_supplied_empty_bevy_workspace_overrides_the_launcher_preset() -> Result<(),
         .with_env_logger(false)
         .with_headless(Some(1))
         .run(|engine| {
-            assert_preset(&engine.workspace, WorkspacePreset::Empty);
+            assert_preset(engine.workspace(), WorkspacePreset::Empty);
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
-    assert_preset(&engine.workspace, WorkspacePreset::Empty);
+    assert_preset(engine.workspace(), WorkspacePreset::Empty);
     Ok(())
 }

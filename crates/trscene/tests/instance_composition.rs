@@ -100,7 +100,7 @@ fn custom_instances_keep_builders_generic_methods_identity_and_exact_downcasts()
 
     let mut workspace = Workspace::new();
     workspace.add_child(part);
-    let instance = workspace.instance(id).unwrap();
+    let instance = workspace.view::<dyn Instance>(id).unwrap();
     assert_eq!(instance.class_name(), "WeightedSpring");
     assert_eq!(instance.name(), "WeightedSpring");
     assert!(instance.downcast_ref::<WeightedSpring>().is_some());
@@ -108,9 +108,11 @@ fn custom_instances_keep_builders_generic_methods_identity_and_exact_downcasts()
     assert!(instance.is_a::<Part>());
     assert!(instance.is_a::<BasePart>());
     assert!(instance.is_a::<PVInstance>());
+    assert!(instance.is_a::<dyn Instance>());
     assert!(!instance.is_a::<Rig>());
     assert!(WeightedSpring::descriptor().is_a::<SpringPart>());
     assert!(WeightedSpring::descriptor().is_a::<PVInstance>());
+    assert!(WeightedSpring::descriptor().is_a::<dyn Instance>());
 
     let view = workspace.view::<SpringPart>(id).unwrap();
     assert_eq!(view.id(), id);
@@ -254,11 +256,7 @@ fn rig_overrides_move_children_through_mutable_references_and_runtime_views() {
     let child = rig.add_child(Part::new().with_position(Vec3::X));
     (&mut rig).with_position(Vec3::new(5.0, 0.0, 0.0));
     assert_eq!(
-        rig.find_descendant(child)
-            .unwrap()
-            .view::<PVInstance>()
-            .unwrap()
-            .position(),
+        rig.view::<PVInstance>(child).unwrap().position(),
         Vec3::new(6.0, 0.0, 0.0)
     );
 
@@ -284,6 +282,49 @@ fn rig_overrides_move_children_through_mutable_references_and_runtime_views() {
             .unwrap()
             .accepts_pivot(Mat4::ZERO)
     );
+}
+
+#[test]
+fn instance_views_preserve_scope_identity_and_overrides_inside_and_outside_a_workspace() {
+    fn check(parent: &mut dyn Instance, child: trscene::InstanceId) {
+        let id = parent.id();
+        assert_eq!(parent.view::<dyn Instance>(id).unwrap().id(), id);
+        assert_eq!(parent.view::<Rig>(id).unwrap().id(), id);
+        assert_eq!(parent.view::<BasePart>(child).unwrap().id(), child);
+        assert!(parent.view::<Rig>(child).is_none());
+        assert!(parent.view_mut::<Rig>(child).is_none());
+
+        parent
+            .view_mut::<PVInstance>(child)
+            .unwrap()
+            .set_position(Vec3::new(2.0, 8.0, 3.0));
+        assert_eq!(
+            parent.view::<PVInstance>(child).unwrap().position(),
+            Vec3::new(2.0, 0.0, 3.0)
+        );
+        let view = parent.view::<Rig>(id).unwrap();
+        assert_eq!(view.view::<CustomPlanarPart>(child).unwrap().id(), child);
+    }
+
+    let mut parent = Rig::new();
+    let child = parent.add_child(CustomPlanarPart::default());
+    check(&mut parent, child);
+
+    let mut workspace = Workspace::new();
+    let parent = workspace.add_child(parent);
+    let sibling = workspace.add_child(Part::new());
+    let root = workspace.id();
+    {
+        let parent = workspace.view_mut::<dyn Instance>(parent).unwrap();
+        check(parent, child);
+        assert!(parent.view::<dyn Instance>(root).is_none());
+        assert!(parent.view_mut::<dyn Instance>(root).is_none());
+        assert!(parent.view::<dyn Instance>(sibling).is_none());
+        assert!(parent.view_mut::<dyn Instance>(sibling).is_none());
+    }
+    assert!(workspace.view_mut::<dyn Instance>(child).unwrap().destroy());
+    assert!(workspace.view::<BasePart>(child).is_none());
+    assert!(workspace.view_mut::<BasePart>(child).is_none());
 }
 
 #[test]
@@ -337,7 +378,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     let mut workspace = Workspace::new();
     let spring = workspace.add_child(SpringPart::default());
     workspace
-        .instance_mut(spring)
+        .view_mut::<dyn Instance>(spring)
         .unwrap()
         .set_property("stiffness", trscene::devtools::PropertyValue::Number(42.0))
         .unwrap();
@@ -350,7 +391,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     let child = rig.add_child(Part::new().with_position(Vec3::X));
     let id = workspace.add_child(rig);
     workspace
-        .instance_mut(id)
+        .view_mut::<dyn Instance>(id)
         .unwrap()
         .set_property(
             "position",
@@ -364,7 +405,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
 
     let planar = workspace.add_child(CustomPlanarPart::default());
     workspace
-        .instance_mut(planar)
+        .view_mut::<dyn Instance>(planar)
         .unwrap()
         .set_property("color", trscene::devtools::PropertyValue::Color([1.0; 3]))
         .unwrap();
@@ -374,7 +415,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     );
     assert!(
         workspace
-            .instance_mut(id)
+            .view_mut::<dyn Instance>(id)
             .unwrap()
             .set_property(
                 "size",
@@ -428,7 +469,10 @@ fn independent_capabilities_and_new_root_types_keep_one_scene_identity() {
     let mut workspace = Workspace::new();
     let group = workspace.add_child(group);
     assert_eq!(workspace.view::<Group>(group).unwrap().label(), "assembly");
-    assert_eq!(workspace.instance(part).unwrap().parent(), Some(group));
+    assert_eq!(
+        workspace.view::<dyn Instance>(part).unwrap().parent(),
+        Some(group)
+    );
     let motor = workspace.view_mut::<Motor>(part).unwrap();
     assert_eq!(motor.id(), part);
     assert_eq!(motor.class_name(), "MotorPart");

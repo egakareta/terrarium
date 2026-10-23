@@ -1,7 +1,7 @@
 use terrarium::{
     App, AppCreationError, BasePartExt, Camera, CameraExt, Color3, Engine, Instance, InstanceId,
     PVInstanceExt, Part, PartExt, PartShape, PlayerController, Rig, RigExt, Terrarium, Workspace,
-    egui, glam::Vec3,
+    egui, glam::Vec3, with_workspace,
 };
 
 const SPAWN: Vec3 = Vec3::new(0.0, 4.0, 22.0);
@@ -209,8 +209,9 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     rig
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
-    let rig = create_scene(&mut engine.workspace);
+    let rig = create_scene(workspace);
     Ok(PlayerApp { rig })
 }
 

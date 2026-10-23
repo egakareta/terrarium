@@ -3,9 +3,10 @@ use slotmap::Key;
 #[cfg(feature = "meshpart")]
 use crate::MeshPart;
 use crate::{
-    Camera, CameraExt, Instance, InstanceId, LightPropertiesExt, Outline, PVInstanceExt, Part,
-    PointLight, RenderCamera, RenderGeometry, RenderLight, RenderLightKind, RenderMesh, RenderNode,
-    RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight, Workspace, glam,
+    Camera, CameraExt, Instance, InstanceExt, InstanceId, LightPropertiesExt, Outline,
+    PVInstanceExt, Part, PointLight, RenderCamera, RenderGeometry, RenderLight, RenderLightKind,
+    RenderMesh, RenderNode, RenderOutline, RenderScene, RenderTransform, SpotLight, SurfaceLight,
+    Workspace, glam,
 };
 
 fn render_id(id: InstanceId) -> u64 {
@@ -42,7 +43,7 @@ fn render_node<'a>(
 }
 
 fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
-    if let Some(part) = instance.view::<Part>() {
+    if let Some(part) = instance.view::<Part>(instance.id()) {
         let shape = part.shape();
         return Some(RenderMesh {
             geometry: RenderGeometry::Primitive(shape),
@@ -53,7 +54,7 @@ fn render_mesh(instance: &dyn Instance) -> Option<RenderMesh<'_>> {
         });
     }
     #[cfg(feature = "meshpart")]
-    if let Some(part) = instance.view::<MeshPart>() {
+    if let Some(part) = instance.view::<MeshPart>(instance.id()) {
         return Some(RenderMesh {
             geometry: RenderGeometry::Custom {
                 mesh: part.mesh(),
@@ -94,14 +95,14 @@ fn render_light(
         brightness: light.brightness(),
         shadows: light.shadows(),
     };
-    let light = if let Some(light) = instance.view::<PointLight>() {
+    let light = if let Some(light) = instance.view::<PointLight>(instance.id()) {
         build(
             RenderLightKind::Point {
                 range: light.range(),
             },
             light,
         )
-    } else if let Some(light) = instance.view::<SpotLight>() {
+    } else if let Some(light) = instance.view::<SpotLight>(instance.id()) {
         build(
             RenderLightKind::Spot {
                 face: light.face(),
@@ -109,7 +110,7 @@ fn render_light(
             },
             light,
         )
-    } else if let Some(light) = instance.view::<SurfaceLight>() {
+    } else if let Some(light) = instance.view::<SurfaceLight>(instance.id()) {
         build(
             RenderLightKind::Surface {
                 face: light.face(),
@@ -135,13 +136,13 @@ fn render_outline(
     outline: &dyn crate::OutlineView,
 ) -> Option<RenderOutline> {
     let parent_id = outline.parent()?;
-    let parent = workspace.instance(parent_id)?;
+    let parent = workspace.view::<dyn Instance>(parent_id)?;
     let container_id = parent.parent()?;
     let mut targets = vec![render_id(parent_id)];
     let siblings = if container_id == workspace.id() {
         workspace.children()
     } else {
-        workspace.instance(container_id)?.children()
+        workspace.view::<dyn Instance>(container_id)?.children()
     };
     targets.extend(siblings.iter().map(|sibling| render_id(sibling.id())));
     Some(RenderOutline {
@@ -159,7 +160,7 @@ impl Workspace {
     pub fn render_scene(&self) -> RenderScene<'_> {
         RenderScene {
             id: render_id(self.id()),
-            structure_revision: self.lookup.generation(),
+            structure_revision: self.lookup().generation(),
             camera: render_camera(&self.current_camera),
             lighting: &self.lighting,
             nodes: self
@@ -179,7 +180,7 @@ fn render_light_parent(
 ) -> Option<(InstanceId, glam::Mat4)> {
     let mut parent_id = light.parent();
     while let Some(id) = parent_id {
-        let parent = workspace.instance(id)?;
+        let parent = workspace.view::<dyn Instance>(id)?;
         if let Some(spatial) = parent.spatial() {
             return Some((id, spatial.world_pivot()));
         }

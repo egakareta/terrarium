@@ -3,9 +3,9 @@ use std::rc::Rc;
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
 use crate::{
-    BasePartExt, Camera, CameraController, Color3, Controllers, Instance, InstanceData, InstanceId,
-    InstanceLookup, Lighting, PVInstanceExt, Part, RenderTexture, Rig, Texture, TextureError,
-    TextureHandle, TweenManager, glam::*,
+    BasePartExt, Camera, CameraController, Color3, Controllers, Instance, InstanceData,
+    InstanceExt, InstanceId, InstanceLookup, Lighting, PVInstanceExt, Part, RenderTexture, Rig,
+    Texture, TextureError, TextureHandle, TweenManager, glam::*,
 };
 #[cfg(feature = "default-materials")]
 use crate::{BuiltinMaterial, Material};
@@ -98,12 +98,22 @@ crate::instance! {
         texture_revision: u64,
         /// Scene-wide lighting configuration.
         pub lighting: Lighting,
-        #[cfg_attr(feature = "devtools", inspect(skip))]
-        pub(crate) lookup: Rc<InstanceLookup>,
     }
 }
 
 impl Workspace {
+    /// Updates the indexed address after transferring this workspace between runtime owners.
+    #[doc(hidden)]
+    pub fn refresh_registration(&mut self) {
+        if self.parent().is_some() {
+            self.lookup().register(self);
+        }
+    }
+
+    pub(crate) fn lookup(&self) -> Rc<InstanceLookup> {
+        self.instance.lookup().expect("workspace tree index")
+    }
+
     pub(crate) fn render_textures(&self) -> impl Iterator<Item = RenderTexture<'_>> {
         self.textures
             .iter()
@@ -117,10 +127,7 @@ impl Workspace {
 
     /// Creates an empty workspace with the default camera and controller.
     pub fn new() -> Self {
-        let mut instance = Box::new(InstanceData::new("Workspace"));
-        let lookup = Rc::new(InstanceLookup::default());
-        lookup.set_root(&mut instance);
-        instance.set_lookup(Some(&lookup));
+        let instance = InstanceData::new_root("Workspace");
         Self {
             instance,
             current_camera: Camera::default(),
@@ -139,7 +146,6 @@ impl Workspace {
             texture_revisions: Vec::new(),
             texture_revision: 0,
             lighting: Lighting::default(),
-            lookup,
         }
     }
 
@@ -255,12 +261,18 @@ impl Workspace {
 
     /// Returns a descendant by ID, downcast to its concrete instance type.
     pub fn get<T: Instance>(&self, id: InstanceId) -> Option<&T> {
-        self.instance(id)?.downcast_ref::<T>()
+        if id == self.id() {
+            return None;
+        }
+        self.view::<dyn Instance>(id)?.downcast_ref::<T>()
     }
 
     /// Returns a mutable descendant by ID, downcast to its concrete instance type.
     pub fn get_mut<T: Instance>(&mut self, id: InstanceId) -> Option<&mut T> {
-        self.instance_mut(id)?.downcast_mut::<T>()
+        if id == self.id() {
+            return None;
+        }
+        self.view_mut::<dyn Instance>(id)?.downcast_mut::<T>()
     }
 
     /// Returns descendants of the requested concrete instance type in insertion order.
@@ -269,20 +281,10 @@ impl Workspace {
             .filter_map(|instance| instance.downcast_ref::<T>())
     }
 
-    /// Borrows an inherited API from a descendant without losing its identity.
-    pub fn view<T: crate::InstanceType>(&self, id: InstanceId) -> Option<&T::Api> {
-        self.instance(id)?.view::<T>()
-    }
-
-    /// Mutably borrows a descendant's inherited API with its overrides.
-    pub fn view_mut<T: crate::InstanceType>(&mut self, id: InstanceId) -> Option<&mut T::Api> {
-        self.instance_mut(id)?.view_mut::<T>()
-    }
-
     /// Returns all descendants providing an API, including composed subclasses.
-    pub fn views<T: crate::InstanceType>(&self) -> impl Iterator<Item = &T::Api> {
+    pub fn views<T: crate::InstanceType + ?Sized>(&self) -> impl Iterator<Item = &T::Api> {
         self.descendants()
-            .filter_map(|instance| instance.view::<T>())
+            .filter_map(|instance| instance.view::<T>(instance.id()))
     }
 
     /// Returns parts whose colliders intersect the box in `overlap_params`.
@@ -306,33 +308,13 @@ impl Workspace {
         self.descendants()
     }
 
-    /// Returns a child by its stable identifier.
-    pub fn instance(&self, id: InstanceId) -> Option<&dyn Instance> {
-        if id == self.id() {
-            return None;
-        }
-        let instance = self.lookup.get(id)?;
-        // The index only stores pointers to boxed children owned by this workspace.
-        Some(unsafe { instance.as_ref() })
-    }
-
-    /// Returns a mutable child by its stable identifier.
-    pub fn instance_mut(&mut self, id: InstanceId) -> Option<&mut dyn Instance> {
-        if id == self.id() {
-            return None;
-        }
-        let mut instance = self.lookup.get(id)?;
-        // Boxed children have stable addresses while they are owned by the workspace.
-        Some(unsafe { instance.as_mut() })
-    }
-
     /// Applies pending input to the active camera.
     ///
     /// A spatial subject is followed at the configured offset and orbit distance.
     /// Without a valid subject, input moves the camera freely.
     pub fn update_camera(&mut self, delta: f32) {
         let subject = self.current_camera.subject().and_then(|id| {
-            self.instance(id)
+            self.view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
                 .map(|pose| (id, pose))
         });
@@ -374,7 +356,7 @@ impl Workspace {
         }
         let transforms = self.physics.step(&instances, delta_seconds);
         for (id, transform) in transforms {
-            if let Some(instance) = self.instance_mut(id) {
+            if let Some(instance) = self.view_mut::<dyn Instance>(id) {
                 apply_transform(instance, transform);
             }
         }
@@ -403,7 +385,7 @@ impl Workspace {
     /// updated parent transforms. This is called automatically by [`Self::update`].
     pub fn update_animations(&mut self, delta_seconds: f32) {
         fn update(instance: &mut dyn Instance, delta_seconds: f32) {
-            if let Some(rig) = instance.view_mut::<Rig>() {
+            if let Some(rig) = instance.view_mut::<Rig>(instance.id()) {
                 rig.update_animation(delta_seconds);
             }
             for child in instance.children_mut() {
@@ -474,10 +456,11 @@ impl Workspace {
 
 impl Clone for Workspace {
     fn clone(&self) -> Self {
-        let lookup = Rc::new(InstanceLookup::default());
-        let mut instance = Box::new((*self.instance).clone());
-        lookup.set_root(&mut instance);
-        instance.set_lookup(Some(&lookup));
+        let mut instance = InstanceData::new_root(self.name());
+        instance.attributes = self.instance.attributes.clone();
+        for child in self.children() {
+            instance.add_child(child.clone());
+        }
         let mut current_camera = self.current_camera.clone();
         if let Some(subject) = current_camera.subject() {
             current_camera.set_subject(cloned_instance_id(
@@ -504,11 +487,7 @@ impl Clone for Workspace {
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
             lighting: self.lighting.clone(),
-            lookup: lookup.clone(),
         };
-        for child in workspace.instance.children_mut() {
-            super::set_instance_lookup(child, Some(lookup.clone()));
-        }
         workspace.controllers.remap_instances(&|id| {
             cloned_instance_id(self.instance.children(), workspace.instance.children(), id)
         });
@@ -592,7 +571,7 @@ mod tests {
         assert_eq!(returned_id, part_id);
         assert_eq!(workspace.children().len(), 1);
         assert_eq!(workspace.children()[0].id(), part_id);
-        let child = workspace.instance(part_id).unwrap();
+        let child = workspace.view::<dyn Instance>(part_id).unwrap();
         assert_eq!(child.class_name(), "Part");
         assert_eq!(child.parent(), Some(workspace_id));
         assert_eq!(
@@ -608,8 +587,18 @@ mod tests {
             workspace.get::<BasePart>(basepart_id).unwrap().name(),
             "renamed"
         );
-        assert!(workspace.instance(basepart_id).unwrap().is::<BasePart>());
-        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert!(
+            workspace
+                .view::<dyn Instance>(basepart_id)
+                .unwrap()
+                .is::<BasePart>()
+        );
+        assert!(
+            workspace
+                .view::<dyn Instance>(camera_id)
+                .unwrap()
+                .is::<Camera>()
+        );
         assert!(workspace.get::<Part>(camera_id).is_none());
         assert_eq!(workspace.get_all::<Camera>().count(), 1);
         assert_eq!(workspace.get_all::<Part>().count(), 1);
@@ -638,7 +627,7 @@ mod tests {
         let part_id = Part::new().with_name("part").set_parent(&mut workspace);
 
         assert!(workspace.remove_child(part_id));
-        assert!(workspace.instance(part_id).is_none());
+        assert!(workspace.view::<dyn Instance>(part_id).is_none());
         assert!(workspace.get_all::<Part>().next().is_none());
         assert!(!workspace.remove_child(part_id));
     }
@@ -651,10 +640,10 @@ mod tests {
         let last_id = Part::new().with_name("last").set_parent(&mut workspace);
 
         assert!(workspace.remove_child(removed_id));
-        assert!(workspace.instance(first_id).is_some());
-        assert!(workspace.instance(last_id).is_some());
+        assert!(workspace.view::<dyn Instance>(first_id).is_some());
+        assert!(workspace.view::<dyn Instance>(last_id).is_some());
         assert!(workspace.remove_child(last_id));
-        assert!(workspace.instance(first_id).is_some());
+        assert!(workspace.view::<dyn Instance>(first_id).is_some());
     }
 
     #[test]
@@ -666,9 +655,14 @@ mod tests {
             .unwrap()
             .add_child(Part::new().with_name("child"));
 
-        assert!(workspace.instance_mut(parent_id).unwrap().destroy());
-        assert!(workspace.instance(parent_id).is_none());
-        assert!(workspace.instance(child_id).is_none());
+        assert!(
+            workspace
+                .view_mut::<dyn Instance>(parent_id)
+                .unwrap()
+                .destroy()
+        );
+        assert!(workspace.view::<dyn Instance>(parent_id).is_none());
+        assert!(workspace.view::<dyn Instance>(child_id).is_none());
         assert!(workspace.children().is_empty());
     }
 
@@ -681,9 +675,14 @@ mod tests {
             .unwrap()
             .add_child(Part::new().with_name("child"));
 
-        assert!(workspace.instance_mut(child_id).unwrap().destroy());
-        assert!(workspace.instance(parent_id).is_some());
-        assert!(workspace.instance(child_id).is_none());
+        assert!(
+            workspace
+                .view_mut::<dyn Instance>(child_id)
+                .unwrap()
+                .destroy()
+        );
+        assert!(workspace.view::<dyn Instance>(parent_id).is_some());
+        assert!(workspace.view::<dyn Instance>(child_id).is_none());
         assert!(
             workspace
                 .get::<Part>(parent_id)
@@ -707,7 +706,7 @@ mod tests {
         assert_eq!(workspace.get::<Part>(child_id).unwrap().name(), "child");
 
         let other_workspace = Workspace::new();
-        assert!(other_workspace.instance(child_id).is_none());
+        assert!(other_workspace.view::<dyn Instance>(child_id).is_none());
     }
 
     #[test]

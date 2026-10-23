@@ -154,6 +154,9 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
 
     fn setup(mut scene: NonSendMut<Workspace>) {
         scene.add_child(Part::new().with_name("Startup part"));
+        let transient = scene.add_child(Part::new().with_name("Transient part"));
+        assert!(scene.view_mut::<dyn Instance>(transient).unwrap().destroy());
+        assert!(scene.view::<dyn Instance>(transient).is_none());
     }
 
     fn update(
@@ -198,7 +201,9 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             .with_env_logger(false)
             .with_headless(Some(10))
             .run(move |engine| {
-                engine.add_child(Part::new().with_name("Initializer part"));
+                engine
+                    .workspace_mut()
+                    .add_child(Part::new().with_name("Initializer part"));
                 engine
                     .bevy_app_mut()
                     .unwrap()
@@ -207,7 +212,8 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             })?
             .unwrap();
 
-        let scene = &engine.workspace;
+        let scene = engine.workspace();
+        assert_eq!(scene.parent(), Some(engine.id()));
         assert!(
             scene
                 .get_all::<Part>()
@@ -279,11 +285,13 @@ fn plugin_finalization_can_populate_the_scene_before_startup() -> Result<(), App
             .with_env_logger(false)
             .with_headless(Some(1))
             .run(|engine| {
-                engine.add_child(Part::new().with_name("Initializer part"));
+                engine
+                    .workspace_mut()
+                    .add_child(Part::new().with_name("Initializer part"));
                 Ok::<(), AppCreationError>(())
             })?
             .unwrap();
-        let scene = &engine.workspace;
+        let scene = engine.workspace();
         assert!(
             scene
                 .get_all::<Part>()
@@ -349,14 +357,16 @@ fn pending_plugins_prepare_the_scene_before_systems_run() -> Result<(), AppCreat
         .with_env_logger(false)
         .with_headless(Some(10))
         .run(|engine| {
-            engine.add_child(Part::new().with_name("Initializer part"));
+            engine
+                .workspace_mut()
+                .add_child(Part::new().with_name("Initializer part"));
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
 
     assert!(
         engine
-            .workspace
+            .workspace()
             .get_all::<Part>()
             .any(|part| part.name() == "Prepared scene")
     );

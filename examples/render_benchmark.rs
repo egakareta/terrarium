@@ -6,9 +6,9 @@ use std::{
 };
 
 use terrarium::{
-    App, BasePartExt, Camera, CameraExt, Color3, Engine, Face, Instance, InstanceId, Material,
-    PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium, Texture, TextureColorSpace,
-    TextureFilter, Workspace, eframe, egui,
+    App, BasePartExt, Camera, CameraExt, Color3, Engine, Face, Instance, InstanceExt, InstanceId,
+    Material, PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium, Texture,
+    TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
 };
@@ -74,7 +74,7 @@ impl Benchmark {
     fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
         engine.with_clear_color([0.012, 0.019, 0.050, 1.0]);
         let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
-            &mut engine.workspace,
+            engine.workspace_mut(),
             config.parts,
             config.width,
             config.height,
@@ -213,7 +213,7 @@ impl Benchmark {
     fn replace_upper_layer(&mut self, engine: &mut Engine) {
         let previous_layer = std::mem::take(&mut self.upper_layer_ids);
         for id in previous_layer {
-            if let Some(instance) = engine.instance_mut(id) {
+            if let Some(instance) = engine.view_mut::<dyn Instance>(id) {
                 instance.destroy();
             }
         }
@@ -249,7 +249,7 @@ impl Benchmark {
                 block = block.with_material_slot(slot, material);
             }
             self.upper_layer_ids
-                .push(block.set_parent(&mut engine.workspace));
+                .push(block.set_parent(engine.workspace_mut()));
         }
     }
 

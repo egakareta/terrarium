@@ -8,7 +8,7 @@ use slotmap::Key;
 
 use crate::{
     egui_wgpu,
-    trscene::{Color3, InstanceId, OutlineMode, RenderOutline, Workspace},
+    trscene::{Color3, Instance, InstanceExt, InstanceId, OutlineMode, RenderOutline, Workspace},
 };
 
 #[cfg(feature = "meshpart")]
@@ -75,7 +75,7 @@ impl RenderAdapter {
         let targets: Vec<_> = selected
             .iter()
             .copied()
-            .filter(|&id| workspace.instance(id).is_some())
+            .filter(|&id| workspace.view::<dyn Instance>(id).is_some())
             .map(|id| id.data().as_ffi())
             .collect();
         let mut scene = scene;

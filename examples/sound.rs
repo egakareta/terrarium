@@ -127,16 +127,17 @@ impl App for SoundApp {
     }
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<SoundApp, AppCreationError> {
     engine.current_camera = Camera::new(Vec3::new(0.0, 1.5, 9.0), Vec3::Y, 1.0);
-    engine.add_child(
+    workspace.add_child(
         Part::new()
             .with_name("Ground")
             .with_size(Vec3::new(32.0, 0.2, 32.0))
             .with_position(Vec3::new(0.0, -0.1, 0.0))
             .with_color(Color3::new(0.16, 0.2, 0.25)),
     );
-    let emitter = engine.add_child_ref(
+    let emitter = workspace.add_child_ref(
         Part::new()
             .with_name("Emitter")
             .with_shape(PartShape::Ball)

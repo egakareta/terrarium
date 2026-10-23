@@ -6,8 +6,8 @@ use rapier3d::prelude::{
 };
 
 use crate::{
-    BasePart, BasePartExt, BoxOverlapQuery, Instance, InstanceId, PVInstance, PVInstanceExt, Part,
-    PartShape, Rig,
+    BasePart, BasePartExt, BoxOverlapQuery, Instance, InstanceExt, InstanceId, PVInstance,
+    PVInstanceExt, Part, PartShape, Rig,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -440,7 +440,7 @@ impl fmt::Debug for PhysicsWorld {
 
 impl PhysicsInstance {
     pub(crate) fn collect(instance: &dyn Instance, instances: &mut Vec<Self>) {
-        if let Some(rig) = instance.view::<Rig>() {
+        if let Some(rig) = instance.view::<Rig>(instance.id()) {
             let mut body = Self {
                 id: rig.id(),
                 transform: rig.pivot(),
@@ -477,9 +477,9 @@ impl PhysicsInstance {
 
 impl PhysicsPart {
     fn from_instance(instance: &dyn Instance) -> Option<Self> {
-        let part = instance.view::<BasePart>()?;
+        let part = instance.view::<BasePart>(instance.id())?;
         let shape = instance
-            .view::<Part>()
+            .view::<Part>(instance.id())
             .map_or(PartShape::Block, |part| part.shape());
         Some(Self::from_traits(instance.id(), part, shape))
     }

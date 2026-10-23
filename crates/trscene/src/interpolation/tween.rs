@@ -1,5 +1,5 @@
 use crate::{
-    BasePart, BasePartExt, Color3, InstanceId, Workspace,
+    BasePart, BasePartExt, Color3, Instance, InstanceExt, InstanceId, Workspace,
     glam::{Vec2, Vec3, Vec4},
     instance::{InstanceTransformUpdate, update_instance_transform},
 };
@@ -388,13 +388,13 @@ impl TweenTrack {
         match self {
             Self::Position { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(instance) = workspace.instance_mut(*target) {
+                if let Some(instance) = workspace.view_mut::<dyn Instance>(*target) {
                     update_instance_transform(instance, InstanceTransformUpdate::Position(value));
                 }
             }
             Self::Orientation { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(instance) = workspace.instance_mut(*target) {
+                if let Some(instance) = workspace.view_mut::<dyn Instance>(*target) {
                     update_instance_transform(
                         instance,
                         InstanceTransformUpdate::Orientation(value),
@@ -403,7 +403,7 @@ impl TweenTrack {
             }
             Self::Size { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(instance) = workspace.instance_mut(*target) {
+                if let Some(instance) = workspace.view_mut::<dyn Instance>(*target) {
                     update_instance_transform(instance, InstanceTransformUpdate::Size(value));
                 }
             }

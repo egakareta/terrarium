@@ -6,7 +6,10 @@ use euphorium::{
 };
 use thiserror::Error;
 
-use crate::{Camera, InstanceId, PVInstance, PVInstanceExt, Sound, Workspace, glam::Vec3};
+use crate::{
+    Camera, Instance, InstanceExt, InstanceId, PVInstance, PVInstanceExt, Sound, Workspace,
+    glam::Vec3,
+};
 
 /// A failure discovered while updating the workspace's audio scene.
 #[derive(Debug, Error)]
@@ -123,7 +126,7 @@ pub(crate) fn velocity(position: Vec3, previous: Option<Vec3>, delta_seconds: f3
 fn emitter(workspace: &Workspace, sound: &dyn crate::SoundView) -> Option<(InstanceId, Vec3)> {
     let mut parent = sound.parent();
     while let Some(id) = parent {
-        let instance = workspace.instance(id)?;
+        let instance = workspace.view::<dyn Instance>(id)?;
         let pivot = instance.spatial().map(|spatial| spatial.world_pivot());
         if let Some(pivot) = pivot {
             return Some((
@@ -164,7 +167,7 @@ impl Workspace {
         {
             errors.push(AudioError::Listener(error));
         }
-        let generation = self.lookup.generation();
+        let generation = self.lookup().generation();
         if self.audio.generation != Some(generation) {
             self.audio.instances = self.views::<Sound>().map(|sound| sound.id()).collect();
             self.audio.generation = Some(generation);

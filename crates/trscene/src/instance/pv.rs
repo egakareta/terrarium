@@ -104,14 +104,14 @@ crate::instance! {
         /// instance's own transform.
         ///
         /// ```
-        /// use trscene::{PVInstanceExt, Instance, Part, glam::{Mat4, Vec3}};
+        /// use trscene::{PVInstanceExt, Instance, InstanceExt, Part, glam::{Mat4, Vec3}};
         ///
         /// let mut parent = Part::new();
         /// let child = parent.add_child(Part::new().with_position(Vec3::X));
         /// parent.pivot_to(Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)));
         /// assert_eq!(parent.position(), Vec3::new(10.0, 0.0, 0.0));
         /// assert_eq!(
-        ///     parent.find_descendant(child).unwrap().downcast_ref::<Part>().unwrap().position(),
+        ///     parent.view::<Part>(child).unwrap().position(),
         ///     Vec3::new(11.0, 0.0, 0.0),
         /// );
         /// ```
@@ -333,7 +333,7 @@ fn transform_subtree(instance: &mut dyn Instance, transform: Mat4) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BasePart, Camera, Part, Workspace};
+    use crate::{BasePart, Camera, InstanceExt, Part, Workspace};
 
     #[test]
     fn pivot_to_moves_nested_spatial_descendants_through_non_spatial_nodes() {
@@ -413,15 +413,15 @@ mod tests {
             unrelated_pivot
         );
         assert_eq!(
-            workspace.instance(part_id).unwrap().parent(),
+            workspace.view::<dyn Instance>(part_id).unwrap().parent(),
             Some(parent_id)
         );
         assert_eq!(
-            workspace.instance(camera_id).unwrap().parent(),
+            workspace.view::<dyn Instance>(camera_id).unwrap().parent(),
             Some(part_id)
         );
         assert_eq!(
-            workspace.instance(base_id).unwrap().parent(),
+            workspace.view::<dyn Instance>(base_id).unwrap().parent(),
             Some(light_id)
         );
 
@@ -451,7 +451,7 @@ mod tests {
         ));
 
         let child = parent
-            .find_descendant(child_id)
+            .view::<dyn Instance>(child_id)
             .unwrap()
             .downcast_ref::<BasePart>()
             .unwrap();
@@ -489,7 +489,7 @@ mod tests {
         assert_eq!(parent.pivot(), target);
         assert_eq!(
             parent
-                .find_descendant(child_id)
+                .view::<dyn Instance>(child_id)
                 .unwrap()
                 .downcast_ref::<Part>()
                 .unwrap()
@@ -498,7 +498,7 @@ mod tests {
         );
         assert_eq!(
             parent
-                .find_descendant(camera_id)
+                .view::<dyn Instance>(camera_id)
                 .unwrap()
                 .downcast_ref::<Camera>()
                 .unwrap()

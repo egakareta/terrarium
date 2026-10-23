@@ -18,7 +18,7 @@ fn main() {
             let part = Part::new().with_size(glam::Vec3::new(2.0, 2.0, 2.0));
 
             // Add it into the scene
-            engine.add_child(part);
+            engine.workspace_mut().add_child(part);
 
             // Finish initializing :)
             Ok::<(), AppCreationError>(())

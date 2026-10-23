@@ -554,10 +554,21 @@ fn signature_aliases(
     }
 }
 
+fn receiver_is_borrowed(receiver: &syn::Receiver) -> bool {
+    matches!(receiver.kind, syn::ReceiverKind::Reference(..))
+}
+
+fn receiver_is_mutable(receiver: &syn::Receiver) -> bool {
+    match &receiver.kind {
+        syn::ReceiverKind::Reference(_, _, mutability) => mutability.is_some(),
+        _ => receiver.mutability.is_some(),
+    }
+}
+
 fn strip_argument_mutability(signature: &mut Signature) {
     for argument in &mut signature.inputs {
         match argument {
-            syn::FnArg::Receiver(receiver) if receiver.reference.is_none() => {
+            syn::FnArg::Receiver(receiver) if !receiver_is_borrowed(receiver) => {
                 receiver.mutability = None
             }
             syn::FnArg::Typed(argument) => {
@@ -740,7 +751,7 @@ fn expand(
                     if inspected {
                         if method.sig.inputs.len() != 1
                             || method.sig.receiver().is_none_or(|receiver| {
-                                receiver.reference.is_none() || receiver.mutability.is_some()
+                                !receiver_is_borrowed(receiver) || receiver_is_mutable(receiver)
                             })
                         {
                             return Err(syn::Error::new_spanned(
@@ -819,19 +830,22 @@ fn expand(
                                 "an override requires a receiver",
                             ));
                         };
-                        if receiver.reference.is_none() || !method.sig.generics.params.is_empty() {
+                        if !receiver_is_borrowed(&receiver)
+                            || !method.sig.generics.params.is_empty()
+                        {
                             return Err(syn::Error::new_spanned(
                                 method.sig,
                                 "overrides require a borrowed receiver and concrete arguments",
                             ));
                         }
                         arguments(&method.sig)?;
+                        let mutable = receiver_is_mutable(&receiver);
                         let receiver_name = format_ident!("receiver");
                         ReceiverFields {
                             runtime: &runtime,
                             class: &class,
                             receiver: receiver_name.clone(),
-                            mutable: receiver.mutability.is_some(),
+                            mutable,
                         }
                         .visit_block_mut(&mut method.block);
                         let mut helper_signature = method.sig.clone();
@@ -840,7 +854,7 @@ fn expand(
                             .generics
                             .params
                             .push(parse_quote!(__Receiver: #api + ?Sized));
-                        helper_signature.inputs[0] = if receiver.mutability.is_some() {
+                        helper_signature.inputs[0] = if mutable {
                             parse_quote!(receiver: &mut __Receiver)
                         } else {
                             parse_quote!(receiver: &__Receiver)
@@ -866,7 +880,7 @@ fn expand(
                                 .predicates
                                 .push(parse_quote!(Self: Sized));
                         }
-                        let mutable = method.sig.receiver().unwrap().mutability.is_some();
+                        let mutable = receiver_is_mutable(method.sig.receiver().unwrap());
                         ReceiverFields {
                             runtime: &runtime,
                             class: &class,
@@ -909,7 +923,7 @@ fn expand(
         };
         if !matches!(signature.output, syn::ReturnType::Default)
             || signature.receiver().is_none_or(|receiver| {
-                receiver.reference.is_none() || receiver.mutability.is_none()
+                !receiver_is_borrowed(receiver) || !receiver_is_mutable(receiver)
             })
         {
             continue;
@@ -1030,10 +1044,7 @@ fn expand(
     let forwarded = methods
         .iter()
         .filter(|method| {
-            method
-                .sig
-                .receiver()
-                .is_some_and(|receiver| receiver.reference.is_some())
+            method.sig.receiver().is_some_and(receiver_is_borrowed)
                 && method.sig.generics.where_clause.is_none()
         })
         .map(|method| {
@@ -1042,7 +1053,7 @@ fn expand(
             let args = arguments(signature)?;
             let attrs = &method.attrs;
             let self_ident = Ident::new("self", signature.receiver().unwrap().self_token.span);
-            let receiver = if signature.receiver().unwrap().mutability.is_some() {
+            let receiver = if receiver_is_mutable(signature.receiver().unwrap()) {
                 quote!(&mut **#self_ident)
             } else {
                 quote!(&**#self_ident)
@@ -1109,6 +1120,10 @@ fn expand(
         }
     });
     let parents = definition.parents.iter().map(|parent| &parent.ty);
+    let instance_base = definition
+        .data
+        .as_ref()
+        .map(|_| quote!(<dyn #runtime::Instance as #runtime::InstanceType>::descriptor,));
     let mut schema_entries = vec![Entry {
         name: class.clone(),
         target: quote!(#public_prefix #class),
@@ -1268,7 +1283,7 @@ fn expand(
                 &#runtime::InstanceClass {
                     name: stringify!(#class),
                     type_id: ::core::any::TypeId::of::<Self>,
-                    bases: &[#(<#parents as #runtime::InstanceType>::descriptor),*],
+                    bases: &[#instance_base #(<#parents as #runtime::InstanceType>::descriptor),*],
                 }
             }
         }

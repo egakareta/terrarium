@@ -3,7 +3,7 @@
 use terrarium::{
     App, AppCreationError, BasePartExt, Color3, Engine, GltfError, Instance, Mesh, MeshPart,
     PVInstanceExt, Part, RendererError, Terrarium, Viewport, ViewportTexture, eframe, egui,
-    glam::Vec3, push_triangle,
+    glam::Vec3, push_triangle, with_workspace,
 };
 
 struct ViewportApp {
@@ -82,6 +82,7 @@ fn create_viewport2() -> Result<Viewport, GltfError> {
     Ok(viewport)
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<ViewportApp, AppCreationError> {
     Ok(ViewportApp {
         texture1: engine.render_viewport(&create_viewport1()?)?,

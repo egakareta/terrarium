@@ -1,7 +1,7 @@
 use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
 use trscene::{
-    BasePart, BasePartExt, Color3, Instance, InstanceId, LightPropertiesExt, PVInstanceExt, Part,
-    PartExt, PartShape, PlayerController, PointLight, Rig, Workspace,
+    BasePart, BasePartExt, Color3, Instance, InstanceExt, InstanceId, LightPropertiesExt,
+    PVInstanceExt, Part, PartExt, PartShape, PlayerController, PointLight, Rig, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
     winit::keyboard::KeyCode,
@@ -366,7 +366,7 @@ fn full_dock_deletes_the_selected_instance_on_delete_key() {
     );
     output.textures_delta.clear();
 
-    assert!(host.workspace.instance(part).is_none());
+    assert!(host.workspace.view::<dyn Instance>(part).is_none());
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn edits_common_properties_and_rejects_invalid_values_without_mutation() {
         Err(PropertyError::InvalidValue)
     );
     assert_eq!(workspace.get::<Part>(part).unwrap().color(), edited_color);
-    assert!(workspace.instance(part).is_some());
+    assert!(workspace.view::<dyn Instance>(part).is_some());
 }
 
 #[test]
@@ -628,9 +628,9 @@ fn deleting_nested_selection_preserves_root_and_unselected_siblings() {
         vec![key(Key::Delete, false)],
     );
 
-    assert!(host.workspace.instance(parent).is_none());
-    assert!(host.workspace.instance(child).is_none());
-    assert!(host.workspace.instance(sibling).is_some());
+    assert!(host.workspace.view::<dyn Instance>(parent).is_none());
+    assert!(host.workspace.view::<dyn Instance>(child).is_none());
+    assert!(host.workspace.view::<dyn Instance>(sibling).is_some());
     assert_eq!(host.workspace.id(), root);
     assert_eq!(devtools.selected(), &[root]);
 }

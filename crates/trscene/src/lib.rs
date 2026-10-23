@@ -111,9 +111,9 @@ pub mod prelude {
     #[cfg(feature = "meshpart")]
     pub use crate::MeshPartExt;
     pub use crate::{
-        BasePartExt, CameraExt, Instance, InstanceAttributes, InstanceReceiver, LightPropertiesExt,
-        OutlineExt, PVInstanceExt, PartExt, PointLightExt, RigExt, SpotLightExt, SurfaceLightExt,
-        instance,
+        BasePartExt, CameraExt, Instance, InstanceAttributes, InstanceExt, InstanceReceiver,
+        LightPropertiesExt, OutlineExt, PVInstanceExt, PartExt, PointLightExt, RigExt,
+        SpotLightExt, SurfaceLightExt, instance,
     };
     #[cfg(feature = "sound")]
     pub use crate::{SoundExt, SoundSettingsExt};

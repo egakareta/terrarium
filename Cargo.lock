@@ -4640,7 +4640,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
  "trdevtools",
 ]
 
@@ -4690,6 +4690,7 @@ dependencies = [
  "slotmap",
  "trdevtools",
  "tregui",
+ "trengine-derive",
  "trfont",
  "trrender",
  "trscene",
@@ -4698,6 +4699,16 @@ dependencies = [
  "web-sys",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "trengine-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+ "trengine",
 ]
 
 [[package]]
@@ -4781,7 +4792,7 @@ dependencies = [
  "proc-macro-crate",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.9",
  "trscene",
 ]
 
