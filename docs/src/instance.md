@@ -18,6 +18,10 @@ instance! {
         stiffness: f32,
     }
 }
+
+fn main() {
+    let spring_part = SpringPart::default().with_stiffness(30.0);
+}
 ```
 
 This definition inherits `Part`'s instance identity and APIs. It also generates
@@ -70,6 +74,14 @@ instance! {
         label: String,
     }
 }
+
+fn main() {
+    let motor = Motor::default().with_speed(0.0);
+    let motor_part = MotorPart::default()
+        .with_transparency(0.5)
+        .with_speed(0.0);
+    let group = Group::default().with_label("My Group");
+}
 ```
 
 `Motor` is a capability, while `MotorPart` has the identity and instance APIs
@@ -92,7 +104,7 @@ property attribute accepts these options:
 
 For example:
 
-```rust
+```rust,ignore
 #[property(default = String::new(), borrow, into)]
 label: String,
 
@@ -125,6 +137,12 @@ instance! {
         }
     }
 }
+
+fn main() {
+    let planar_part = PlanarPart::default()
+        .with_transparency(0.5)
+        .set_pivot(glam::Mat4::IDENTITY);
+}
 ```
 
 The override is dispatched through the inherited API, including when that API
@@ -152,14 +170,14 @@ use terrarium::*;
 
 instance! {
     #[derive(Clone, Debug)]
-    pub struct Transform {
+    pub struct TransformData {
         #[data]
         data: InstanceData,
         #[default(glam::Mat4::IDENTITY)]
         pivot: glam::Mat4,
     }
 
-    impl Transform {
+    impl TransformData {
         #[property(flatten, validate = accepts_pivot)]
         pub fn transform(&self) -> glam::Mat4 {
             self.pivot
@@ -173,6 +191,10 @@ instance! {
             pivot.is_finite()
         }
     }
+}
+
+fn main() {
+    let accepts_pivot = TransformData::default().accepts_pivot(glam::Mat4::IDENTITY);
 }
 ```
 
@@ -192,6 +214,8 @@ default is `crate`.
 use terrarium::*;
 
 mod models {
+    use super::*;
+
     instance! {
         #[instance(path = crate::models)]
         #[derive(Clone, Debug)]
@@ -212,5 +236,9 @@ instance! {
         #[property(default = 2.0)]
         mass: f32,
     }
+}
+
+fn main() {
+    let spring = WeightedSpring::default().with_mass(1.0);
 }
 ```
