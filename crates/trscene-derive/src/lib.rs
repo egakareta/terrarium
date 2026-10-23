@@ -948,9 +948,19 @@ fn expand(
             .iter()
             .filter(|attr| attr.path().is_ident("cfg"))
             .collect();
+        let getter = format_ident!("{property}");
+        let docs: Vec<_> = methods
+            .iter()
+            .find(|method| method.sig.ident == getter)
+            .into_iter()
+            .flat_map(|method| &method.attrs)
+            .filter(|attr| attr.path().is_ident("doc"))
+            .cloned()
+            .collect();
         builders.push(parse_quote! {
             #(#cfg)*
             #[doc = concat!("Returns this instance with `", #property, "` set.")]
+            #(#docs)*
             #signature { self.#setter(#(#args),*); self }
         });
     }
