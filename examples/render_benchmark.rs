@@ -6,9 +6,9 @@ use std::{
 };
 
 use terrarium::{
-    App, BasePartExt, Camera, CameraExt, Color3, Engine, Face, Instance, InstanceExt, InstanceId,
-    Material, PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium, Texture,
-    TextureColorSpace, TextureFilter, Workspace, eframe, egui,
+    App, BasePartExt, Camera, CameraExt, Color3, Engine, EngineExt, Face, Instance, InstanceExt,
+    InstanceId, Material, PVInstanceExt, Part, PartExt, PartShape, RendererError, Terrarium,
+    Texture, TextureColorSpace, TextureFilter, Workspace, eframe, egui,
     glam::{EulerRot, Mat4, Quat, Vec3},
     wgpu,
 };
@@ -72,7 +72,7 @@ struct Benchmark {
 
 impl Benchmark {
     fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
-        engine.with_clear_color([0.012, 0.019, 0.050, 1.0]);
+        engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
         let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
             engine.workspace_mut(),
             config.parts,

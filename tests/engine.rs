@@ -1,11 +1,13 @@
 #![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 
 use terrarium::{
-    AppCreationError, Engine, Instance, InstanceClone, InstanceExt, Part, Terrarium, Workspace,
+    AppCreationError, Engine, EngineExt, Instance, InstanceClone, InstanceExt, Part, Terrarium,
+    Workspace,
 };
 
 #[test]
 fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), AppCreationError> {
+    let clear_color = [0.15, 0.25, 0.35, 1.0];
     let mut engine = Terrarium::new()
         .with_size([32, 32])
         .with_env_logger(false)
@@ -18,6 +20,9 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
+
+    engine = engine.with_clear_color(clear_color);
+    assert_eq!(engine.clear_color(), clear_color);
 
     let root: &dyn Instance = &engine;
     assert!(root.is_a::<Engine>());

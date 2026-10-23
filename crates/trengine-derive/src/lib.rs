@@ -27,7 +27,7 @@ use syn::{
 /// #[with_workspace]
 /// fn initialize(engine: &mut Engine) {
 ///     workspace.add_child(Part::new());
-///     engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+///     engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
 ///     workspace.lighting.with_clock_time(18.0);
 /// }
 /// ```

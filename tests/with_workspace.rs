@@ -1,6 +1,8 @@
 #![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 
-use terrarium::{AppCreationError, Engine, Instance, Part, Terrarium, Workspace, with_workspace};
+use terrarium::{
+    AppCreationError, Engine, EngineExt, Instance, Part, Terrarium, Workspace, with_workspace,
+};
 
 #[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<(), AppCreationError> {
@@ -14,7 +16,7 @@ fn initialize(engine: &mut Engine) -> Result<(), AppCreationError> {
 
     workspace.set_name("Scene".into());
     workspace.add_child(Part::new().with_name("first"));
-    engine.with_clear_color([0.1, 0.2, 0.3, 1.0]);
+    engine.set_clear_color([0.1, 0.2, 0.3, 1.0]);
     workspace.lighting.with_clock_time(18.0);
     populate(workspace);
     Scene { workspace }

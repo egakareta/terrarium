@@ -72,7 +72,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
         .run(|engine| {
             hide_devtools!(engine);
             engine.lighting.clear_skybox();
-            engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+            engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
             let lantern = engine.add_texture(Texture::from_bytes(
                 include_bytes!("../assets/festival_lantern.png"),
                 TextureColorSpace::Srgb,
@@ -135,7 +135,7 @@ fn basepart_transparency_blends_front_geometry_with_background()
         .run(|engine| {
             hide_devtools!(engine);
             engine.lighting.clear_skybox();
-            engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+            engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
             engine.workspace_mut().current_camera =
                 Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
             engine.workspace_mut().add_child(
@@ -177,7 +177,7 @@ fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
             .run(move |engine| {
                 hide_devtools!(engine);
                 engine.lighting.clear_skybox();
-                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
                 let part_id = engine.workspace_mut().add_child(
                     Part::new()
                         .with_position(Vec3::ZERO)
@@ -217,7 +217,7 @@ fn always_on_top_outline_renders_through_occluding_geometry() -> Result<(), AppC
             .with_headless(Some(0))
             .run(move |engine| {
                 engine.lighting.clear_skybox();
-                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
                 engine.workspace_mut().current_camera =
                     Camera::new(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO, 1.0);
                 engine.workspace_mut().add_child(
@@ -286,7 +286,7 @@ fn material_triplanar_projection_samples_world_space_coordinates()
             .run(move |engine| {
                 hide_devtools!(engine);
                 engine.lighting.clear_skybox();
-                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
                 engine.workspace_mut().current_camera =
                     Camera::new(Vec3::new(0.13, 0.73, 5.0), Vec3::new(0.13, 0.73, 0.0), 1.0);
                 let texture = engine.add_texture(Texture::new(4, 4, texture_pixels)?)?;
@@ -346,7 +346,7 @@ fn builtin_material_loads_lazily_and_renders() -> Result<(), AppCreationError> {
             .with_headless(Some(1))
             .run(move |engine| {
                 engine.lighting.clear_skybox();
-                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
                 engine.workspace_mut().add_child(
                     Part::new()
                         .with_position(Vec3::new(0.0, 1.0, 0.0))
@@ -429,7 +429,7 @@ fn occlusion_texture_changes_ambient_but_preserves_direct_light() -> Result<(), 
             .run(move |engine| {
                 engine.lighting.clear_skybox();
                 engine.lighting.outdoor_ambient = outdoor_ambient;
-                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
                 engine.workspace_mut().current_camera =
                     Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
                 let occlusion_map = engine.add_texture(Texture::linear(
@@ -1195,7 +1195,7 @@ fn point_light_shadows_change_occlusion_on_receivers() -> Result<(), AppCreation
                 engine.lighting.ambient = Color3::BLACK;
                 engine.lighting.outdoor_ambient = Color3::BLACK;
                 engine.lighting.global_shadows = false;
-                engine.with_clear_color([0.0, 0.0, 0.0, 1.0]);
+                engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
                 engine.workspace_mut().add_child(
                     Part::new()
                         .with_position(Vec3::new(0.0, -0.05, 0.0))

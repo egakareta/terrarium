@@ -164,6 +164,8 @@ trscene::instance! {
         creation_context: eframe::CreationContext<'static>,
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         renderer_id: usize,
+        #[property]
+        /// The color used to clear the window and rendered scene.
         clear_color: [f32; 4],
         #[cfg(feature = "bevy")]
         bevy_app: Option<bevy_app::App>,
@@ -335,24 +337,6 @@ impl Engine {
         self.bevy_app.as_mut()
     }
 
-    /// Returns the color eframe should use to clear the window.
-    pub fn clear_color(&self) -> [f32; 4] {
-        self.clear_color
-    }
-
-    /// Sets both eframe's window clear color and Terrarium's scene clear color.
-    ///
-    pub fn with_clear_color(&mut self, color: [f32; 4]) -> &mut Self {
-        self.clear_color = color;
-        self.renderer().with_clear_color(egui_wgpu::wgpu::Color {
-            r: color[0] as f64,
-            g: color[1] as f64,
-            b: color[2] as f64,
-            a: color[3] as f64,
-        });
-        self
-    }
-
     /// Returns locked access to the underlying renderer for advanced operations.
     #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     pub fn renderer(&self) -> MutexGuard<'_, RenderAdapter> {
@@ -394,6 +378,7 @@ impl Engine {
         let selected: Vec<InstanceId> = Vec::new();
         prepare_workspace(
             &self.renderer,
+            self.clear_color,
             engine_workspace(&mut self.instance),
             ui,
             &selected,
@@ -675,6 +660,7 @@ fn configure_egui_style(context: &egui::Context) {
 
 fn prepare_workspace(
     renderer: &RendererHandle,
+    clear_color: [f32; 4],
     workspace: &mut Workspace,
     ui: &mut egui::Ui,
     selected: &[InstanceId],
@@ -690,6 +676,12 @@ fn prepare_workspace(
     let mut renderer = renderer.lock().expect("engine renderer lock poisoned");
     #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
     let mut renderer = renderer.borrow_mut();
+    renderer.with_clear_color(egui_wgpu::wgpu::Color {
+        r: clear_color[0] as f64,
+        g: clear_color[1] as f64,
+        b: clear_color[2] as f64,
+        a: clear_color[3] as f64,
+    });
     renderer.prepare_eframe_scene(workspace, size, selected)
 }
 
@@ -747,7 +739,7 @@ impl trdevtools::DevtoolsHost for Engine {
 
 impl eframe::App for Engine {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        Engine::clear_color(self)
+        EngineExt::clear_color(self)
     }
 
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
@@ -777,7 +769,7 @@ impl eframe::App for Engine {
 pub trait App: 'static {
     /// Returns the color eframe should use to clear the window.
     fn clear_color(&self, engine: &Engine, _visuals: &egui::Visuals) -> [f32; 4] {
-        engine.clear_color()
+        EngineExt::clear_color(engine)
     }
 
     /// Processes one application update.
