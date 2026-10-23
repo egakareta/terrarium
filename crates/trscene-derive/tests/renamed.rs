@@ -1,6 +1,6 @@
-use scene::{BasePart, Part as Primitive, Workspace, glam::Mat4 as Transform, prelude::*};
+use trscene::{BasePart, Part as Primitive, Workspace, glam::Mat4 as Transform, *};
 
-scene::instance! {
+instance! {
     /// A custom type built through a renamed runtime dependency and parent import.
     #[derive(Clone, Debug)]
     pub struct RenamedPart {
@@ -21,9 +21,9 @@ scene::instance! {
 }
 
 mod models {
-    use super::RenamedPart;
+    use super::*;
 
-    scene::instance! {
+    instance! {
         #[instance(path = crate::models)]
         /// A descendant whose module does not import its parent's argument types.
         #[derive(Clone, Debug)]
@@ -41,12 +41,12 @@ fn renamed_dependencies_and_parent_imports_preserve_composed_behavior() {
         models::DerivedPart::default()
             .with_tag(12)
             .with_transparency(0.4)
-            .with_position(scene::glam::Vec3::Y),
+            .with_position(glam::Vec3::Y),
     );
     let part = workspace.view::<BasePart>(id).unwrap();
     assert_eq!(part.id(), id);
     assert_eq!(part.class_name(), "DerivedPart");
     assert_eq!(part.transparency(), 0.4);
-    assert_eq!(part.position(), scene::glam::Vec3::ZERO);
+    assert_eq!(part.position(), glam::Vec3::ZERO);
     assert_eq!(workspace.view::<RenamedPart>(id).unwrap().tag(), 12);
 }

@@ -1,7 +1,7 @@
 use trscene::{
     BasePart, Color3, InstanceType, PVInstance, Part, PartShape, Rig, Workspace,
     glam::{Mat4, Vec3},
-    prelude::*,
+    *,
 };
 
 mod models {

@@ -1,8 +1,6 @@
-use trscene::{
-    BasePart, Color3, InstanceType, PVInstance, Part, Rig, Workspace, glam::Vec3, prelude::*,
-};
+use trscene::{glam::*, *};
 
-trscene::instance! {
+instance! {
     /// A primitive with an additional authored spring property.
     #[derive(Clone, Debug)]
     pub struct SpringPart {
@@ -14,7 +12,7 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     /// An assembly that retains the built-in rig's hierarchy-aware setters.
     #[derive(Clone, Debug)]
     pub struct SpringAssembly {
