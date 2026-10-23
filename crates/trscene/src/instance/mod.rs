@@ -637,21 +637,6 @@ pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + Instanc
             .expect("just pushed child of type T")
     }
 
-    /// Configures an isolated child, then adds it and returns a mutable reference to it.
-    ///
-    /// The concrete type is known statically, so no downcasting is needed.
-    /// The reference borrows the parent, so copy out the [`InstanceId`] with
-    /// [`Instance::id`] if the handle must outlive the borrow.
-    fn add_child_with_ref<T, F>(&mut self, mut child: T, configure: F) -> &mut T
-    where
-        Self: Sized,
-        T: Instance,
-        F: FnOnce(&mut T),
-    {
-        configure(&mut child);
-        self.add_child_ref(child)
-    }
-
     /// Returns this value as [`Any`] for downcasting.
     fn as_any(&self) -> &dyn ::std::any::Any {
         self.as_instance()
