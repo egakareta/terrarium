@@ -124,6 +124,9 @@ pub(crate) fn velocity(position: Vec3, previous: Option<Vec3>, delta_seconds: f3
 fn emitter(workspace: &Workspace, sound: &dyn crate::SoundView) -> Option<(InstanceId, Vec3)> {
     let mut parent = sound.parent();
     while let Some(id) = parent {
+        if id == workspace.id() {
+            break;
+        }
         let instance = workspace.view::<dyn Instance>(id)?;
         let pivot = instance.spatial().map(|spatial| spatial.world_pivot());
         if let Some(pivot) = pivot {

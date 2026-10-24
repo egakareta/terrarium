@@ -86,7 +86,7 @@ required-features = ["physics"]
 
 [[example]]
 name = "player"
-required-features = ["physics"]
+required-features = ["meshpart", "physics"]
 
 [[example]]
 name = "sound"

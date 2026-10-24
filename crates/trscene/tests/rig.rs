@@ -19,6 +19,104 @@ fn moving_arm() -> AnimationClip {
 }
 
 #[test]
+fn crossfades_preserve_the_displayed_pose_when_interrupted_or_moved() {
+    let mut rig = Rig::new();
+    let arm = rig.add_child(Part::new().with_name("Arm").with_position(Vec3::X));
+    let pose = |x| {
+        AnimationPlayer::new(AnimationClip::new([AnimationTrack::new(
+            ["Arm"],
+            [Keyframe::new(0.0, translation(x))],
+        )]))
+    };
+    rig.transition_animation(pose(10.0), 1.0).unwrap();
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 1.0);
+    rig.animation_mut().unwrap().pause();
+    rig.step_animation(1.0);
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 1.0);
+    rig.animation_mut().unwrap().resume();
+    rig.step_animation(0.5);
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 5.5);
+
+    rig.transition_animation(pose(-2.0), 1.0).unwrap();
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 5.5);
+    rig = rig.with_position(Vec3::X * 10.0);
+    rig.step_animation(0.5);
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 11.75);
+    for duration in [-1.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(
+            rig.transition_animation(pose(100.0), duration),
+            Err(AnimationError::InvalidTime)
+        );
+    }
+    rig.step_animation(0.5);
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 8.0);
+    rig.transition_animation(pose(3.0), 0.0).unwrap();
+    assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 13.0);
+}
+
+#[cfg(feature = "meshpart")]
+#[test]
+fn gltf_channels_preserve_independent_timelines_interpolation_and_rest_scale() {
+    use trscene::MeshPart;
+
+    let mut workspace = Workspace::new();
+    let mut rig = Rig::from_gltf(
+        include_bytes!("../fixtures/AnimationChannels.gltf"),
+        &mut workspace,
+    )
+    .unwrap();
+    let mixed = rig.animation_clips()["Mixed"].clone();
+    let triangle = rig.find_first_child::<MeshPart>("Triangle").unwrap().0;
+    let marker = rig.find_first_child::<Rig>("Marker").unwrap().0;
+    rig.play_animation(AnimationPlayer::new(mixed)).unwrap();
+    rig.step_animation(0.5);
+    let (scale, rotation, position) = rig
+        .view::<MeshPart>(triangle)
+        .unwrap()
+        .pivot()
+        .to_scale_rotation_translation();
+    assert!(scale.abs_diff_eq(Vec3::new(2.0, 3.0, 4.0), 1e-5));
+    assert!(position.abs_diff_eq(Vec3::ZERO, 1e-5));
+    assert!((rotation * Vec3::Z).abs_diff_eq(Vec3::X, 1e-5));
+    rig.step_animation(1.0);
+    assert!(
+        rig.view::<MeshPart>(triangle)
+            .unwrap()
+            .position()
+            .abs_diff_eq(Vec3::ZERO, 1e-5)
+    );
+    rig.step_animation(0.5);
+    assert!(
+        rig.view::<MeshPart>(triangle)
+            .unwrap()
+            .position()
+            .abs_diff_eq(Vec3::X * 2.0, 1e-5)
+    );
+
+    let cubic = rig.animation_clips()["Cubic"].clone();
+    assert!(
+        rig.view::<Rig>(marker)
+            .unwrap()
+            .position()
+            .abs_diff_eq(Vec3::X * 2.0, 1e-5)
+    );
+    rig.play_animation(AnimationPlayer::new(cubic)).unwrap();
+    rig.step_animation(1.0);
+    assert!(
+        rig.view::<MeshPart>(triangle)
+            .unwrap()
+            .position()
+            .abs_diff_eq(Vec3::X * 1.25, 1e-5)
+    );
+    assert!(
+        rig.view::<Rig>(marker)
+            .unwrap()
+            .position()
+            .abs_diff_eq(Vec3::X * 3.0, 1e-5)
+    );
+}
+
+#[test]
 fn rig_setters_preserve_descendant_transforms_and_existing_world_space_parenting() {
     let mut rig = Rig::new().with_position(Vec3::new(10.0, 0.0, 0.0));
     let offset = Mat4::from_scale_rotation_translation(

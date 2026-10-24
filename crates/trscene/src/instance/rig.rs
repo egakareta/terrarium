@@ -1,4 +1,16 @@
+use std::collections::BTreeMap;
+
 use crate::{glam::*, *};
+
+#[cfg(feature = "meshpart")]
+mod gltf;
+
+#[derive(Clone, Debug)]
+struct AnimationTransition {
+    poses: std::sync::Arc<BTreeMap<Vec<String>, Mat4>>,
+    duration: f32,
+    elapsed: f32,
+}
 
 instance! {
     #[instance(inspect = false)]
@@ -19,6 +31,10 @@ instance! {
         #[property(default = true)]
         anchored: bool,
         animation: Option<AnimationPlayer>,
+        transition: Option<AnimationTransition>,
+        clips: BTreeMap<String, AnimationClip>,
+        #[cfg(feature = "meshpart")]
+        skins: std::sync::Arc<[gltf::SkinBinding]>,
     }
     impl Rig {
         #[r#override(PVInstance::set_pivot)]
@@ -52,8 +68,25 @@ instance! {
         /// untouched. Removed targets and subtrees with singular pivots are skipped
         /// during playback.
         pub fn play_animation(&mut self, player: AnimationPlayer) -> Result<(), AnimationError> {
+            self.transition_animation(player, 0.0)
+        }
+
+        /// Crossfades from the displayed pose to a new player over `duration_seconds`.
+        ///
+        /// Interrupted fades start from the current blended pose. Zero switches
+        /// immediately; negative or nonfinite durations leave playback unchanged.
+        pub fn transition_animation(
+            &mut self,
+            player: AnimationPlayer,
+            duration_seconds: f32,
+        ) -> Result<(), AnimationError> {
+            if !duration_seconds.is_finite() || duration_seconds < 0.0 {
+                return Err(AnimationError::InvalidTime);
+            }
+            let mut poses = BTreeMap::new();
             for track in player.clip().tracks() {
                 let mut instance: &dyn Instance = self.as_instance();
+                let mut parent_pivot = self.pivot();
                 for name in track.target() {
                     if instance
                         .spatial()
@@ -71,6 +104,7 @@ instance! {
                     if matches.next().is_some() {
                         return Err(AnimationError::AmbiguousTarget(track.target().to_vec()));
                     }
+                    parent_pivot = instance.spatial().map_or(parent_pivot, |spatial| spatial.world_pivot());
                     instance = child.as_ref();
                 }
                 let Some(pivot) = instance.spatial().map(|spatial| spatial.world_pivot()) else {
@@ -79,10 +113,25 @@ instance! {
                 if !pivot.inverse().is_finite() {
                     return Err(AnimationError::InvalidTransform);
                 }
+                let local = parent_pivot.inverse() * pivot;
+                if duration_seconds > 0.0 && !crate::interpolation::valid_transform(local) {
+                    return Err(AnimationError::InvalidTransform);
+                }
+                poses.insert(track.target().to_vec(), local);
             }
+            self.transition = (duration_seconds > 0.0).then_some(AnimationTransition {
+                poses: std::sync::Arc::new(poses),
+                duration: duration_seconds,
+                elapsed: 0.0,
+            });
             apply_animation(self, &player);
             self.animation = Some(player);
             Ok(())
+        }
+
+        /// Returns named clips imported with the rig.
+        pub fn animation_clips(&self) -> &BTreeMap<String, AnimationClip> {
+            &self.clips
         }
 
         /// Returns the current animation's playback state, including completed clips.
@@ -97,6 +146,7 @@ instance! {
 
         /// Stops playback, retaining the current pose.
         pub fn stop_animation(&mut self) -> Option<AnimationPlayer> {
+            self.transition = None;
             self.animation.take()
         }
 
@@ -107,8 +157,16 @@ instance! {
             let Some(mut player) = self.animation.take() else {
                 return;
             };
-            if !player.is_finished() {
+            if !player.is_finished() || self.transition.is_some() {
                 player.update(delta_seconds);
+                if let Some(transition) = &mut self.transition {
+                    if !player.is_paused() && delta_seconds.is_finite() && delta_seconds > 0.0 {
+                        transition.elapsed = (transition.elapsed + delta_seconds).min(transition.duration);
+                    }
+                    if transition.elapsed >= transition.duration {
+                        self.transition = None;
+                    }
+                }
                 apply_animation(self, &player);
             }
             self.animation = Some(player);
@@ -118,10 +176,13 @@ instance! {
 
 fn apply_animation<T: RigExt + ?Sized>(rig: &mut T, player: &AnimationPlayer) {
     let pivot = rig.pivot();
+    let transition = rig.rig().transition.clone();
     let mut path = Vec::new();
     for child in rig.as_instance_mut().children_mut() {
-        apply_tracks(child, pivot, &mut path, player);
+        apply_tracks(child, pivot, &mut path, player, transition.as_ref());
     }
+    #[cfg(feature = "meshpart")]
+    gltf::update_skins(rig);
 }
 
 fn apply_tracks(
@@ -129,6 +190,7 @@ fn apply_tracks(
     parent_pivot: Mat4,
     path: &mut Vec<String>,
     player: &AnimationPlayer,
+    transition: Option<&AnimationTransition>,
 ) {
     if instance
         .spatial()
@@ -144,14 +206,29 @@ fn apply_tracks(
         .find(|track| track.target() == path)
         && let Some(spatial) = instance.spatial_mut()
     {
-        spatial.move_to_world_pivot(parent_pivot * track.sample(player.time()));
+        let target = track.sample(player.time());
+        let local = transition
+            .and_then(|fade| {
+                fade.poses.get(path).map(|from| {
+                    crate::interpolation::interpolate_transform(
+                        *from,
+                        target,
+                        fade.elapsed / fade.duration,
+                    )
+                })
+            })
+            .unwrap_or(target);
+        let pivot = parent_pivot * local;
+        if pivot.inverse().is_finite() {
+            spatial.move_to_world_pivot(pivot);
+        }
     }
     let pivot = instance
         .spatial()
         .map(|spatial| spatial.world_pivot())
         .unwrap_or(parent_pivot);
     for child in instance.children_mut() {
-        apply_tracks(child, pivot, path, player);
+        apply_tracks(child, pivot, path, player, transition);
     }
     path.pop();
 }

@@ -1,0 +1,72 @@
+{
+  "asset": { "version": "2.0" },
+  "scene": 0,
+  "scenes": [{ "nodes": [0, 1] }],
+  "nodes": [
+    { "name": "Triangle", "mesh": 0, "scale": [2, 3, 4] },
+    { "name": "Marker", "translation": [3, 0, 0] }
+  ],
+  "meshes": [{ "primitives": [{ "attributes": { "POSITION": 0 } }] }],
+  "buffers": [
+    {
+      "byteLength": 180,
+      "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  ],
+  "bufferViews": [
+    { "buffer": 0, "byteOffset": 0, "byteLength": 36 },
+    { "buffer": 0, "byteOffset": 36, "byteLength": 8 },
+    { "buffer": 0, "byteOffset": 44, "byteLength": 24 },
+    { "buffer": 0, "byteOffset": 68, "byteLength": 8 },
+    { "buffer": 0, "byteOffset": 76, "byteLength": 32 },
+    { "buffer": 0, "byteOffset": 108, "byteLength": 72 }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 3,
+      "type": "VEC3",
+      "min": [0, 0, 0],
+      "max": [1, 1, 0]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 2,
+      "type": "SCALAR",
+      "min": [0],
+      "max": [2]
+    },
+    { "bufferView": 2, "componentType": 5126, "count": 2, "type": "VEC3" },
+    {
+      "bufferView": 3,
+      "componentType": 5126,
+      "count": 2,
+      "type": "SCALAR",
+      "min": [0],
+      "max": [1]
+    },
+    { "bufferView": 4, "componentType": 5126, "count": 2, "type": "VEC4" },
+    { "bufferView": 5, "componentType": 5126, "count": 6, "type": "VEC3" }
+  ],
+  "animations": [
+    {
+      "name": "Mixed",
+      "channels": [
+        { "sampler": 0, "target": { "node": 0, "path": "translation" } },
+        { "sampler": 1, "target": { "node": 0, "path": "rotation" } },
+        { "sampler": 0, "target": { "node": 1, "path": "translation" } }
+      ],
+      "samplers": [
+        { "input": 1, "output": 2, "interpolation": "STEP" },
+        { "input": 3, "output": 4, "interpolation": "LINEAR" }
+      ]
+    },
+    {
+      "name": "Cubic",
+      "channels": [{ "sampler": 0, "target": { "node": 0, "path": "translation" } }],
+      "samplers": [{ "input": 1, "output": 5, "interpolation": "CUBICSPLINE" }]
+    }
+  ]
+}

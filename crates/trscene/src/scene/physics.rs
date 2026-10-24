@@ -143,7 +143,15 @@ impl PhysicsWorld {
         );
     }
 
-    fn is_grounded(world: &RapierPhysicsWorld, body_handle: RigidBodyHandle) -> bool {
+    /// Reports whether an instance's body has an upward-facing supporting contact.
+    ///
+    /// Uses the most recently completed physics step. Missing bodies are not grounded.
+    pub fn is_grounded(&self, instance: InstanceId) -> bool {
+        self.body_handle(instance)
+            .is_some_and(|handle| Self::body_is_grounded(&self.world, handle))
+    }
+
+    fn body_is_grounded(world: &RapierPhysicsWorld, body_handle: RigidBodyHandle) -> bool {
         let Some(body) = world.bodies.get(body_handle) else {
             return false;
         };
@@ -221,7 +229,7 @@ impl PhysicsWorld {
             };
             let jump_speed = motion
                 .jump_speed
-                .filter(|_| Self::is_grounded(&self.world, entry.handle));
+                .filter(|_| Self::body_is_grounded(&self.world, entry.handle));
             let Some(body) = self.world.bodies.get_mut(entry.handle) else {
                 continue;
             };

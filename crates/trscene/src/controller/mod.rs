@@ -40,12 +40,14 @@ use crate::{
 mod actions;
 mod input;
 mod player;
+mod player_animation;
 mod touch;
 
 pub(crate) use actions::frame_delta;
 pub use actions::*;
 pub use input::*;
 pub use player::*;
+pub use player_animation::*;
 
 /// A per-frame behavior owned by an engine.
 ///

@@ -1,4 +1,9 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
+
+#[cfg(feature = "meshpart")]
+mod gltf;
+#[cfg(feature = "meshpart")]
+pub(crate) use gltf::*;
 
 use crate::{
     Easing,
@@ -81,6 +86,8 @@ impl Keyframe {
 pub struct AnimationTrack {
     target: Vec<String>,
     keyframes: Vec<Keyframe>,
+    #[cfg(feature = "meshpart")]
+    channels: Option<Arc<GltfTransformTrack>>,
 }
 
 impl AnimationTrack {
@@ -116,7 +123,12 @@ impl AnimationTrack {
                 return Err(AnimationError::InvalidTransform);
             }
         }
-        Ok(Self { target, keyframes })
+        Ok(Self {
+            target,
+            keyframes,
+            #[cfg(feature = "meshpart")]
+            channels: None,
+        })
     }
 
     /// Returns the target's path relative to the rig.
@@ -125,6 +137,9 @@ impl AnimationTrack {
     }
 
     /// Returns the ordered keyframes.
+    ///
+    /// Imported glTF tracks expose poses at channel timestamps. [`Self::sample`]
+    /// retains the channels' individual interpolation modes between them.
     pub fn keyframes(&self) -> &[Keyframe] {
         &self.keyframes
     }
@@ -141,6 +156,10 @@ impl AnimationTrack {
     ///
     /// NaN samples use time zero.
     pub fn sample(&self, time_seconds: f32) -> Mat4 {
+        #[cfg(feature = "meshpart")]
+        if let Some(channels) = &self.channels {
+            return channels.sample(time_seconds);
+        }
         let time = if time_seconds.is_nan() {
             0.0
         } else {
@@ -162,7 +181,7 @@ impl AnimationTrack {
     }
 }
 
-fn valid_transform(transform: Mat4) -> bool {
+pub(crate) fn valid_transform(transform: Mat4) -> bool {
     if !transform.is_finite() || transform.determinant() <= 0.0 {
         return false;
     }
@@ -175,7 +194,7 @@ fn valid_transform(transform: Mat4) -> bool {
             .abs_diff_eq(transform, 0.0001)
 }
 
-fn interpolate_transform(from: Mat4, to: Mat4, amount: f32) -> Mat4 {
+pub(crate) fn interpolate_transform(from: Mat4, to: Mat4, amount: f32) -> Mat4 {
     if amount <= 0.0 {
         return from;
     }
@@ -194,7 +213,7 @@ fn interpolate_transform(from: Mat4, to: Mat4, amount: f32) -> Mat4 {
 /// A reusable set of local transform tracks played on a [`crate::Rig`].
 #[derive(Clone, Debug)]
 pub struct AnimationClip {
-    tracks: Vec<AnimationTrack>,
+    tracks: Arc<[AnimationTrack]>,
     duration: f32,
 }
 
@@ -222,7 +241,10 @@ impl AnimationClip {
             .iter()
             .map(AnimationTrack::duration)
             .fold(0.0, f32::max);
-        Ok(Self { tracks, duration })
+        Ok(Self {
+            tracks: tracks.into(),
+            duration,
+        })
     }
 
     /// Returns all tracks in this clip.
@@ -233,6 +255,10 @@ impl AnimationClip {
     /// Returns the length of the longest track in seconds.
     pub fn duration(&self) -> f32 {
         self.duration
+    }
+
+    pub(crate) fn same_clip(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.tracks, &other.tracks)
     }
 }
 

@@ -2,6 +2,9 @@ use std::ops::{Deref, DerefMut};
 
 use crate::{glam::*, *};
 
+#[cfg(feature = "meshpart")]
+mod default_rig;
+
 /// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
 ///
 /// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
@@ -34,10 +37,15 @@ pub struct PlayerController {
     /// Each moving frame uses `(turn_factor * delta_seconds).clamp(0.0, 1.0)`
     /// along the shortest yaw arc. Zero disables turning; idle frames retain yaw.
     pub turn_factor: f32,
+    /// Animation players selected automatically from movement and physics state.
+    pub animations: PlayerAnimations,
+    locomotion: PlayerAnimationState,
+    animation_state: PlayerAnimationState,
+    animated_state: Option<(InstanceId, PlayerAnimationState)>,
 }
 
 impl PlayerController {
-    /// Creates a controller for `rig` with WASD/Space/Shift movement and drag-look bindings.
+    /// Creates a controller for a custom rig with WASD/Space/Shift and drag-look bindings.
     ///
     /// Space uses the up action to jump a grounded dynamic rig. The down action is
     /// unbound. Mouse and touch look orbit the active camera when it follows the rig.
@@ -52,6 +60,10 @@ impl PlayerController {
             jump_speed: 7.0,
             sensitivity: 0.0025,
             turn_factor: 10.0,
+            animations: PlayerAnimations::default(),
+            locomotion: PlayerAnimationState::Idle,
+            animation_state: PlayerAnimationState::Idle,
+            animated_state: None,
         }
     }
 
@@ -99,6 +111,18 @@ impl PlayerController {
     pub fn with_jump_speed(mut self, speed: f32) -> Self {
         self.jump_speed = speed;
         self
+    }
+
+    /// Wires animation players to locomotion states.
+    pub fn with_animations(mut self, animations: PlayerAnimations) -> Self {
+        self.animations = animations;
+        self.animated_state = None;
+        self
+    }
+
+    /// Returns the most recently selected locomotion animation state.
+    pub fn animation_state(&self) -> PlayerAnimationState {
+        self.animation_state
     }
 
     /// Applies accumulated input directly to a rig without a workspace.
@@ -156,6 +180,19 @@ impl PlayerController {
         let movement_rotation = reference.yaw_rotation(workspace.camera().pose(), 1.0);
         let delta_seconds = super::frame_delta(delta_seconds);
         let (movement, rotation) = self.motion(actions, movement_rotation, pose, delta_seconds);
+        let mut horizontal = actions;
+        horizontal.movement.y = 0.0;
+        self.locomotion = if horizontal
+            .translation(movement_rotation, self.speed, 1.0)
+            .length_squared()
+            <= 1e-8
+        {
+            PlayerAnimationState::Idle
+        } else if actions.sprint {
+            PlayerAnimationState::Sprint
+        } else {
+            PlayerAnimationState::Walk
+        };
         #[cfg(feature = "physics")]
         if !anchored {
             if delta_seconds > 0.0 {
@@ -170,10 +207,56 @@ impl PlayerController {
                     jump_speed,
                 );
             }
+            self.update_animation(workspace);
             return;
         }
         if let Some(rig) = workspace.get_mut::<Rig>(id) {
             Self::apply_pose(rig, movement, rotation);
+        }
+        self.update_animation(workspace);
+    }
+
+    fn update_animation(&mut self, workspace: &mut Workspace) {
+        let Some(id) = self.rig else { return };
+        let Some(rig) = workspace.get::<Rig>(id) else {
+            return;
+        };
+        let state = self.locomotion;
+        #[cfg(feature = "physics")]
+        let state = if !rig.anchored()
+            && let Some(body) = workspace.physics().body(id)
+            && !workspace.physics().is_grounded(id)
+        {
+            if body.linvel().y > 0.05 {
+                PlayerAnimationState::Jump
+            } else {
+                PlayerAnimationState::Fall
+            }
+        } else {
+            state
+        };
+        self.animation_state = state;
+        let Some(player) = self.animations.get(state) else {
+            return;
+        };
+        if self.animated_state == Some((id, state))
+            && rig
+                .animation()
+                .is_some_and(|current| current.clip().same_clip(player.clip()))
+        {
+            return;
+        }
+        let duration = self.animations.transition_duration;
+        let duration = if duration.is_finite() {
+            duration.max(0.0)
+        } else {
+            0.0
+        };
+        if let Some(rig) = workspace.get_mut::<Rig>(id) {
+            match rig.transition_animation(player.clone(), duration) {
+                Ok(()) => self.animated_state = Some((id, state)),
+                Err(error) => log::error!("could not play {state:?} animation: {error}"),
+            }
         }
     }
 
@@ -258,6 +341,7 @@ impl Controller for PlayerController {
     }
 
     fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+        self.update_animation(workspace);
         let subject = workspace.subject().and_then(|id| {
             workspace
                 .view::<dyn Instance>(id)

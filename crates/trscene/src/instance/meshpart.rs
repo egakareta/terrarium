@@ -65,6 +65,15 @@ pub enum GltfError {
     /// An imported image could not be represented as a workspace texture.
     #[error("could not create glTF texture: {0}")]
     Texture(#[from] TextureError),
+    /// Animation data cannot be represented by the rig player.
+    #[error("invalid glTF animation: {0}")]
+    Animation(#[from] AnimationError),
+    /// Skin attributes, joint indices, or inverse bind matrices are invalid.
+    #[error("invalid glTF skin: {0}")]
+    InvalidSkin(String),
+    /// Morph target animation is not supported by the rig importer.
+    #[error("glTF morph target animation is not supported")]
+    UnsupportedMorphTargets,
 }
 
 instance! {
@@ -87,16 +96,19 @@ instance! {
         mesh_revision: u64,
         #[cfg_attr(feature = "devtools", inspect(readonly))]
         bounding_radius: f32,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        deformed_mesh: Option<Mesh>,
     }
     impl MeshPart {
         /// CPU-side geometry rendered by this mesh part. Replacing it updates
         /// the bounds and schedules a new upload before the next frame.
         pub fn mesh(&self) -> &Mesh {
-            self.mesh_part().mesh.mesh()
+            self.mesh_part().deformed_mesh.as_ref().unwrap_or_else(|| self.mesh_part().mesh.mesh())
         }
         /// Sets `mesh`.
         pub fn set_mesh(&mut self, mesh: Mesh) {
             let mesh_part = self.mesh_part_mut();
+            mesh_part.deformed_mesh = None;
             mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
             mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots().clone());
             mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
@@ -154,7 +166,7 @@ pub struct GltfAsset {
 }
 
 impl GltfAsset {
-    fn import(bytes: &[u8]) -> Result<Self, GltfError> {
+    pub(crate) fn import(bytes: &[u8]) -> Result<Self, GltfError> {
         let source = Arc::<[u8]>::from(bytes);
         let (document, buffers, images) = gltf::import_slice(bytes)?;
         Ok(Self {
@@ -215,7 +227,11 @@ impl MeshHandle {
         }))
     }
 
-    fn from_gltf(asset: Arc<GltfAsset>, mesh: Mesh, material_slots: MeshMaterialSlots) -> Self {
+    pub(crate) fn from_gltf(
+        asset: Arc<GltfAsset>,
+        mesh: Mesh,
+        material_slots: MeshMaterialSlots,
+    ) -> Self {
         Self(Arc::new(MeshAsset {
             source: MeshAssetSource::Gltf(asset),
             mesh,
@@ -278,6 +294,7 @@ impl MeshPart {
             mesh,
             mesh_revision: 0,
             bounding_radius,
+            deformed_mesh: None,
         }
     }
 
@@ -335,6 +352,12 @@ impl MeshPart {
         self.mesh_revision
     }
 
+    pub(crate) fn deform(&mut self, mesh: Mesh) {
+        self.bounding_radius = mesh_bounding_radius(&mesh);
+        self.deformed_mesh = Some(mesh);
+        self.mesh_revision = self.mesh_revision.wrapping_add(1);
+    }
+
     pub(crate) fn bounding_radius(&self) -> f32 {
         self.bounding_radius
     }
@@ -377,7 +400,7 @@ fn append_node(
     Ok(())
 }
 
-fn append_primitive(
+pub(crate) fn append_primitive(
     primitive: gltf::Primitive<'_>,
     mesh_index: usize,
     transform: Mat4,
@@ -613,7 +636,7 @@ fn fallback_tangent(normal: Vec3) -> Vec3 {
     }
 }
 
-fn import_material(
+pub(crate) fn import_material(
     source: Option<gltf::Material<'_>>,
     images: &[gltf::image::Data],
     workspace: &mut Workspace,

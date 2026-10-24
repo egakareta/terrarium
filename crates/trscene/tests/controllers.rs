@@ -160,6 +160,74 @@ fn dynamic_player_rig(position: Vec3) -> Rig {
     rig
 }
 
+#[test]
+fn player_state_bindings_crossfade_and_keep_playing_without_restarting() {
+    let clip = |x| {
+        AnimationClip::new([AnimationTrack::new(
+            ["Visual"],
+            [
+                Keyframe::new(0.0, Mat4::from_translation(Vec3::X * x)),
+                Keyframe::new(2.0, Mat4::from_translation(Vec3::X * (x + 2.0))),
+            ],
+        )])
+    };
+    let animations = PlayerAnimations::default()
+        .with_transition_duration(0.2)
+        .with_state(
+            PlayerAnimationState::Idle,
+            AnimationPlayer::new(clip(0.0)).with_looping(true),
+        )
+        .with_state(
+            PlayerAnimationState::Walk,
+            AnimationPlayer::new(clip(10.0)).with_looping(true),
+        );
+    let mut rig = Rig::new();
+    let visual = rig.add_child(Part::new().with_name("Visual"));
+    let mut workspace = Workspace::new();
+    let rig = workspace.add_child(rig);
+    let mut controller = PlayerController::new(rig).with_animations(animations);
+    controller.step_workspace_with_actions(&mut workspace, ControllerActions::default(), 0.0);
+    workspace.step_animations(0.2);
+    assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
+    assert!((workspace.get::<Part>(visual).unwrap().position().x - 0.2).abs() < 1e-5);
+
+    let walking = ControllerActions {
+        movement: Vec3::Z,
+        ..Default::default()
+    };
+    controller.step_workspace_with_actions(&mut workspace, walking, 0.0);
+    assert_eq!(controller.animation_state(), PlayerAnimationState::Walk);
+    assert!((workspace.get::<Part>(visual).unwrap().position().x - 0.2).abs() < 1e-5);
+    workspace.step_animations(0.1);
+    assert!((workspace.get::<Part>(visual).unwrap().position().x - 5.15).abs() < 1e-5);
+    controller.step_workspace_with_actions(&mut workspace, walking, 0.0);
+    workspace.step_animations(0.1);
+    assert!((workspace.get::<Part>(visual).unwrap().position().x - 10.2).abs() < 1e-5);
+    assert!(
+        (workspace
+            .get::<Rig>(rig)
+            .unwrap()
+            .animation()
+            .unwrap()
+            .time()
+            - 0.2)
+            .abs()
+            < 1e-5
+    );
+
+    controller.step_workspace_with_actions(
+        &mut workspace,
+        ControllerActions {
+            sprint: true,
+            ..walking
+        },
+        0.0,
+    );
+    assert_eq!(controller.animation_state(), PlayerAnimationState::Sprint);
+    workspace.step_animations(0.1);
+    assert!((workspace.get::<Part>(visual).unwrap().position().x - 10.3).abs() < 1e-5);
+}
+
 #[cfg(feature = "physics")]
 #[test]
 fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {

@@ -38,9 +38,13 @@ impl App for PlayerApp {
         egui::Panel::left("controls").show(ui, |ui| {
             ui.heading("Courtyard");
             ui.label("WASD: walk · Shift: sprint");
+            ui.label("Space: jump");
             ui.label("Drag: orbit camera · Touch: joystick and drag");
             ui.separator();
             ui.label("Explore the buildings and take the ramp to the lookout.");
+            if let Some(player) = engine.controller().downcast_ref::<PlayerController>() {
+                ui.label(format!("Animation: {:?}", player.animation_state()));
+            }
             if ui.button("Respawn").clicked() {
                 self.respawn(engine);
             }
@@ -167,29 +171,12 @@ fn add_map(workspace: &mut Workspace) {
     }
 }
 
-fn create_scene(workspace: &mut Workspace) -> InstanceId {
+fn create_scene(workspace: &mut Workspace) -> PlayerController {
     add_map(workspace);
     workspace.lighting.with_clock_time(15.0);
-    let mut rig = Rig::new()
-        .with_name("Player")
-        .with_anchored(false)
-        .with_position(SPAWN);
-    rig.add_child_local(
-        Part::new()
-            .with_name("Body")
-            .with_size(Vec3::new(0.8, 1.8, 0.8))
-            .with_position(Vec3::Y * 0.9)
-            .with_color(Color3::new(0.85, 0.63, 0.30)),
-    );
-    rig.add_child_local(
-        Part::new()
-            .with_name("FacingMarker")
-            .with_size(Vec3::splat(0.4))
-            .with_position(Vec3::new(0.0, 1.3, -0.5))
-            .with_can_collide(false)
-            .with_color(Color3::new(0.2, 0.5, 0.9)),
-    );
-    let rig = workspace.add_child(rig);
+    let player = PlayerController::spawn(workspace);
+    let rig = player.rig.unwrap();
+    workspace.get_mut::<Rig>(rig).unwrap().with_position(SPAWN);
     *workspace.camera_mut() = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
         SPAWN + Vec3::Y,
@@ -197,12 +184,12 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     )
     .with_subject(Some(rig))
     .with_zfar(150.0);
-    rig
+    player
 }
 
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
-    let rig = create_scene(engine.workspace_mut());
-    let player = PlayerController::new(rig);
+    let player = create_scene(engine.workspace_mut());
+    let rig = player.rig.unwrap();
     let _ = engine
         .workspace_mut()
         .camera_mut()
@@ -223,11 +210,12 @@ fn player_example_loads_headlessly() -> Result<(), AppCreationError> {
         .with_headless_frames(Some(Some(2)))
         .run(initialize)?
         .expect("native headless runs return the engine");
-    assert_eq!(engine.get_all::<Rig>().count(), 1);
-    assert_eq!(
-        engine.camera().subject(),
-        Some(engine.get_all::<Rig>().next().unwrap().id())
-    );
+    let player = engine
+        .get_all::<Rig>()
+        .find(|rig| rig.name() == "Player")
+        .unwrap();
+    assert!(player.animation_clips().contains_key("Idle_Loop"));
+    assert_eq!(engine.camera().subject(), Some(player.id()));
     Ok(())
 }
 
@@ -300,8 +288,8 @@ mod tests {
     }
 
     fn create_test_scene(workspace: &mut Workspace) -> (InstanceId, PlayerController) {
-        let rig = create_scene(workspace);
-        let mut controller = PlayerController::new(rig);
+        let mut controller = create_scene(workspace);
+        let rig = controller.rig.unwrap();
         workspace.camera_mut().set_subject_offset(Vec3::Y);
         workspace.camera_mut().set_subject_distance(7.6);
         controller.post_physics(workspace, 0.0);
@@ -326,17 +314,76 @@ mod tests {
         assert!(falling.position().y > 0.5);
         assert!(falling.position().z < SPAWN.z - 2.5);
         assert!(falling.forward().x > 0.1);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
 
         advance(&mut workspace, &mut controller, 150);
         let landed = workspace.get::<Rig>(rig).unwrap();
         assert!(landed.position().y.abs() < 0.05, "{:?}", landed.position());
         assert!(landed.position().z < SPAWN.z - 14.0);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Walk);
         assert!(
             landed
                 .pose()
                 .transform_vector3(Vec3::Y)
                 .abs_diff_eq(Vec3::Y, 1e-5)
         );
+    }
+
+    #[test]
+    fn player_animations_transition_between_idle_walk_sprint_jump_and_fall() {
+        let mut workspace = Workspace::new();
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        advance(&mut workspace, &mut controller, 120);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
+        let mesh_id = workspace.get_all::<MeshPart>().next().unwrap().id();
+        let idle = workspace.get::<MeshPart>(mesh_id).unwrap().mesh().clone();
+        walk_forward(&mut workspace, &mut controller);
+        advance(&mut workspace, &mut controller, 20);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Walk);
+        let walk = workspace.get::<MeshPart>(mesh_id).unwrap().mesh();
+        assert!(
+            idle.vertices
+                .iter()
+                .zip(&walk.vertices)
+                .any(|(idle, walk)| {
+                    !Vec3::from_array(idle.position)
+                        .abs_diff_eq(Vec3::from_array(walk.position), 0.001)
+                })
+        );
+        let before = workspace
+            .get::<Rig>(rig)
+            .unwrap()
+            .animation()
+            .unwrap()
+            .time();
+        step(&mut workspace, &mut controller, 1.0 / 60.0);
+        assert!(
+            workspace
+                .get::<Rig>(rig)
+                .unwrap()
+                .animation()
+                .unwrap()
+                .time()
+                > before
+        );
+
+        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, true);
+        advance(&mut workspace, &mut controller, 15);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Sprint);
+        controller.process_key(winit::keyboard::KeyCode::KeyW, false);
+        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, false);
+        advance(&mut workspace, &mut controller, 15);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
+
+        controller.process_key(winit::keyboard::KeyCode::Space, true);
+        advance(&mut workspace, &mut controller, 3);
+        controller.process_key(winit::keyboard::KeyCode::Space, false);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Jump);
+        advance(&mut workspace, &mut controller, 50);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
+        advance(&mut workspace, &mut controller, 80);
+        assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
+        assert!(workspace.physics().is_grounded(rig));
     }
 
     #[test]
