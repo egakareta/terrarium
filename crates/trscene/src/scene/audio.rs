@@ -339,15 +339,16 @@ mod tests {
         );
         assert!(workspace.step_audio(0.0).is_empty());
         for id in [global_id, disabled_id] {
+            let spatial = workspace
+                .get::<Sound>(id)
+                .unwrap()
+                .playback()
+                .unwrap()
+                .spatial()
+                .unwrap();
             assert!(
-                workspace
-                    .get::<Sound>(id)
-                    .unwrap()
-                    .playback()
-                    .unwrap()
-                    .spatial()
-                    .unwrap()
-                    .is_none()
+                spatial.is_none(),
+                "sound {id:?} unexpectedly has spatial settings: {spatial:?}"
             );
         }
         workspace
