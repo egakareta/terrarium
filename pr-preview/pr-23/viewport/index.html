@@ -6,8 +6,8 @@
     <title>this is terrarium</title>
     
 <script type="module">
-import init, * as bindings from '/terrarium/pr-preview/pr-23/viewport/terrarium-7e45972547a59136.js';
-const wasm = await init({ module_or_path: '/terrarium/pr-preview/pr-23/viewport/terrarium-7e45972547a59136_bg.wasm' });
+import init, * as bindings from '/terrarium/pr-preview/pr-23/viewport/terrarium-73a2274ecdfdfb34.js';
+const wasm = await init({ module_or_path: '/terrarium/pr-preview/pr-23/viewport/terrarium-a943743fe5296a75_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +30,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/pr-preview/pr-23/viewport/terrarium-7e45972547a59136.js" crossorigin="anonymous" integrity="sha384-gQmnZ7P4zqhfgxNt+x3QQHtQH/kA/YwNTBW0lDlviCflKWpgEysgIGBjpC1wH7im"><link rel="modulepreload" href="/terrarium/pr-preview/pr-23/viewport/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/pr-preview/pr-23/viewport/terrarium-7e45972547a59136_bg.wasm" crossorigin="anonymous" integrity="sha384-xddfbM33yoJmXZjXTlGTbSzxyQo2JkVQq/E0UMirBtbFXOvQ5ik7CvKU3EqEfe1z" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/pr-preview/pr-23/viewport/terrarium-73a2274ecdfdfb34.js" crossorigin="anonymous" integrity="sha384-Qyg51R5lnTbrTBMp09oXY2YiK/3qW3KYUmcifkBktSoqF5M8D4QyPkHgpt5mz0m5"><link rel="modulepreload" href="/terrarium/pr-preview/pr-23/viewport/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/pr-preview/pr-23/viewport/terrarium-a943743fe5296a75_bg.wasm" crossorigin="anonymous" integrity="sha384-JU4JcY3Blz9E2tf86Scd1n7p+qrQU/CLr7VWyOo73afkfdIr6pZ4EfkUIT4TPQCG" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
