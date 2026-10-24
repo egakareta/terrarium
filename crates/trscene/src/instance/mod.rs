@@ -1002,11 +1002,9 @@ mod tests {
 
         assert_instance::<Workspace>();
         assert_instance::<BasePart>();
-        assert_instance::<Camera>();
         assert_instance::<Part>();
         assert_eq!(Workspace::new().name(), "Workspace");
         assert_eq!(BasePart::new().with_name("base").name(), "base");
-        assert_eq!(Camera::default().name(), "Camera");
 
         let instance: Box<dyn Instance> = Box::new(BasePart::new().with_name("base"));
         assert!(instance.is::<BasePart>());
@@ -1024,7 +1022,7 @@ mod tests {
     fn every_instance_can_own_a_nested_instance_tree() {
         let mut model = BasePart::new().with_name("model");
         let part_id = model.add_child(Part::new().with_shape(PartShape::Ball).with_name("part"));
-        let camera_id = Camera::default().set_parent(&mut model);
+        let basepart_id = BasePart::new().set_parent(&mut model);
         let model_id = model.id();
 
         assert_eq!(
@@ -1032,12 +1030,14 @@ mod tests {
             Some(part_id)
         );
         assert_eq!(
-            model.find_first_child::<Camera>("Camera").map(|(id, _)| id),
-            Some(camera_id)
+            model
+                .find_first_child::<BasePart>("BasePart")
+                .map(|(id, _)| id),
+            Some(basepart_id)
         );
         assert_eq!(model.children().len(), 2);
         assert_eq!(model.children()[0].id(), part_id);
-        assert_eq!(model.children()[1].id(), camera_id);
+        assert_eq!(model.children()[1].id(), basepart_id);
         assert_eq!(model.children()[0].parent(), Some(model_id));
 
         let mut workspace = Workspace::new();
@@ -1056,9 +1056,9 @@ mod tests {
         );
         assert!(
             workspace
-                .view::<dyn Instance>(camera_id)
+                .view::<dyn Instance>(basepart_id)
                 .unwrap()
-                .is::<Camera>()
+                .is::<BasePart>()
         );
         assert_eq!(workspace.get_all::<Part>().count(), 1);
         assert_eq!(workspace.instances().count(), 3);
@@ -1067,7 +1067,7 @@ mod tests {
                 .instances()
                 .map(|instance| instance.name())
                 .collect::<Vec<_>>(),
-            ["model", "part", "Camera"]
+            ["model", "part", "BasePart"]
         );
     }
 

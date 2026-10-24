@@ -45,7 +45,7 @@ fn animate_orbits(time: Res<Time>, orbits: Res<Orbits>, mut scene: NonSendMut<Wo
 
 fn setup(mut scene: NonSendMut<Workspace>, mut orbits: ResMut<Orbits>) {
     scene.lighting.with_clock_time(17.5);
-    scene.camera = Camera::new(
+    *scene.camera_mut() = Camera::new(
         Vec3::new(8.5, 5.5, 10.0),
         Vec3::new(0.0, 1.5, 0.0),
         16.0 / 9.0,

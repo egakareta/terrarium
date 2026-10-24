@@ -92,15 +92,16 @@ impl AudioRuntime {
 
     pub(crate) fn update_listener(
         &mut self,
-        camera: &Camera,
+        position: Vec3,
+        forward: Vec3,
+        up: Vec3,
         delta_seconds: f32,
     ) -> Result<(), SoundscapeError> {
-        let position = camera.position();
         self.soundscape.set_listener(ListenerState {
             position: position.to_array(),
             velocity: velocity(position, self.previous_listener_position, delta_seconds).to_array(),
-            forward: camera.forward().to_array(),
-            up: camera.pose().transform_vector3(Vec3::Y).to_array(),
+            forward: forward.to_array(),
+            up: up.to_array(),
         })?;
         self.previous_listener_position = Some(position);
         Ok(())
@@ -158,7 +159,13 @@ impl Workspace {
     /// [`Workspace::update`] calls this automatically and logs returned errors.
     pub fn update_audio(&mut self, delta_seconds: f32) -> Vec<AudioError> {
         let mut errors = Vec::new();
-        if let Err(error) = self.audio.update_listener(&self.camera, delta_seconds) {
+        let position = self.camera().position();
+        let forward = self.camera().forward();
+        let up = self.camera().pose().transform_vector3(Vec3::Y);
+        if let Err(error) = self
+            .audio
+            .update_listener(position, forward, up, delta_seconds)
+        {
             errors.push(AudioError::Listener(error));
         }
         let generation = self.lookup().generation();
@@ -247,11 +254,11 @@ mod tests {
     #[test]
     fn camera_motion_and_orientation_drive_the_listener() {
         let mut workspace = Workspace::new();
-        (&mut workspace.camera).with_position(Vec3::ZERO);
+        workspace.camera_mut().with_position(Vec3::ZERO);
         assert!(workspace.update_audio(0.5).is_empty());
         assert_vector(workspace.soundscape().listener().velocity, Vec3::ZERO);
 
-        (&mut workspace.camera)
+        (workspace.camera_mut())
             .with_position(Vec3::new(2.0, 1.0, 0.0))
             .with_orientation(Vec3::new(0.0, 90.0, 0.0));
         assert!(workspace.update_audio(0.5).is_empty());
@@ -368,7 +375,7 @@ mod tests {
         let sound_id = part.add_child(Sound::new());
         assert!(workspace.update_audio(0.25).is_empty());
         for delta in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            (&mut workspace.camera).with_position(Vec3::splat(10.0));
+            workspace.camera_mut().with_position(Vec3::splat(10.0));
             workspace
                 .get_mut::<Part>(parent_id)
                 .unwrap()

@@ -4,13 +4,10 @@ use crate::{glam::*, *};
 
 instance! {
     #[instance(default = false, inspect = false)]
-    /// A perspective camera with a world-space pivot.
+    /// A perspective camera capability with a world-space pivot.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Camera {
-        #[cfg_attr(feature = "devtools", inspect(flatten))]
-        #[data]
-        pub(crate) instance: InstanceData,
         #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[compose]
         pub(crate) pv_instance: PVInstance,
@@ -51,7 +48,6 @@ impl Camera {
         let yaw = direction.x.atan2(-direction.z);
         let pitch = direction.y.asin();
         Self {
-            instance: InstanceData::new("Camera"),
             pv_instance: PVInstance::from_world_transform(Mat4::from_rotation_translation(
                 Quat::from_rotation_y(-yaw) * Quat::from_rotation_x(pitch),
                 position,
@@ -381,12 +377,16 @@ impl Controller for CameraController {
     }
 
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let subject = workspace.camera.subject().and_then(|id| {
+        let subject = workspace.subject().and_then(|id| {
             workspace
                 .view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
-        self.update_camera(&mut workspace.camera, subject, delta_seconds);
+        self.update_camera(
+            Project::<Camera>::project_mut(workspace),
+            subject,
+            delta_seconds,
+        );
     }
 }
 

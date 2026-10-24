@@ -60,7 +60,8 @@ instance! {
         #[data]
         instance: Box<InstanceData>,
         /// The camera used when this workspace is rendered.
-        pub camera: Camera,
+        #[compose]
+        camera: Camera,
         #[cfg_attr(feature = "devtools", inspect(skip))]
         camera_controller: CameraController,
         /// Additional controllers, updated in registration order before physics and the camera.
@@ -542,7 +543,7 @@ mod tests {
                 .map(|(id, _)| id),
             Some(part_id)
         );
-        assert!(workspace.find_first_child::<Camera>("shared").is_none());
+        assert!(workspace.find_first_child::<PointLight>("shared").is_none());
     }
 
     #[test]
@@ -567,7 +568,7 @@ mod tests {
         let basepart_id = BasePart::new()
             .with_name("renamed")
             .set_parent(&mut workspace);
-        let camera_id = Camera::default().set_parent(&mut workspace);
+        let light_id = PointLight::new().set_parent(&mut workspace);
         assert_eq!(
             workspace.get::<BasePart>(basepart_id).unwrap().name(),
             "renamed"
@@ -580,19 +581,19 @@ mod tests {
         );
         assert!(
             workspace
-                .view::<dyn Instance>(camera_id)
+                .view::<dyn Instance>(light_id)
                 .unwrap()
-                .is::<Camera>()
+                .is::<PointLight>()
         );
-        assert!(workspace.get::<Part>(camera_id).is_none());
-        assert_eq!(workspace.get_all::<Camera>().count(), 1);
+        assert!(workspace.get::<Part>(light_id).is_none());
+        assert_eq!(workspace.get_all::<PointLight>().count(), 1);
         assert_eq!(workspace.get_all::<Part>().count(), 1);
         assert_eq!(
             workspace
                 .instances()
                 .map(Instance::class_name)
                 .collect::<Vec<_>>(),
-            vec!["Part", "BasePart", "Camera"]
+            vec!["Part", "BasePart", "PointLight"]
         );
 
         let cloned_workspace = workspace.clone();
@@ -711,7 +712,7 @@ mod tests {
     fn camera_subject_follows_a_spatial_instance_and_can_be_cleared() {
         let mut workspace = Workspace::new();
         let subject_id = workspace.add_child(Part::new());
-        workspace.camera.set_subject(Some(subject_id));
+        workspace.camera_mut().set_subject(Some(subject_id));
         workspace.camera_controller_mut().subject_distance = 8.0;
         workspace.camera_controller_mut().subject_offset = Vec3::Y;
 
@@ -720,12 +721,12 @@ mod tests {
         workspace.update_camera(1.0 / 60.0);
 
         let focus = Vec3::Y;
-        let camera_position = workspace.camera.position();
+        let camera_position = workspace.camera().position();
         assert!((camera_position.distance(focus) - 8.0).abs() < 1e-5);
-        assert!(workspace.camera.forward().y < 0.0);
+        assert!(workspace.camera().forward().y < 0.0);
         assert!(
             workspace
-                .camera
+                .camera()
                 .forward()
                 .dot((focus - camera_position).normalize())
                 > 0.9999
@@ -736,14 +737,14 @@ mod tests {
         );
         workspace.update_camera(1.0 / 60.0);
 
-        let moved_position = workspace.camera.position();
+        let moved_position = workspace.camera().position();
         assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
 
         let mut cloned_workspace = workspace.clone();
-        let cloned_subject = cloned_workspace.camera.subject().unwrap();
+        let cloned_subject = cloned_workspace.camera().subject().unwrap();
         assert_ne!(cloned_subject, subject_id);
         cloned_workspace.update_camera(1.0 / 60.0);
-        let cloned_camera_position = cloned_workspace.camera.position();
+        let cloned_camera_position = cloned_workspace.camera().position();
         cloned_workspace
             .get_mut::<Part>(cloned_subject)
             .unwrap()
@@ -752,15 +753,15 @@ mod tests {
             )));
         cloned_workspace.update_camera(1.0 / 60.0);
         assert!(
-            (cloned_workspace.camera.position().x - cloned_camera_position.x - 10.0).abs() < 1e-5
+            (cloned_workspace.camera().position().x - cloned_camera_position.x - 10.0).abs() < 1e-5
         );
 
-        workspace.camera.set_subject(None);
+        workspace.camera_mut().set_subject(None);
         workspace.camera_controller_mut().forward = true;
         workspace.update_camera(0.1);
 
-        assert_eq!(workspace.camera.subject(), None);
-        assert!(workspace.camera.position().z < moved_position.z);
+        assert_eq!(workspace.camera().subject(), None);
+        assert!(workspace.camera().position().z < moved_position.z);
     }
 
     #[test]

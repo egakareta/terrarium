@@ -18,7 +18,7 @@ impl Viewport {
         let size = normalized_size(size);
         let mut workspace = Workspace::new();
         workspace.lighting.clear_skybox();
-        workspace.camera.resize(size[0], size[1]);
+        workspace.camera_mut().resize(size[0], size[1]);
         Self {
             workspace,
             size,
@@ -55,7 +55,9 @@ impl Viewport {
     /// Changes the output image dimensions in pixels.
     pub fn set_size(&mut self, size: [u32; 2]) -> &mut Self {
         self.size = normalized_size(size);
-        self.workspace.camera.resize(self.size[0], self.size[1]);
+        self.workspace
+            .camera_mut()
+            .resize(self.size[0], self.size[1]);
         self
     }
 

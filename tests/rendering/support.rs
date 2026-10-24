@@ -99,7 +99,7 @@ async fn render_workspace_frame(
 ) -> Vec<[u8; 4]> {
     let mut workspace = Workspace::new();
     workspace.lighting.clear_skybox();
-    workspace.current_camera = Camera::new(
+    *workspace.camera_mut() = Camera::new(
         Vec3::new(0.0, 0.0, 4.0),
         Vec3::ZERO,
         WIDTH as f32 / HEIGHT as f32,

@@ -343,12 +343,12 @@ mod tests {
             Quat::from_rotation_x(0.7),
             Vec3::new(2.0, 0.0, -1.0),
         );
-        let camera_offset =
+        let nested_offset =
             Mat4::from_rotation_translation(Quat::from_rotation_y(-0.3), Vec3::new(-1.0, 2.0, 3.0));
         let base_offset = Mat4::from_translation(Vec3::new(5.0, -1.0, 0.0));
         let mut parent = BasePart::new().with_pivot(initial_pose * parent_scale);
         let mut part = Part::new().with_pivot(initial_pose * part_offset);
-        let camera_id = part.add_child(Camera::default().with_pivot(initial_pose * camera_offset));
+        let nested_id = part.add_child(Part::new().with_pivot(initial_pose * nested_offset));
         let part_id = parent.add_child(part);
         let mut light = crate::PointLight::new();
         let base_id = light.add_child(BasePart::new().with_pivot(initial_pose * base_offset));
@@ -384,10 +384,10 @@ mod tests {
         );
         assert!(
             workspace
-                .get::<Camera>(camera_id)
+                .get::<Part>(nested_id)
                 .unwrap()
                 .pivot()
-                .abs_diff_eq(target_pose * camera_offset, 0.0001)
+                .abs_diff_eq(target_pose * nested_offset, 0.0001)
         );
         assert!(
             workspace
@@ -413,7 +413,7 @@ mod tests {
             Some(parent_id)
         );
         assert_eq!(
-            workspace.view::<dyn Instance>(camera_id).unwrap().parent(),
+            workspace.view::<dyn Instance>(nested_id).unwrap().parent(),
             Some(part_id)
         );
         assert_eq!(
@@ -421,14 +421,14 @@ mod tests {
             Some(light_id)
         );
 
-        let camera_pivot = workspace.get::<Camera>(camera_id).unwrap().pivot();
+        let nested_pivot = workspace.get::<Part>(nested_id).unwrap().pivot();
         workspace
             .get_mut::<BasePart>(parent_id)
             .unwrap()
             .pivot_to(target);
         assert_eq!(
-            workspace.get::<Camera>(camera_id).unwrap().pivot(),
-            camera_pivot
+            workspace.get::<Part>(nested_id).unwrap().pivot(),
+            nested_pivot
         );
     }
 
@@ -471,9 +471,9 @@ mod tests {
     fn with_pivot_changes_only_the_instance_transform() {
         let mut parent = BasePart::new();
         let child_pivot = Mat4::from_translation(Vec3::new(2.0, 3.0, 4.0));
-        let camera_pivot = Mat4::from_rotation_y(0.8);
+        let nested_pivot = Mat4::from_rotation_y(0.8);
         let mut child = Part::new().with_pivot(child_pivot);
-        let camera_id = child.add_child(Camera::default().with_pivot(camera_pivot));
+        let nested_id = child.add_child(Part::new().with_pivot(nested_pivot));
         let child_id = parent.add_child(child);
         let target = Mat4::from_rotation_translation(
             Quat::from_rotation_z(1.0),
@@ -494,12 +494,12 @@ mod tests {
         );
         assert_eq!(
             parent
-                .view::<dyn Instance>(camera_id)
+                .view::<dyn Instance>(nested_id)
                 .unwrap()
-                .downcast_ref::<Camera>()
+                .downcast_ref::<Part>()
                 .unwrap()
                 .pivot(),
-            camera_pivot
+            nested_pivot
         );
     }
 }

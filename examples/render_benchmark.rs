@@ -73,7 +73,7 @@ impl Benchmark {
             config.width,
             config.height,
         )?;
-        let base_camera_pivot = engine.camera.pivot();
+        let base_camera_pivot = engine.camera().pivot();
         let base_parts = engine.get_all::<Part>().cloned().collect();
         let random_state = 0x4d59_5df4_d0f3_3173;
         let mut app = Self {
@@ -159,10 +159,12 @@ impl Benchmark {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        (&mut engine.camera).with_pose(Mat4::from_rotation_translation(
-            camera_rotation,
-            camera_position * camera_scale,
-        ));
+        engine
+            .camera_mut()
+            .with_pose(Mat4::from_rotation_translation(
+                camera_rotation,
+                camera_position * camera_scale,
+            ));
 
         for offset in 0..animated_count {
             let index = (self.animation_pool_start + offset) % part_count;
@@ -309,12 +311,14 @@ fn create_benchmark_workspace(
     let extent = side as f32 * spacing;
     let camera_distance = extent * 1.25 + 5.0;
     let benchmark_materials = load_benchmark_materials(workspace)?;
-    workspace.camera = Camera::new(
+    *workspace.camera_mut() = Camera::new(
         Vec3::new(0.0, camera_distance * 0.72, camera_distance),
         Vec3::ZERO,
         width as f32 / height.max(1) as f32,
     );
-    (&mut workspace.camera).with_zfar(camera_distance * 4.0 + extent);
+    workspace
+        .camera_mut()
+        .with_zfar(camera_distance * 4.0 + extent);
     let mut part_ids = Vec::with_capacity(part_count);
 
     for index in 0..part_count {

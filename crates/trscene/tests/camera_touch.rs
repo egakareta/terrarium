@@ -1,5 +1,5 @@
 use trscene::{
-    Camera, CameraController, Instance, PVInstanceExt,
+    Camera, CameraController, Instance, PVInstanceExt, Part,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
@@ -44,7 +44,7 @@ fn start_joystick(context: &Context, controller: &mut CameraController) {
 
 #[test]
 fn joystick_matches_keyboard_movement_in_free_and_subject_modes() {
-    for subject in [None, Some((Camera::default().id(), Mat4::IDENTITY))] {
+    for subject in [None, Some((Part::new().id(), Mat4::IDENTITY))] {
         for direction in [
             vec2(0.0, -1.0),
             vec2(0.0, 1.0),
@@ -121,7 +121,7 @@ fn joystick_has_a_dead_zone_and_proportional_speed() {
 #[test]
 fn two_fingers_can_move_and_look_in_either_start_order() {
     for look_first in [false, true] {
-        for subject in [None, Some((Camera::default().id(), Mat4::IDENTITY))] {
+        for subject in [None, Some((Part::new().id(), Mat4::IDENTITY))] {
             let context = Context::default();
             let mut controller = CameraController::default();
             let mut starts = vec![
@@ -465,7 +465,7 @@ fn a_second_finger_on_an_egui_area_does_not_rotate_the_camera() {
 
 #[test]
 fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
-    for subject in [None, Some((Camera::default().id(), Mat4::IDENTITY))] {
+    for subject in [None, Some((Part::new().id(), Mat4::IDENTITY))] {
         let context = Context::default();
         let mut controller = CameraController::default();
         let mut camera = Camera::default();

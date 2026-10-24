@@ -185,7 +185,6 @@ fn spatial_instances_parent_children_in_local_coordinates() {
     }
     check(BasePart::new());
     check(Part::new());
-    check(trscene::Camera::default());
     check(Rig::new());
     check(CustomRig::default());
     check(SpringPart::default());

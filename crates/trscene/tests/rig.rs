@@ -1,7 +1,6 @@
 use trscene::{
-    AnimationClip, AnimationError, AnimationPlayer, AnimationTrack, BasePart, Camera, Easing,
-    Instance, InstanceExt, Keyframe, PVInstanceExt, Part, PointLight, Rig, RigExt, Tween,
-    Workspace,
+    AnimationClip, AnimationError, AnimationPlayer, AnimationTrack, BasePart, Easing, Instance,
+    InstanceExt, Keyframe, PVInstanceExt, Part, PointLight, Rig, RigExt, Tween, Workspace,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -34,7 +33,7 @@ fn rig_setters_preserve_descendant_transforms_and_existing_world_space_parenting
     );
     let mut nested = Rig::new().with_pivot(translation(12.0));
     let mut light = PointLight::new();
-    let camera_id = light.add_child(Camera::default().with_pivot(translation(14.0)));
+    let nested_part_id = light.add_child(Part::new().with_pivot(translation(14.0)));
     nested.add_child(light);
     let nested_id = rig.add_child(nested);
     let mut workspace = Workspace::new();
@@ -68,7 +67,7 @@ fn rig_setters_preserve_descendant_transforms_and_existing_world_space_parenting
     );
     assert!(
         workspace
-            .get::<Camera>(camera_id)
+            .get::<Part>(nested_part_id)
             .unwrap()
             .pivot()
             .abs_diff_eq(target * translation(4.0), 0.0001)
@@ -110,11 +109,8 @@ fn spatial_instance_access_preserves_transform_semantics() {
         Vec3::new(6.0, 0.0, 0.0)
     );
 
-    let mut instances: Vec<Box<dyn Instance>> = vec![
-        Box::new(Part::new()),
-        Box::new(BasePart::new()),
-        Box::new(Camera::default()),
-    ];
+    let mut instances: Vec<Box<dyn Instance>> =
+        vec![Box::new(Part::new()), Box::new(BasePart::new())];
     #[cfg(feature = "meshpart")]
     instances.push(Box::new(trscene::MeshPart::new(trscene::Mesh::cube(
         1.0, [1.0; 4],
@@ -230,7 +226,7 @@ fn animation_applies_parent_tracks_before_children_and_carries_untracked_descend
             .with_name("Hand")
             .with_pivot(translation(2.0)),
     );
-    let ornament_id = arm.add_child(Camera::default().with_pivot(translation(3.0)));
+    let ornament_id = arm.add_child(Part::new().with_pivot(translation(3.0)));
     let arm_id = rig.add_child(arm);
     let clip = AnimationClip::new([
         AnimationTrack::new(
@@ -260,7 +256,7 @@ fn animation_applies_parent_tracks_before_children_and_carries_untracked_descend
         Vec3::new(8.5, 0.0, 0.0)
     );
     assert_eq!(
-        workspace.get::<Camera>(ornament_id).unwrap().position(),
+        workspace.get::<Part>(ornament_id).unwrap().position(),
         Vec3::new(9.0, 0.0, 0.0)
     );
 }

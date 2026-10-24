@@ -205,7 +205,7 @@ fn camera_movement_resumes_after_focusing_the_explorer() {
         frame(&context, &mut devtools, &mut host, Vec::new());
         click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
         assert!(context.egui_wants_keyboard_input());
-        let initial_position = host.workspace.camera.position();
+        let initial_position = host.workspace.camera().position();
 
         frame(
             &context,
@@ -214,7 +214,7 @@ fn camera_movement_resumes_after_focusing_the_explorer() {
             vec![key(movement_key, false)],
         );
 
-        let movement = host.workspace.camera.position() - initial_position;
+        let movement = host.workspace.camera().position() - initial_position;
         assert!(movement.dot(direction) > 0.0, "{movement_key:?}");
     }
 }
@@ -240,7 +240,7 @@ fn controller_focus_uses_custom_movement_bindings() {
         };
         let position = |host: &TestDevtoolsHost| {
             rig.map_or_else(
-                || host.workspace.camera.position(),
+                || host.workspace.camera().position(),
                 |id| host.workspace.get::<Rig>(id).unwrap().position(),
             )
         };
@@ -280,7 +280,7 @@ fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
         frame(&context, &mut devtools, &mut host, Vec::new());
         click(&context, &mut devtools, &mut host, egui::pos2(1100.0, 45.0));
         assert!(context.egui_wants_keyboard_input());
-        let initial_position = host.workspace.camera.position();
+        let initial_position = host.workspace.camera().position();
 
         frame(
             &context,
@@ -290,7 +290,7 @@ fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
         );
 
         assert!(context.egui_wants_keyboard_input());
-        assert_eq!(host.workspace.camera.position(), initial_position);
+        assert_eq!(host.workspace.camera().position(), initial_position);
     }
 }
 
@@ -302,7 +302,7 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
         workspace: Workspace::new(),
     };
     let context = egui::Context::default();
-    let initial_position = host.workspace.camera.position();
+    let initial_position = host.workspace.camera().position();
     let mut text = String::new();
     let mut text_has_focus = false;
 
@@ -340,7 +340,7 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
 
     assert_eq!(text, "w");
     assert!(text_has_focus);
-    assert_eq!(host.workspace.camera.position(), initial_position);
+    assert_eq!(host.workspace.camera().position(), initial_position);
 }
 
 #[test]
