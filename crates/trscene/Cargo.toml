@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-egui = "0.36"
+egui = "0.37"
 euphorium = { version = "0.6", default-features = false, optional = true }
 gltf = { version = "1", optional = true }
 log = "0.4"
