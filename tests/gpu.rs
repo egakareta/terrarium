@@ -21,7 +21,7 @@ fn imported_gltf_is_rendered() -> Result<(), terrarium::AppCreationError> {
     let _gpu_test_guard = serialize_gpu_test();
     let engine = Terrarium::new()
         .with_size([128, 128])
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .run(|engine| {
             let mesh = engine.add_mesh(include_bytes!(
                 "../crates/trscene/fixtures/DamagedHelmet.glb"
@@ -68,7 +68,7 @@ fn screen_pixels_are_readable() -> Result<(), Box<dyn std::error::Error>> {
     let _gpu_test_guard = serialize_gpu_test();
     let engine = Terrarium::new()
         .with_size([128, 128])
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .run(|engine| {
             hide_devtools!(engine);
             engine.lighting.clear_skybox();
@@ -109,7 +109,7 @@ fn multiple_viewports_keep_independent_egui_textures() -> Result<(), AppCreation
     let _gpu_test_guard = serialize_gpu_test();
     Terrarium::new()
         .with_size([128, 128])
-        .with_headless(Some(0))
+        .with_headless_frames(Some(Some(0)))
         .run(|engine| {
             let first = Viewport::new([16, 16]);
             let second = Viewport::new([32, 16]);
@@ -131,7 +131,7 @@ fn basepart_transparency_blends_front_geometry_with_background()
     let _gpu_test_guard = serialize_gpu_test();
     let engine = Terrarium::new()
         .with_size([128, 128])
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .run(|engine| {
             hide_devtools!(engine);
             engine.lighting.clear_skybox();
@@ -173,7 +173,7 @@ fn instance_outlines_render_in_all_modes() -> Result<(), AppCreationError> {
     ] {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 hide_devtools!(engine);
                 engine.lighting.clear_skybox();
@@ -214,7 +214,7 @@ fn always_on_top_outline_renders_through_occluding_geometry() -> Result<(), AppC
     fn red_pixels(always_on_top: bool) -> Result<usize, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(0))
+            .with_headless_frames(Some(Some(0)))
             .run(move |engine| {
                 engine.lighting.clear_skybox();
                 engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
@@ -282,7 +282,7 @@ fn material_triplanar_projection_samples_world_space_coordinates()
             .collect();
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 hide_devtools!(engine);
                 engine.lighting.clear_skybox();
@@ -343,7 +343,7 @@ fn builtin_material_loads_lazily_and_renders() -> Result<(), AppCreationError> {
     fn render(material: Material) -> Result<Vec<[u8; 4]>, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 engine.lighting.clear_skybox();
                 engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
@@ -377,7 +377,7 @@ fn metallic_roughness_changes_rendered_environment_reflections() -> Result<(), A
     fn render(roughness: f32) -> Result<Vec<[u8; 4]>, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 *engine.workspace_mut().camera_mut() =
                     Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
@@ -425,7 +425,7 @@ fn occlusion_texture_changes_ambient_but_preserves_direct_light() -> Result<(), 
     fn render(occlusion: u8, outdoor_ambient: Color3) -> Result<Vec<[u8; 4]>, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 engine.lighting.clear_skybox();
                 engine.lighting.outdoor_ambient = outdoor_ambient;
@@ -485,7 +485,7 @@ fn dielectric_reflectance_changes_rendered_direct_specular() -> Result<(), AppCr
     fn render(reflectance: f32) -> Result<Vec<[u8; 4]>, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 engine.lighting.clear_skybox();
                 engine.lighting.ambient = Color3::BLACK;
@@ -555,7 +555,7 @@ fn directional_shadow_long_shadow_has_clean_edges_and_lit_floor() -> Result<(), 
     ) -> Result<Vec<[u8; 4]>, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([WIDTH, HEIGHT])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 hide_devtools!(engine);
                 *engine.workspace_mut().camera_mut() =
@@ -1186,7 +1186,7 @@ fn point_light_shadows_change_occlusion_on_receivers() -> Result<(), AppCreation
     fn render(shadows: bool) -> Result<Vec<[u8; 4]>, AppCreationError> {
         let engine = Terrarium::new()
             .with_size([128, 128])
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 *engine.workspace_mut().camera_mut() =
                     Camera::new(Vec3::new(4.0, 4.0, 6.0), Vec3::new(0.0, 0.0, 0.0), 1.0);

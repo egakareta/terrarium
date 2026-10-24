@@ -277,7 +277,7 @@ fn main() {
 fn app_loads() -> Result<(), terrarium::AppCreationError> {
     Terrarium::new()
         .with_size([32, 32])
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .run(initialize)?;
     Ok(())
 }

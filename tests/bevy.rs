@@ -202,11 +202,11 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
             .add_systems(Update, update);
 
         let engine = Terrarium::preset(WorkspacePreset::Baseplate)
-            .with_bevy(app)
+            .with_bevy_app(Some(app))
             .with_title("Bevy adapter test")
             .with_size([640, 480])
             .with_env_logger(false)
-            .with_headless(Some(10))
+            .with_headless_frames(Some(Some(10)))
             .run(move |engine| {
                 engine
                     .workspace_mut()
@@ -288,10 +288,10 @@ fn plugin_finalization_can_populate_the_scene_before_startup() -> Result<(), App
         }
 
         let engine = Terrarium::new()
-            .with_bevy(app)
+            .with_bevy_app(Some(app))
             .with_size([32, 32])
             .with_env_logger(false)
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(|engine| {
                 engine
                     .workspace_mut()
@@ -360,10 +360,10 @@ fn pending_plugins_prepare_the_scene_before_systems_run() -> Result<(), AppCreat
     app.add_plugins((TerrariumPlugin, PreparingPlugin(AtomicUsize::new(4))))
         .add_systems(Startup, setup);
     let engine = Terrarium::new()
-        .with_bevy(app)
+        .with_bevy_app(Some(app))
         .with_size([32, 32])
         .with_env_logger(false)
-        .with_headless(Some(10))
+        .with_headless_frames(Some(Some(10)))
         .run(|engine| {
             engine
                 .workspace_mut()

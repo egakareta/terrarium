@@ -535,9 +535,9 @@ fn main() {
     Terrarium::new()
         .with_title("Render benchmark")
         .with_size([config.width, config.height])
-        .with_wgpu_options(|wgpu_options| {
+        .with_wgpu_options(Some(Box::new(|wgpu_options| {
             wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
-        })
+        })))
         .run(move |engine| Benchmark::new(engine, config))
         .unwrap();
 }

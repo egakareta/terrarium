@@ -52,7 +52,7 @@ mod tests {
         Terrarium::new()
             .with_size([32, 32])
             .with_env_logger(false)
-            .with_headless(None)
+            .with_headless_frames(Some(None))
             .run(move |_engine| {
                 Ok::<_, AppCreationError>(CloseAfterFrames {
                     completed: app_completed,

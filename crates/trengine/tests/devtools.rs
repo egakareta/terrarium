@@ -3,7 +3,7 @@
     not(all(target_family = "wasm", not(target_os = "wasi")))
 ))]
 
-use trengine::{App, AppCreationError, Engine, Terrarium, egui};
+use trengine::*;
 
 #[test]
 fn inspector_runs_after_custom_app_rendering() -> Result<(), AppCreationError> {
@@ -35,7 +35,7 @@ fn inspector_runs_after_custom_app_rendering() -> Result<(), AppCreationError> {
     }
 
     let engine = Terrarium::new()
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .with_env_logger(false)
         .run(|engine| {
             engine.devtools.set_visible(false);

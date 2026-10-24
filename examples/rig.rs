@@ -98,7 +98,7 @@ fn main() {
 fn rig_example_loads_headlessly() -> Result<(), AppCreationError> {
     let engine = Terrarium::new()
         .with_size([64, 64])
-        .with_headless(Some(2))
+        .with_headless_frames(Some(Some(2)))
         .run(initialize)?
         .expect("native headless runs return the engine");
     assert_eq!(engine.get_all::<Rig>().count(), 1);

@@ -20,7 +20,7 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
     let mut engine = Terrarium::new()
         .with_size([32, 32])
         .with_env_logger(false)
-        .with_headless(Some(0))
+        .with_headless_frames(Some(Some(0)))
         .run(|engine| {
             assert!(
                 engine

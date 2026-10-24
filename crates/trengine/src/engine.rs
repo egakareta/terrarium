@@ -21,9 +21,13 @@ unsafe extern "C" {
 }
 
 const DEFAULT_CLEAR_COLOR: [f32; 4] = [0.018, 0.028, 0.065, 1.0];
+const DEFAULT_WINDOW_SIZE: [u32; 2] = [1280, 720];
 
 /// Error returned while creating an application.
 pub type AppCreationError = Box<dyn std::error::Error + Send + Sync>;
+
+/// One-shot callback for configuring wgpu before the application starts.
+pub type WgpuOptionsCallback = Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration)>;
 
 #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
 type RendererHandle = Rc<RefCell<RenderAdapter>>;
@@ -391,13 +395,13 @@ impl Engine {
         &self.creation_context
     }
 
-    /// Returns the Bevy app attached through [`Terrarium::with_bevy`], if any.
+    /// Returns the Bevy app attached through [`Terrarium::with_bevy_app`], if any.
     #[cfg(feature = "bevy")]
     pub fn bevy_app(&self) -> Option<&bevy_app::App> {
         self.bevy_app.as_ref()
     }
 
-    /// Returns mutable access to the Bevy app attached through [`Terrarium::with_bevy`], if any.
+    /// Returns mutable access to the Bevy app attached through [`Terrarium::with_bevy_app`], if any.
     #[cfg(feature = "bevy")]
     pub fn bevy_app_mut(&mut self) -> Option<&mut bevy_app::App> {
         self.bevy_app.as_mut()
@@ -486,7 +490,7 @@ impl Engine {
         Ok(())
     }
 
-    fn start(config: Terrarium<'_>, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
+    fn start(config: Terrarium, app_creator: eframe::AppCreator<'static>) -> eframe::Result {
         #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         if config.env_logger {
             let _ = env_logger::try_init();
@@ -494,17 +498,18 @@ impl Engine {
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let _ = config.env_logger;
 
+        let wgpu_options_customized = config.wgpu_options.is_some();
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
-        (config.wgpu_options)(&mut wgpu_options);
+        if let Some(configure) = config.wgpu_options {
+            configure(&mut wgpu_options);
+        }
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
+        let window_size = config.size.unwrap_or(DEFAULT_WINDOW_SIZE);
         #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         {
-            let headless_frame_limit = match config.headless {
-                HeadlessMode::Disabled => None,
-                HeadlessMode::Frames(frame_count) => Some(Some(frame_count)),
-                HeadlessMode::UntilClose => Some(None),
-            };
+            let headless_frame_limit = config.headless_frames;
             if let Some(mut frames_remaining) = headless_frame_limit {
-                let render_state = if config.wgpu_options_customized {
+                let render_state = if wgpu_options_customized {
                     // TODO: maybe actual caching for custom wgpu_options?
                     let instance = pollster::block_on(wgpu_options.wgpu_setup.new_instance());
                     pollster::block_on(egui_wgpu::RenderState::create(
@@ -525,7 +530,7 @@ impl Engine {
                     let mut raw_input = egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
                             egui::Pos2::ZERO,
-                            egui::vec2(config.size[0] as f32, config.size[1] as f32),
+                            egui::vec2(window_size[0] as f32, window_size[1] as f32),
                         )),
                         ..Default::default()
                     };
@@ -554,12 +559,12 @@ impl Engine {
 
             let native_options = eframe::NativeOptions {
                 renderer: eframe::Renderer::Wgpu,
-                viewport: native_viewport(config.title, config.size, config.size_explicit),
+                viewport: native_viewport(&config.title, window_size, config.size.is_some()),
                 wgpu_options,
                 ..Default::default()
             };
 
-            eframe::run_native(config.title, native_options, app_creator)
+            eframe::run_native(&config.title, native_options, app_creator)
         }
 
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
@@ -570,7 +575,7 @@ impl Engine {
                 console_error_panic_hook::set_once();
             }
 
-            let canvas_id = config.canvas_id.to_owned();
+            let canvas_id = config.canvas_id.clone();
 
             wasm_bindgen_futures::spawn_local(async move {
                 let canvas = web_sys::window()
@@ -781,15 +786,37 @@ mod tests {
     #[test]
     fn native_window_defaults_to_maximized_unless_sized() {
         let default = Terrarium::default();
-        let default_viewport = native_viewport(default.title, default.size, default.size_explicit);
+        let default_viewport = native_viewport(
+            &default.title,
+            default.size.unwrap_or(DEFAULT_WINDOW_SIZE),
+            default.size.is_some(),
+        );
         assert_eq!(default_viewport.maximized, Some(true));
         assert_eq!(default_viewport.fullscreen, None);
         assert_eq!(default_viewport.inner_size, None);
 
         let sized = Terrarium::default().with_size([960, 540]);
-        let sized_viewport = native_viewport(sized.title, sized.size, sized.size_explicit);
+        let sized_viewport = native_viewport(
+            &sized.title,
+            sized.size.unwrap_or(DEFAULT_WINDOW_SIZE),
+            sized.size.is_some(),
+        );
         assert_eq!(sized_viewport.fullscreen, None);
         assert_eq!(sized_viewport.inner_size, Some(egui::vec2(960.0, 540.0)));
+    }
+
+    #[test]
+    fn terrarium_is_an_instance_root() {
+        let mut terrarium = Terrarium::new();
+        let instance: &dyn Instance = &terrarium;
+
+        assert_eq!(instance.class_name(), "Terrarium");
+        assert_eq!(instance.parent(), None);
+        assert!(instance.children().is_empty());
+        assert!(instance.try_clone_box().is_none());
+
+        let child_id = terrarium.add_child(Part::new());
+        assert_eq!(terrarium.view::<Part>(child_id).unwrap().id(), child_id);
     }
 }
 
@@ -1020,60 +1047,49 @@ impl DerefMut for Engine {
     }
 }
 
-#[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-#[derive(Clone, Copy)]
-enum HeadlessMode {
-    Disabled,
-    Frames(usize),
-    UntilClose,
-}
-
-/// The primary entry point for configuring and running a Terrarium application.
-pub struct Terrarium<'a> {
-    workspace_preset: WorkspacePreset,
-    #[cfg(feature = "bevy")]
-    bevy_app: Option<bevy_app::App>,
-    title: &'a str,
-    size: [u32; 2],
-    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-    size_explicit: bool,
-    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-    canvas_id: &'a str,
-    wgpu_options: Box<dyn FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a>,
-    wgpu_options_customized: bool,
-    env_logger: bool,
-    #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-    headless: HeadlessMode,
-    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-    console_error_panic_hook: bool,
-    bundle_fonts: bool,
-}
-
-impl<'a> Default for Terrarium<'a> {
-    fn default() -> Self {
-        Self {
-            workspace_preset: WorkspacePreset::default(),
-            #[cfg(feature = "bevy")]
-            bevy_app: None,
-            title: "App",
-            size: [1280, 720],
-            #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-            size_explicit: false,
-            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-            canvas_id: "app",
-            wgpu_options: Box::new(|_| {}),
-            wgpu_options_customized: false,
-            env_logger: true,
-            #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-            headless: HeadlessMode::Disabled,
-            #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-            console_error_panic_hook: true,
-            bundle_fonts: cfg!(feature = "default-fonts"),
-        }
+instance! {
+    #[instance(inspect = false)]
+    /// The primary entry point for configuring and running a Terrarium application.
+    pub struct Terrarium {
+        #[data]
+        #[default(InstanceData::new_root("Terrarium"))]
+        instance: Box<InstanceData>,
+        /// Starting geometry applied before the application initializer runs.
+        #[property]
+        workspace_preset: WorkspacePreset,
+        #[cfg(feature = "bevy")]
+        #[property(borrow)]
+        bevy_app: Option<bevy_app::App>,
+        /// The application title on native platforms.
+        #[property(default = "App".to_owned(), into)]
+        title: String,
+        /// Explicit window size. An unset size uses a maximized native window and the default fallback size.
+        #[property(default = None, into)]
+        size: Option<[u32; 2]>,
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
+        #[property(default = "app".to_owned(), into)]
+        canvas_id: String,
+        /// Optional one-shot wgpu configuration callback.
+        #[property(borrow, default = None)]
+        wgpu_options: Option<WgpuOptionsCallback>,
+        /// Whether to automatically call [`env_logger::init()`].
+        #[property(default = true)]
+        env_logger: bool,
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
+        /// Native headless frame policy: `None` disables it, `Some(None)` runs until close, and
+        /// `Some(Some(n))` runs at most `n` frames.
+        #[property]
+        headless_frames: Option<Option<usize>>,
+        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
+        #[property(default = true)]
+        console_error_panic_hook: bool,
+        /// Whether to install Terrarium's bundled fonts.
+        #[property(default = cfg!(feature = "default-fonts"))]
+        bundled_fonts: bool,
     }
 }
 
-impl<'a> Terrarium<'a> {
+impl Terrarium {
     /// Creates a Terrarium application launcher with an empty workspace and default settings.
     ///
     /// Equivalent to [`Terrarium::default()`].
@@ -1087,22 +1103,7 @@ impl<'a> Terrarium<'a> {
     /// [`WorkspacePreset::Empty`] is equivalent to [`Self::new`].
     /// A workspace supplied to Bevy takes precedence over this preset.
     pub fn preset(preset: WorkspacePreset) -> Self {
-        Self {
-            workspace_preset: preset,
-            ..Self::default()
-        }
-    }
-
-    /// Configures a Bevy app without changing the [`Self::run`] initializer or application callbacks.
-    ///
-    /// This only configures the launcher; the adapter is installed when `run(initialize)` creates
-    /// the engine. Terrarium adds [`crate::bevy::TerrariumPlugin`] when needed, drives Bevy from
-    /// [`Engine::update`], and still owns the event loop and renderer. Do not install Bevy's window
-    /// or render plugins. A finalized Bevy app must already contain `TerrariumPlugin`.
-    #[cfg(feature = "bevy")]
-    pub fn with_bevy(mut self, app: bevy_app::App) -> Self {
-        self.bevy_app = Some(app);
-        self
+        Self::default().with_workspace_preset(preset)
     }
 
     /// Creates an [`Engine`] and runs the initialized [`App`].
@@ -1131,12 +1132,12 @@ impl<'a> Terrarium<'a> {
         #[cfg(not(feature = "bevy"))]
         let launcher = self;
 
-        let size = launcher.size;
+        let size = launcher.size.unwrap_or(DEFAULT_WINDOW_SIZE);
         let preset = launcher.workspace_preset;
         #[cfg(feature = "devtools")]
-        let title = launcher.title.to_owned();
+        let title = launcher.title.clone();
         #[cfg(feature = "default-fonts")]
-        let is_bundled_fonts = launcher.bundle_fonts;
+        let is_bundled_fonts = launcher.bundled_fonts;
         let engine_slot: EngineSlot = Rc::new(RefCell::new(None));
 
         let app_engine_slot = engine_slot.clone();
@@ -1208,105 +1209,44 @@ impl<'a> Terrarium<'a> {
 
         Ok(take_engine(engine_slot))
     }
+}
 
-    /// Runs headlessly instead of opening a native window.
-    ///
-    /// `Some(frame_count)` runs at most that many frames, while `None` runs indefinitely. A frame
-    /// that sends [`egui::ViewportCommand::Close`] stops either mode early. A count of zero
-    /// initializes the application without running a frame.
-    ///
-    /// This has no useful effect on web applications.
-    pub fn with_headless(self, frame_count: Option<usize>) -> Self {
-        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-        {
-            let mut this = self;
-            this.headless = match frame_count {
-                Some(frame_count) => HeadlessMode::Frames(frame_count),
-                None => HeadlessMode::UntilClose,
-            };
-            this
+impl std::fmt::Debug for Terrarium {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Terrarium")
+            .field("workspace_preset", &self.workspace_preset)
+            .field("title", &self.title)
+            .field("size", &self.size)
+            .finish_non_exhaustive()
+    }
+}
+
+trscene::__instance_inspection_items! {
+    impl trscene::devtools::Inspect for Terrarium {
+        fn properties(&self) -> Vec<trscene::devtools::Property> {
+            trscene::devtools::Inspect::properties(&self.instance)
         }
 
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        {
-            let _ = frame_count;
-            self
-        }
-    }
-
-    /// The application title on native platforms.
-    pub fn with_title(mut self, title: &'a str) -> Self {
-        self.title = title;
-        self
-    }
-
-    /// The window size on native platforms.
-    pub fn with_size(mut self, size: [u32; 2]) -> Self {
-        self.size = size;
-        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-        {
-            self.size_explicit = true;
-        }
-        self
-    }
-
-    /// The element to render the web application.
-    pub fn with_canvas_id(self, canvas_id: &'a str) -> Self {
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        {
-            let mut this = self;
-            this.canvas_id = canvas_id;
-            this
+        fn validate_property(
+            &self,
+            path: &str,
+            value: &trscene::devtools::PropertyValue,
+        ) -> Result<(), trscene::devtools::PropertyError> {
+            trscene::devtools::Inspect::validate_property(&self.instance, path, value)
         }
 
-        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-        {
-            let _ = canvas_id;
-            self
+        fn set_property(
+            &mut self,
+            path: &str,
+            value: trscene::devtools::PropertyValue,
+        ) -> Result<(), trscene::devtools::PropertyError> {
+            trscene::devtools::Inspect::set_property(&mut self.instance, path, value)
         }
     }
+}
 
-    /// Configures wgpu instance/device/adapter/surface creation and renderloop.
-    pub fn with_wgpu_options(
-        mut self,
-        f: impl FnOnce(&mut egui_wgpu::WgpuConfiguration) + 'a,
-    ) -> Self {
-        self.wgpu_options = Box::new(f);
-        self.wgpu_options_customized = true;
-        self
-    }
-
-    /// Whether to automatically call [`env_logger::init()`].
-    ///
-    /// By default, this is enabled.
-    pub fn with_env_logger(mut self, enabled: bool) -> Self {
-        self.env_logger = enabled;
-        self
-    }
-
-    /// Whether to automatically call [`console_error_panic_hook::set_once()`].
-    ///
-    /// By default, this is enabled.
-    pub fn with_console_error_panic_hook(self, enabled: bool) -> Self {
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        {
-            let mut this = self;
-            this.console_error_panic_hook = enabled;
-            this
-        }
-
-        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
-        {
-            let _ = enabled;
-            self
-        }
-    }
-
-    /// Whether to install Terrarium's bundled fonts.
-    ///
-    /// By default, this is enabled.
-    pub fn with_bundled_fonts(mut self, enabled: bool) -> Self {
-        self.bundle_fonts = enabled;
-        self
+impl InstanceClone for Terrarium {
+    fn try_clone_box(&self) -> Option<Box<dyn Instance>> {
+        None
     }
 }

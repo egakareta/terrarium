@@ -1,7 +1,8 @@
 #![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 
 use terrarium::{
-    AppCreationError, Engine, EngineExt, Instance, Part, Terrarium, Workspace, with_workspace,
+    AppCreationError, Engine, EngineExt, Instance, Part, Terrarium, TerrariumExt, Workspace,
+    with_workspace,
 };
 
 #[with_workspace]
@@ -114,7 +115,7 @@ fn workspace_shorthand_preserves_scene_edits_and_engine_access() -> Result<(), A
     let mut engine = Terrarium::new()
         .with_size([32, 32])
         .with_env_logger(false)
-        .with_headless(Some(0))
+        .with_headless_frames(Some(Some(0)))
         .run(initialize)?
         .unwrap();
 

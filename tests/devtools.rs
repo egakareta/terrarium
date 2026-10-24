@@ -31,7 +31,7 @@ fn engine_explorer_opens_the_workspace_and_inspects_the_root()
     let mut engine = Terrarium::new()
         .with_size([1280, 720])
         .with_env_logger(false)
-        .with_headless(Some(0))
+        .with_headless_frames(Some(Some(0)))
         .run(|engine| {
             engine
                 .workspace_mut()

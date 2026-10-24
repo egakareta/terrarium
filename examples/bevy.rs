@@ -101,7 +101,7 @@ fn main() {
         .add_systems(bevy_app::Update, animate_orbits);
 
     Terrarium::new()
-        .with_bevy(app)
+        .with_bevy_app(Some(app))
         .run(|_engine| Ok::<_, AppCreationError>(SceneUi))
         .unwrap();
 }

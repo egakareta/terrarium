@@ -73,7 +73,7 @@ fn launchers_apply_presets_before_the_initializer() -> Result<(), AppCreationErr
         let engine = launcher
             .with_size([32, 32])
             .with_env_logger(false)
-            .with_headless(Some(1))
+            .with_headless_frames(Some(Some(1)))
             .run(move |engine| {
                 assert_preset(engine.workspace(), preset);
                 Ok::<(), AppCreationError>(())
@@ -91,10 +91,10 @@ fn launchers_apply_presets_before_the_initializer() -> Result<(), AppCreationErr
 #[test]
 fn bevy_without_a_supplied_workspace_uses_the_launcher_preset() -> Result<(), AppCreationError> {
     let engine = Terrarium::preset(WorkspacePreset::Baseplate)
-        .with_bevy(terrarium::bevy::app::App::new())
+        .with_bevy_app(Some(terrarium::bevy::app::App::new()))
         .with_size([32, 32])
         .with_env_logger(false)
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .run(|engine| {
             assert_preset(engine.workspace(), WorkspacePreset::Baseplate);
             Ok::<(), AppCreationError>(())
@@ -113,10 +113,10 @@ fn a_supplied_empty_bevy_workspace_overrides_the_launcher_preset() -> Result<(),
     let mut app = terrarium::bevy::app::App::new();
     app.world_mut().insert_non_send(Workspace::new());
     let engine = Terrarium::preset(WorkspacePreset::Baseplate)
-        .with_bevy(app)
+        .with_bevy_app(Some(app))
         .with_size([32, 32])
         .with_env_logger(false)
-        .with_headless(Some(1))
+        .with_headless_frames(Some(Some(1)))
         .run(|engine| {
             assert_preset(engine.workspace(), WorkspacePreset::Empty);
             Ok::<(), AppCreationError>(())
