@@ -1,13 +1,9 @@
-use trscene::{
-    BasePart, Color3, InstanceType, PVInstance, Part, PartShape, Rig, Workspace,
-    glam::{Mat4, Vec3},
-    *,
-};
+use trscene::{glam::*, *};
 
 mod models {
     use super::*;
 
-    trscene::instance! {
+    instance! {
         #[instance(path = crate::models)]
         /// A custom primitive with authored spring stiffness.
         #[derive(Clone, Debug)]
@@ -23,7 +19,7 @@ mod models {
 
 use models::{SpringPart, SpringPartExt};
 
-trscene::instance! {
+instance! {
     /// A second level of custom composition.
     #[derive(Clone, Debug)]
     pub struct WeightedSpring {
@@ -35,7 +31,7 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     /// A custom assembly using the built-in rig transform semantics.
     #[derive(Clone, Debug)]
     pub struct CustomRig {
@@ -44,7 +40,7 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     /// A primitive that constrains its position to the horizontal plane.
     #[derive(Clone, Debug)]
     pub struct PlanarPart {
@@ -54,7 +50,7 @@ trscene::instance! {
 
     impl PlanarPart {
         #[r#override(PVInstance::set_pivot)]
-        fn set_pivot(&mut self, mut pivot: trscene::glam::Mat4) {
+        fn set_pivot(&mut self, mut pivot: glam::Mat4) {
             pivot.w_axis.y = 0.0;
             self.pv_instance_mut().set_pivot(pivot);
         }
@@ -65,14 +61,14 @@ trscene::instance! {
         }
 
         #[r#override(BasePart::set_material)]
-        fn set_material(&mut self, _material: trscene::Material) {
+        fn set_material(&mut self, _material: Material) {
             self.base_part_mut()
-                .set_material(trscene::Material::from_color(Color3::BLACK));
+                .set_material(Material::from_color(Color3::BLACK));
         }
     }
 }
 
-trscene::instance! {
+instance! {
     /// A descendant that retains its parent's transform override.
     #[derive(Clone, Debug)]
     pub struct CustomPlanarPart {
@@ -143,12 +139,12 @@ fn spatial_instances_parent_children_in_local_coordinates() {
     fn check<T: Instance + PVInstanceExt>(mut parent: T) {
         let pivot = Mat4::from_scale_rotation_translation(
             Vec3::new(2.0, 3.0, 4.0),
-            trscene::glam::Quat::from_rotation_y(0.6),
+            glam::Quat::from_rotation_y(0.6),
             Vec3::new(10.0, 5.0, -3.0),
         );
         let local = Mat4::from_scale_rotation_translation(
             Vec3::new(1.0, 2.0, 1.0),
-            trscene::glam::Quat::from_rotation_x(0.4),
+            glam::Quat::from_rotation_x(0.4),
             Vec3::new(1.0, 2.0, 3.0),
         );
         parent.set_pivot(pivot);
@@ -189,21 +185,21 @@ fn spatial_instances_parent_children_in_local_coordinates() {
     check(CustomRig::default());
     check(SpringPart::default());
     #[cfg(feature = "meshpart")]
-    check(trscene::MeshPart::new(trscene::Mesh::cube(1.0, [1.0; 4])));
+    check(MeshPart::new(Mesh::cube(1.0, [1.0; 4])));
 }
 
 #[test]
 fn base_part_materials_are_available_on_every_subtype() {
     fn check<T: Instance + BasePartExt>(part: T) {
-        let uniform = trscene::Material::from_color(Color3::BLACK);
-        let top = trscene::Material::from_color(Color3::WHITE);
-        assert_eq!(part.material(), Some(&trscene::Material::default()));
+        let uniform = Material::from_color(Color3::BLACK);
+        let top = Material::from_color(Color3::WHITE);
+        assert_eq!(part.material(), Some(&Material::default()));
         let mut part = part
             .with_material(uniform)
-            .with_material_slot(trscene::Face::Top, top);
+            .with_material_slot(Face::Top, top);
         assert_eq!(part.material(), None);
-        assert_eq!(part.material_slot(trscene::Face::Bottom), &uniform);
-        assert_eq!(part.material_slot(trscene::Face::Top), &top);
+        assert_eq!(part.material_slot(Face::Bottom), &uniform);
+        assert_eq!(part.material_slot(Face::Top), &top);
         (&mut part).with_material(uniform);
         assert_eq!(part.material(), Some(&uniform));
         let mut workspace = Workspace::new();
@@ -211,12 +207,12 @@ fn base_part_materials_are_available_on_every_subtype() {
         workspace
             .view_mut::<BasePart>(id)
             .unwrap()
-            .set_material_slot(trscene::Face::Top, top);
+            .set_material_slot(Face::Top, top);
         assert_eq!(
             workspace
                 .view::<BasePart>(id)
                 .unwrap()
-                .material_slot(trscene::Face::Top),
+                .material_slot(Face::Top),
             &top
         );
     }
@@ -224,12 +220,12 @@ fn base_part_materials_are_available_on_every_subtype() {
     check(Part::new());
     check(SpringPart::default());
     #[cfg(feature = "meshpart")]
-    check(trscene::MeshPart::new(trscene::Mesh::cube(1.0, [1.0; 4])));
+    check(MeshPart::new(Mesh::cube(1.0, [1.0; 4])));
 }
 
 #[test]
 fn custom_primitives_render_with_the_outer_identity_and_materials() {
-    let material = trscene::Material::from_color(Color3::BLACK);
+    let material = Material::from_color(Color3::BLACK);
     let mut workspace = Workspace::new();
     let id = workspace.add_child(
         SpringPart::default()
@@ -243,9 +239,9 @@ fn custom_primitives_render_with_the_outer_identity_and_materials() {
     let mesh = node.mesh.as_ref().unwrap();
     assert!(matches!(
         mesh.geometry,
-        trscene::RenderGeometry::Primitive(PartShape::Ball)
+        RenderGeometry::Primitive(PartShape::Ball)
     ));
-    assert_eq!(mesh.materials.get(trscene::Face::Top), Some(&material));
+    assert_eq!(mesh.materials.get(Face::Top), Some(&material));
     assert_eq!(workspace.view::<BasePart>(id).unwrap().id(), id);
 }
 
@@ -285,7 +281,7 @@ fn rig_overrides_move_children_through_mutable_references_and_runtime_views() {
 
 #[test]
 fn instance_views_preserve_scope_identity_and_overrides_inside_and_outside_a_workspace() {
-    fn check(parent: &mut dyn Instance, child: trscene::InstanceId) {
+    fn check(parent: &mut dyn Instance, child: InstanceId) {
         let id = parent.id();
         assert_eq!(parent.view::<dyn Instance>(id).unwrap().id(), id);
         assert_eq!(parent.view::<Rig>(id).unwrap().id(), id);
@@ -330,11 +326,8 @@ fn instance_views_preserve_scope_identity_and_overrides_inside_and_outside_a_wor
 fn derived_setters_dispatch_to_custom_overrides_across_multiple_levels() {
     let mut part = CustomPlanarPart::default().with_position(Vec3::new(1.0, 7.0, 3.0));
     assert_eq!(part.position(), Vec3::new(1.0, 0.0, 3.0));
-    (&mut part).with_material(trscene::Material::from_color(Color3::WHITE));
-    assert_eq!(
-        part.material(),
-        Some(&trscene::Material::from_color(Color3::BLACK))
-    );
+    (&mut part).with_material(Material::from_color(Color3::WHITE));
+    assert_eq!(part.material(), Some(&Material::from_color(Color3::BLACK)));
     let mut workspace = Workspace::new();
     let id = workspace.add_child(part);
     workspace
@@ -361,12 +354,8 @@ fn composed_primitives_participate_in_physics_and_overlap_queries() {
     }
     let position = workspace.view::<PVInstance>(id).unwrap().position();
     assert!(position.y < 10.0);
-    let hits = workspace.get_part_bounds_in_box(&trscene::BoxOverlapQuery::new(
-        Mat4::from_scale_rotation_translation(
-            Vec3::splat(4.0),
-            trscene::glam::Quat::IDENTITY,
-            position,
-        ),
+    let hits = workspace.get_part_bounds_in_box(&BoxOverlapQuery::new(
+        Mat4::from_scale_rotation_translation(Vec3::splat(4.0), glam::Quat::IDENTITY, position),
     ));
     assert!(hits.contains(&id));
 }
@@ -379,7 +368,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     workspace
         .view_mut::<dyn Instance>(spring)
         .unwrap()
-        .set_property("stiffness", trscene::devtools::PropertyValue::Number(42.0))
+        .set_property("stiffness", devtools::PropertyValue::Number(42.0))
         .unwrap();
     assert_eq!(
         workspace.get::<SpringPart>(spring).unwrap().stiffness(),
@@ -394,7 +383,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
         .unwrap()
         .set_property(
             "position",
-            trscene::devtools::PropertyValue::Vector(vec![5.0, 0.0, 0.0]),
+            devtools::PropertyValue::Vector(vec![5.0, 0.0, 0.0]),
         )
         .unwrap();
     assert_eq!(
@@ -406,7 +395,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     workspace
         .view_mut::<dyn Instance>(planar)
         .unwrap()
-        .set_property("color", trscene::devtools::PropertyValue::Color([1.0; 3]))
+        .set_property("color", devtools::PropertyValue::Color([1.0; 3]))
         .unwrap();
     assert_eq!(
         workspace.view::<BasePart>(planar).unwrap().color(),
@@ -416,10 +405,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
         workspace
             .view_mut::<dyn Instance>(id)
             .unwrap()
-            .set_property(
-                "size",
-                trscene::devtools::PropertyValue::Vector(vec![0.0; 3])
-            )
+            .set_property("size", devtools::PropertyValue::Vector(vec![0.0; 3]))
             .is_err()
     );
     assert_eq!(
@@ -428,7 +414,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     );
 }
 
-trscene::instance! {
+instance! {
     /// An independently reusable capability without a scene identity.
     #[derive(Clone, Debug)]
     pub struct Motor {
@@ -438,7 +424,7 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     /// A primitive composed with an independent motor capability.
     #[derive(Clone, Debug)]
     pub struct MotorPart {
@@ -449,12 +435,12 @@ trscene::instance! {
     }
 }
 
-trscene::instance! {
+instance! {
     /// A scene node authored without a built-in parent type.
     #[derive(Clone, Debug)]
     pub struct Group {
         #[data]
-        data: trscene::InstanceData,
+        data: InstanceData,
         /// Application-owned group label.
         #[property(borrow, default = "group".into())]
         label: String,
@@ -480,12 +466,12 @@ fn independent_capabilities_and_new_root_types_keep_one_scene_identity() {
     assert!(workspace.view::<BasePart>(group).is_none());
 }
 
-trscene::instance! {
+instance! {
     /// A custom light using the built-in point-light capability.
     #[derive(Clone, Debug)]
     pub struct CustomLight {
         #[extends]
-        light: trscene::PointLight,
+        light: PointLight,
     }
 }
 
@@ -497,21 +483,18 @@ fn custom_lights_are_included_in_render_snapshots() {
     workspace.add_child(part);
     let scene = workspace.render_scene();
     let light = scene.nodes[0].children[0].light.as_ref().unwrap();
-    assert!(matches!(
-        light.kind,
-        trscene::RenderLightKind::Point { range: 12.0 }
-    ));
+    assert!(matches!(light.kind, RenderLightKind::Point { range: 12.0 }));
     assert_eq!(light.brightness, 2.0);
 }
 
 #[cfg(feature = "meshpart")]
-trscene::instance! {
+instance! {
     /// A custom mesh whose provider has an explicit default initializer.
     #[derive(Clone, Debug)]
     pub struct CustomMesh {
         #[extends]
-        #[default(trscene::MeshPart::new(trscene::Mesh::block(1.0, [1.0; 4])))]
-        mesh: trscene::MeshPart,
+        #[default(MeshPart::new(Mesh::block(1.0, [1.0; 4])))]
+        mesh: MeshPart,
     }
 }
 
@@ -519,30 +502,26 @@ trscene::instance! {
 #[test]
 fn custom_meshes_render_updated_geometry() {
     let mut workspace = Workspace::new();
-    let id =
-        workspace.add_child(CustomMesh::default().with_mesh(trscene::Mesh::block(2.0, [1.0; 4])));
+    let id = workspace.add_child(CustomMesh::default().with_mesh(Mesh::block(2.0, [1.0; 4])));
     assert_eq!(
-        workspace
-            .view::<trscene::MeshPart>(id)
-            .unwrap()
-            .class_name(),
+        workspace.view::<MeshPart>(id).unwrap().class_name(),
         "CustomMesh"
     );
     let scene = workspace.render_scene();
     let mesh = scene.nodes[0].mesh.as_ref().unwrap();
     assert!(matches!(
         mesh.geometry,
-        trscene::RenderGeometry::Custom { revision: 1, .. }
+        RenderGeometry::Custom { revision: 1, .. }
     ));
 }
 
 #[cfg(feature = "sound")]
-trscene::instance! {
+instance! {
     /// A custom sound using the built-in audio capability.
     #[derive(Clone, Debug)]
     pub struct CustomSound {
         #[extends]
-        sound: trscene::Sound,
+        sound: Sound,
     }
 }
 
@@ -552,12 +531,6 @@ fn custom_sounds_are_updated_by_the_audio_runtime() {
     let mut workspace = Workspace::new();
     let id = workspace.add_child(CustomSound::default().with_volume(0.4));
     assert!(workspace.update_audio(0.0).is_empty());
-    assert!(
-        workspace
-            .view::<trscene::Sound>(id)
-            .unwrap()
-            .playback()
-            .is_some()
-    );
-    assert_eq!(workspace.view::<trscene::Sound>(id).unwrap().volume(), 0.4);
+    assert!(workspace.view::<Sound>(id).unwrap().playback().is_some());
+    assert_eq!(workspace.view::<Sound>(id).unwrap().volume(), 0.4);
 }
