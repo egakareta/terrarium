@@ -141,15 +141,19 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
-trscene::instance! {
+instance! {
     #[instance(default = false, inspect = false)]
-    /// The instance-tree root, owning a [`Workspace`] and renderer integrated with [`eframe`].
+    /// The instance-tree root and owner of a [`Workspace`], [`Controller`], and renderer integrated
+    /// with [`eframe`]. The default controller is a [`CameraController`].
     ///
     /// Add scene instances through [`Self::workspace_mut`]. The workspace cannot be
     /// destroyed independently, and the live engine does not support instance cloning.
     pub struct Engine {
         #[data]
         instance: Box<InstanceData>,
+        /// The controller driven by this engine. Defaults to a camera controller.
+        #[property(borrow)]
+        pub controller: Box<dyn Controller>,
         renderer: RendererHandle,
         /// The docked workspace inspector.
         #[cfg(feature = "devtools")]
@@ -216,6 +220,32 @@ fn engine_workspace(instance: &mut InstanceData) -> &mut Workspace {
         .expect("engine workspace")
 }
 
+fn controller_delta(delta_seconds: f32) -> f32 {
+    if delta_seconds.is_finite() {
+        delta_seconds.clamp(0.0, 0.1)
+    } else {
+        0.0
+    }
+}
+
+pub(crate) fn step_engine(
+    workspace: &mut Workspace,
+    controller: &mut dyn Controller,
+    delta_seconds: f32,
+) {
+    workspace.step_tweens(delta_seconds);
+    workspace.step_animations(delta_seconds);
+    let controller_delta = controller_delta(delta_seconds);
+    controller.step(workspace, controller_delta);
+    #[cfg(feature = "physics")]
+    workspace.step_physics(delta_seconds);
+    controller.post_physics(workspace, controller_delta);
+    #[cfg(feature = "sound")]
+    for error in workspace.step_audio(delta_seconds) {
+        log::error!("{error}");
+    }
+}
+
 impl Engine {
     /// Returns the workspace rendered by this engine.
     pub fn workspace(&self) -> &Workspace {
@@ -227,6 +257,43 @@ impl Engine {
     /// Returns mutable access to the workspace rendered by this engine.
     pub fn workspace_mut(&mut self) -> &mut Workspace {
         engine_workspace(&mut self.instance)
+    }
+
+    /// Feeds the current egui frame to the controller.
+    pub fn process_input(&mut self, context: &egui::Context) {
+        self.controller.process_input(context);
+    }
+
+    /// Sends a winit window event to the controller.
+    ///
+    /// Returns `true` if the controller reports using the event.
+    pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) -> bool {
+        self.controller.process_window_event(event)
+    }
+
+    /// Sends an unfiltered device event to the controller.
+    pub fn process_device_event(&mut self, event: &winit::event::DeviceEvent) {
+        self.controller.process_device_event(event);
+    }
+
+    /// Reports whether a bound movement key is down for the controller.
+    pub fn has_movement_input(&self, input: &egui::InputState) -> bool {
+        self.controller
+            .input()
+            .is_some_and(|controls| controls.has_movement_input(input))
+    }
+
+    /// Advances tweens, animations, the controller, physics, and audio.
+    ///
+    /// The controller runs after animation and before physics, with a post-physics
+    /// phase for behavior such as following a dynamic camera subject. Its frame
+    /// delta is clamped to `0..=0.1` seconds.
+    pub fn step(&mut self, delta_seconds: f32) {
+        step_engine(
+            engine_workspace(&mut self.instance),
+            self.controller.as_mut(),
+            delta_seconds,
+        );
     }
 
     #[cfg(feature = "devtools")]
@@ -257,14 +324,15 @@ impl Engine {
             .map_or(fallback_size, |size| [size.width, size.height]);
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let size = fallback_size;
+        let controller = CameraController::default();
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        let mut workspace = workspace;
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
-            workspace
-                .camera_controller_mut()
-                .set_touchscreen_detected(true);
-        }
+        let controller = {
+            let mut controller = controller;
+            if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
+                controller.set_touchscreen_detected(true);
+            }
+            controller
+        };
 
         let render_state = creation_context
             .wgpu_render_state
@@ -284,6 +352,7 @@ impl Engine {
 
         Ok(Self {
             instance,
+            controller: Box::new(controller),
             renderer,
             #[cfg(feature = "devtools")]
             devtools: {
@@ -347,19 +416,32 @@ impl Engine {
     }
 
     /// Processes controller input, advances the workspace, and requests the next frame.
+    ///
+    /// This calls [`Self::step`].
     pub fn update(&mut self, context: &egui::Context) {
-        let workspace = engine_workspace(&mut self.instance);
-        #[cfg(feature = "devtools")]
-        self.devtools
-            .focus_scene_on_camera_input(context, workspace);
-        let delta = process_workspace_input(workspace, context);
-        #[cfg(feature = "bevy")]
-        if let Some(app) = self.bevy_app.as_mut() {
-            crate::bevy::step_app(app, workspace, context, delta);
-            context.request_repaint();
-            return;
-        }
-        workspace.step(delta);
+        let delta = {
+            #[cfg(feature = "devtools")]
+            {
+                let has_movement_input = context.input(|input| self.has_movement_input(input));
+                self.devtools
+                    .focus_scene_on_movement_input(context, has_movement_input);
+            }
+            let delta = process_engine_input(self.controller.as_mut(), context);
+            #[cfg(feature = "bevy")]
+            if let Some(app) = self.bevy_app.as_mut() {
+                crate::bevy::step_app(
+                    app,
+                    engine_workspace(&mut self.instance),
+                    &mut self.controller,
+                    context,
+                    delta,
+                );
+                context.request_repaint();
+                return;
+            }
+            delta
+        };
+        self.step(delta);
         context.request_repaint();
     }
 
@@ -520,14 +602,14 @@ impl Engine {
     }
 }
 
-fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -> f32 {
+fn process_engine_input(controller: &mut dyn Controller, context: &egui::Context) -> f32 {
     let delta = context.input(|input| input.stable_dt);
     let delta = if delta.is_finite() {
         delta.clamp(0.0, 0.1)
     } else {
         0.0
     };
-    workspace.process_input(context);
+    controller.process_input(context);
     delta
 }
 
@@ -721,6 +803,10 @@ impl trdevtools::DevtoolsHost for Engine {
         self.workspace_mut()
     }
 
+    fn has_movement_input(&mut self, input: &egui::InputState) -> bool {
+        Engine::has_movement_input(self, input)
+    }
+
     fn root(&mut self) -> &mut dyn Instance {
         self
     }
@@ -832,6 +918,10 @@ impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
 
     fn workspace(&mut self) -> &mut Workspace {
         self.engine.workspace_mut()
+    }
+
+    fn has_movement_input(&mut self, input: &egui::InputState) -> bool {
+        self.engine.has_movement_input(input)
     }
 
     fn root(&mut self) -> &mut dyn Instance {

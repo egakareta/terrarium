@@ -15,6 +15,18 @@ use terrarium::{
 #[derive(Resource)]
 struct Subject(InstanceId);
 
+#[derive(Debug)]
+struct PlacePartController(InstanceId);
+
+impl Controller for PlacePartController {
+    fn step(&mut self, workspace: &mut Workspace, _: f32) {
+        workspace
+            .get_mut::<Part>(self.0)
+            .unwrap()
+            .with_position(Vec3::X);
+    }
+}
+
 #[test]
 fn workspace_tweens_follow_bevy_virtual_time() {
     let mut scene = Workspace::new();
@@ -203,6 +215,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
                     .bevy_app_mut()
                     .unwrap()
                     .insert_resource(Subject(subject));
+                engine.set_controller(Box::new(PlacePartController(subject)));
                 Ok::<_, AppCreationError>(SceneCallbacks { subject })
             })?
             .unwrap();
@@ -216,7 +229,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
         );
         let part = scene.get::<Part>(subject).unwrap();
         assert_eq!(part.name(), "Existing part");
-        assert_abs_diff_eq!(part.position().x, 3.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(part.position().x, 1.0, epsilon = 1e-6);
         assert_abs_diff_eq!(part.position().y, 4.0, epsilon = 1e-6);
         assert_abs_diff_eq!(part.position().z, 8.0, epsilon = 1e-6);
         assert!(

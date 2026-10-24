@@ -13,15 +13,16 @@ use crate::{glam::*, *};
 /// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
 /// Anchored rigs, and builds without physics, move their poses directly. Descendants
 /// and scale are preserved in both cases.
-/// Movement uses the active camera's horizontal heading. To orbit around the
-/// player, set the camera subject to this rig. Disable duplicate camera input
-/// when both controllers would otherwise respond to the same device.
+/// Movement uses the active camera's horizontal heading. Player look input orbits
+/// the camera when its subject is this rig.
 #[derive(Clone, Debug)]
 pub struct PlayerController {
     /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
     pub rig: Option<InstanceId>,
     /// Device state and bindings used to generate controller actions.
     pub input: ControllerInput,
+    /// Camera behavior used when the workspace camera follows this rig.
+    pub camera_controller: CameraController,
     /// Movement speed in world units per second.
     pub speed: f32,
     /// Upward jump velocity in world units per second.
@@ -46,6 +47,7 @@ impl PlayerController {
         Self {
             rig: Some(rig),
             input,
+            camera_controller: CameraController::default(),
             speed: 6.0,
             jump_speed: 7.0,
             sensitivity: 0.0025,
@@ -102,8 +104,8 @@ impl PlayerController {
     /// Applies accumulated input directly to a rig without a workspace.
     ///
     /// Horizontal movement is world-aligned, look and jumping are discarded, and
-    /// no physics step is performed. Register the controller with a workspace for
-    /// camera-relative movement, camera orbit, and physics integration.
+    /// no physics step is performed. Use this controller as the engine's custom
+    /// controller for camera-relative movement, camera orbit, and physics integration.
     pub fn step_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
         let actions = self.input.take_actions();
         self.step_rig_with_actions(rig, actions, delta_seconds);
@@ -130,7 +132,7 @@ impl PlayerController {
     /// queued for the next physics step; anchored rigs move immediately. This
     /// method does not read or consume device input.
     pub fn step_workspace_with_actions(
-        &self,
+        &mut self,
         workspace: &mut Workspace,
         actions: ControllerActions,
         delta_seconds: f32,
@@ -147,9 +149,9 @@ impl PlayerController {
 
         let mut reference = ControllerActions::default();
         if workspace.camera().subject() == Some(id) {
-            let camera = workspace.camera_controller_mut();
-            camera.queue_look(actions.look * self.sensitivity);
-            reference.look = camera.queued_look();
+            self.camera_controller
+                .queue_look(actions.look * self.sensitivity);
+            reference.look = self.camera_controller.queued_look();
         }
         let movement_rotation = reference.yaw_rotation(workspace.camera().pose(), 1.0);
         let delta_seconds = super::frame_delta(delta_seconds);
@@ -250,14 +252,22 @@ impl Controller for PlayerController {
                 .rig
                 .is_some_and(|id| workspace.camera().subject() == Some(id));
             if follows_rig {
-                workspace
-                    .camera_controller_mut()
-                    .queue_subject_zoom(scroll_delta);
+                self.camera_controller.queue_subject_zoom(scroll_delta);
             }
         }
     }
 
-    fn remap_instances(&mut self, map: &dyn Fn(InstanceId) -> Option<InstanceId>) {
-        self.rig = self.rig.and_then(map);
+    fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+        let subject = workspace.subject().and_then(|id| {
+            workspace
+                .view::<dyn Instance>(id)
+                .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
+        });
+        self.camera_controller.step_camera_with_actions(
+            workspace.camera_mut(),
+            subject,
+            ControllerActions::default(),
+            delta_seconds,
+        );
     }
 }

@@ -699,14 +699,16 @@ fn expand(
                 #(#cfg)* #[doc = concat!("Returns this instance with `", stringify!(#field_name), "` set.")] #(#docs)*
                 fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized { self.#setter(#builder_value); self }
             });
-            property_inspect.push(PropertyApi {
-                getter: field_name.clone(),
-                setter,
-                ty: ty.clone(),
-                cfg,
-                flatten: false,
-                validate: None,
-            });
+            if definition.inspect {
+                property_inspect.push(PropertyApi {
+                    getter: field_name.clone(),
+                    setter,
+                    ty: ty.clone(),
+                    cfg,
+                    flatten: false,
+                    validate: None,
+                });
+            }
         }
     }
     let public_prefix: Tokens = {

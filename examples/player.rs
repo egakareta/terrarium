@@ -190,8 +190,6 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
             .with_color(Color3::new(0.2, 0.5, 0.9)),
     );
     let rig = workspace.add_child(rig);
-    workspace.controllers.add(PlayerController::new(rig));
-    workspace.camera_controller_mut().set_enabled(false);
     *workspace.camera_mut() = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
         SPAWN + Vec3::Y,
@@ -199,15 +197,18 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     )
     .with_subject(Some(rig))
     .with_zfar(150.0);
-    workspace.camera_controller_mut().subject_offset = Vec3::Y;
-    workspace.camera_controller_mut().subject_distance = 7.6;
-    workspace.step_camera(0.0);
     rig
 }
 
-#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
-    let rig = create_scene(workspace);
+    let rig = create_scene(engine.workspace_mut());
+    let player = PlayerController::new(rig);
+    let _ = engine
+        .workspace_mut()
+        .camera_mut()
+        .with_subject_offset(Vec3::Y)
+        .with_subject_distance(7.6);
+    engine.set_controller(Box::new(player));
     Ok(PlayerApp { rig })
 }
 
@@ -244,7 +245,12 @@ mod tests {
         }
     }
 
-    fn input_frame(context: &egui::Context, workspace: &mut Workspace, events: Vec<egui::Event>) {
+    fn input_frame(
+        context: &egui::Context,
+        _workspace: &mut Workspace,
+        controller: &mut dyn Controller,
+        events: Vec<egui::Event>,
+    ) {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -253,34 +259,67 @@ mod tests {
             events,
             ..Default::default()
         };
-        let mut output = context.run_ui(input, |ui| workspace.process_input(ui.ctx()));
+        let mut output = context.run_ui(input, |ui| {
+            controller.process_input(ui.ctx());
+        });
         output.textures_delta.clear();
     }
 
-    fn walk_forward(workspace: &mut Workspace) {
+    fn walk_forward(workspace: &mut Workspace, controller: &mut dyn Controller) {
         input_frame(
             &egui::Context::default(),
             workspace,
+            controller,
             vec![key_event(egui::Key::W, true)],
         );
     }
 
-    fn advance(workspace: &mut Workspace, frames: usize) {
+    fn advance(workspace: &mut Workspace, controller: &mut dyn Controller, frames: usize) {
         for _ in 0..frames {
-            workspace.step(1.0 / 60.0);
+            step(workspace, controller, 1.0 / 60.0);
         }
+    }
+
+    fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_seconds: f32) {
+        workspace.step_tweens(delta_seconds);
+        workspace.step_animations(delta_seconds);
+        controller.step(workspace, delta_seconds);
+        #[cfg(feature = "physics")]
+        workspace.step_physics(delta_seconds);
+        controller.post_physics(workspace, delta_seconds.clamp(0.0, 0.1));
+        #[cfg(feature = "sound")]
+        let _ = workspace.step_audio(delta_seconds);
+    }
+
+    fn process_device_event(
+        _workspace: &mut Workspace,
+        controller: &mut dyn Controller,
+        event: &terrarium::winit::event::DeviceEvent,
+    ) {
+        controller.process_device_event(event);
+    }
+
+    fn create_test_scene(workspace: &mut Workspace) -> (InstanceId, PlayerController) {
+        let rig = create_scene(workspace);
+        let mut controller = PlayerController::new(rig);
+        workspace.camera_mut().set_subject_offset(Vec3::Y);
+        workspace.camera_mut().set_subject_distance(7.6);
+        controller.post_physics(workspace, 0.0);
+        (rig, controller)
     }
 
     #[test]
     fn walking_and_turning_preserve_gravity_and_the_player_lands_upright() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        walk_forward(&mut workspace);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        walk_forward(&mut workspace, &mut controller);
         for _ in 0..30 {
-            workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
-                delta: (2.0, 0.0),
-            });
-            workspace.step(1.0 / 60.0);
+            process_device_event(
+                &mut workspace,
+                &mut controller,
+                &terrarium::winit::event::DeviceEvent::MouseMotion { delta: (2.0, 0.0) },
+            );
+            step(&mut workspace, &mut controller, 1.0 / 60.0);
         }
         let falling = workspace.get::<Rig>(rig).unwrap();
         assert!(falling.position().y < SPAWN.y - 0.8);
@@ -288,7 +327,7 @@ mod tests {
         assert!(falling.position().z < SPAWN.z - 2.5);
         assert!(falling.forward().x > 0.1);
 
-        advance(&mut workspace, 150);
+        advance(&mut workspace, &mut controller, 150);
         let landed = workspace.get::<Rig>(rig).unwrap();
         assert!(landed.position().y.abs() < 0.05, "{:?}", landed.position());
         assert!(landed.position().z < SPAWN.z - 14.0);
@@ -303,9 +342,9 @@ mod tests {
     #[test]
     fn map_walls_stop_the_walking_player() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        walk_forward(&mut workspace);
-        advance(&mut workspace, 720);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        walk_forward(&mut workspace, &mut controller);
+        advance(&mut workspace, &mut controller, 720);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.z > -31.2 && position.z < -30.8, "{position:?}");
         assert!(position.y.abs() < 0.05, "{position:?}");
@@ -314,13 +353,13 @@ mod tests {
     #[test]
     fn the_lookout_is_reachable_by_walking_up_the_ramp() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
         workspace
             .get_mut::<Rig>(rig)
             .unwrap()
             .with_position(Vec3::new(15.0, 0.05, 22.0));
-        walk_forward(&mut workspace);
-        advance(&mut workspace, 180);
+        walk_forward(&mut workspace, &mut controller);
+        advance(&mut workspace, &mut controller, 180);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.y > 2.9 && position.y < 3.1, "{position:?}");
         assert!(position.z < 6.5, "{position:?}");
@@ -329,16 +368,17 @@ mod tests {
     #[test]
     fn strafing_turns_toward_travel_and_releasing_movement_stops_mid_turn() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        advance(&mut workspace, 120);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        advance(&mut workspace, &mut controller, 120);
         let initial = workspace.get::<Rig>(rig).unwrap().position();
         let context = egui::Context::default();
         input_frame(
             &context,
             &mut workspace,
+            &mut controller,
             vec![key_event(egui::Key::D, true)],
         );
-        advance(&mut workspace, 2);
+        advance(&mut workspace, &mut controller, 2);
         let player = workspace.get::<Rig>(rig).unwrap();
         assert!(player.position().x > initial.x + 0.1);
         let partial_facing = player.forward();
@@ -351,10 +391,11 @@ mod tests {
         input_frame(
             &context,
             &mut workspace,
+            &mut controller,
             vec![key_event(egui::Key::D, false)],
         );
         let stopped_at = workspace.get::<Rig>(rig).unwrap().position();
-        advance(&mut workspace, 60);
+        advance(&mut workspace, &mut controller, 60);
         let stopped = workspace.get::<Rig>(rig).unwrap();
         assert!(stopped.forward().abs_diff_eq(partial_facing, 1e-5));
         assert!((stopped.position() - stopped_at).with_y(0.0).length() < 1e-4);
@@ -362,9 +403,10 @@ mod tests {
         input_frame(
             &context,
             &mut workspace,
+            &mut controller,
             vec![key_event(egui::Key::D, true)],
         );
-        advance(&mut workspace, 60);
+        advance(&mut workspace, &mut controller, 60);
         assert!(
             workspace
                 .get::<Rig>(rig)
@@ -377,16 +419,20 @@ mod tests {
     #[test]
     fn mouse_look_orbits_without_turning_or_moving_an_idle_player() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        advance(&mut workspace, 120);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        advance(&mut workspace, &mut controller, 120);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
         let focus = position + Vec3::Y;
         let offset = workspace.camera().position() - focus;
-        workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
-            delta: (80.0, -20.0),
-        });
-        workspace.step(1.0 / 60.0);
+        process_device_event(
+            &mut workspace,
+            &mut controller,
+            &terrarium::winit::event::DeviceEvent::MouseMotion {
+                delta: (80.0, -20.0),
+            },
+        );
+        step(&mut workspace, &mut controller, 1.0 / 60.0);
 
         let player = workspace.get::<Rig>(rig).unwrap();
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
@@ -401,17 +447,19 @@ mod tests {
     #[test]
     fn movement_follows_the_camera_even_while_the_rig_is_still_turning() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        advance(&mut workspace, 120);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        advance(&mut workspace, &mut controller, 120);
         let initial = workspace.get::<Rig>(rig).unwrap().position();
-        walk_forward(&mut workspace);
-        workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
-            delta: (
-                (std::f32::consts::FRAC_PI_2 / workspace.camera_controller().sensitivity) as f64,
-                0.0,
-            ),
-        });
-        workspace.step(1.0 / 60.0);
+        walk_forward(&mut workspace, &mut controller);
+        let sensitivity = controller.camera_controller.sensitivity;
+        process_device_event(
+            &mut workspace,
+            &mut controller,
+            &terrarium::winit::event::DeviceEvent::MouseMotion {
+                delta: ((std::f32::consts::FRAC_PI_2 / sensitivity) as f64, 0.0),
+            },
+        );
+        step(&mut workspace, &mut controller, 1.0 / 60.0);
 
         let player = workspace.get::<Rig>(rig).unwrap();
         let displacement = player.position() - initial;
@@ -426,8 +474,8 @@ mod tests {
     #[test]
     fn touch_look_orbits_the_camera_once_without_turning_the_idle_player() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        advance(&mut workspace, 120);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        advance(&mut workspace, &mut controller, 120);
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
         let focus = workspace.get::<Rig>(rig).unwrap().position() + Vec3::Y;
         let offset = workspace.camera().position() - focus;
@@ -439,6 +487,7 @@ mod tests {
             input_frame(
                 &context,
                 &mut workspace,
+                &mut controller,
                 vec![egui::Event::Touch {
                     device_id: egui::TouchDeviceId(0),
                     id: egui::TouchId(1),
@@ -448,10 +497,10 @@ mod tests {
                 }],
             );
         }
-        workspace.step(1.0 / 60.0);
+        step(&mut workspace, &mut controller, 1.0 / 60.0);
         let player = workspace.get::<Rig>(rig).unwrap();
         let orbit = workspace.camera().position() - (player.position() + Vec3::Y);
-        let angle = -60.0 * workspace.camera_controller().sensitivity;
+        let angle = -60.0 * controller.camera_controller.sensitivity;
         let expected = terrarium::glam::Quat::from_rotation_y(angle) * offset;
         assert!(orbit.abs_diff_eq(expected, 1e-4), "{orbit:?}");
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
@@ -460,22 +509,24 @@ mod tests {
     #[test]
     fn turning_takes_the_short_path_across_the_yaw_wrap() {
         let mut workspace = Workspace::new();
-        let rig = create_scene(&mut workspace);
-        advance(&mut workspace, 120);
+        let (rig, mut controller) = create_test_scene(&mut workspace);
+        advance(&mut workspace, &mut controller, 120);
         workspace
             .get_mut::<Rig>(rig)
             .unwrap()
             .with_orientation(Vec3::new(0.0, 170.0, 0.0));
-        workspace.step(0.0);
+        step(&mut workspace, &mut controller, 0.0);
         let initial_facing = workspace.get::<Rig>(rig).unwrap().forward();
-        walk_forward(&mut workspace);
-        workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
-            delta: (
-                (170.0_f32.to_radians() / workspace.camera_controller().sensitivity) as f64,
-                0.0,
-            ),
-        });
-        workspace.step(1.0 / 60.0);
+        walk_forward(&mut workspace, &mut controller);
+        let sensitivity = controller.camera_controller.sensitivity;
+        process_device_event(
+            &mut workspace,
+            &mut controller,
+            &terrarium::winit::event::DeviceEvent::MouseMotion {
+                delta: ((170.0_f32.to_radians() / sensitivity) as f64, 0.0),
+            },
+        );
+        step(&mut workspace, &mut controller, 1.0 / 60.0);
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
         assert!(facing.z > 0.98, "{facing:?}");
         assert!(facing.x > initial_facing.x && facing.x < 0.0, "{facing:?}");

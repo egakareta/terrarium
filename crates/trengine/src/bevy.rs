@@ -31,6 +31,10 @@ impl Plugin for TerrariumPlugin {
         }
         app.world_mut().init_non_send::<Workspace>();
         app.world_mut().init_non_send::<EguiContext>();
+        if !app.world().contains_non_send::<Box<dyn Controller>>() {
+            app.world_mut()
+                .insert_non_send(Box::new(CameraController::default()) as Box<dyn Controller>);
+        }
         app.add_systems(PostUpdate, advance_workspace.in_set(TerrariumSet::Advance));
     }
 }
@@ -38,7 +42,7 @@ impl Plugin for TerrariumPlugin {
 /// Ordering boundaries for Terrarium systems in [`PostUpdate`].
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TerrariumSet {
-    /// Advances camera motion, tweens, physics, and audio once using Bevy's virtual frame time.
+    /// Advances the controller and workspace using Bevy's virtual frame time.
     ///
     /// Systems in `Update` run before this phase. Systems in `PostUpdate` can declare
     /// `.before(TerrariumSet::Advance)` or `.after(TerrariumSet::Advance)` as appropriate.
@@ -56,8 +60,12 @@ impl EguiContext {
     }
 }
 
-fn advance_workspace(time: Res<Time>, mut workspace: NonSendMut<Workspace>) {
-    workspace.step(time.delta_secs());
+fn advance_workspace(
+    time: Res<Time>,
+    mut workspace: NonSendMut<Workspace>,
+    mut controller: NonSendMut<Box<dyn Controller>>,
+) {
+    crate::engine::step_engine(&mut workspace, &mut **controller, time.delta_secs());
 }
 
 pub(crate) fn attach_app(
@@ -89,16 +97,17 @@ pub(crate) fn attach_app(
 }
 
 pub(crate) fn finalize_app(app: &mut BevyApp, workspace: &mut Workspace) -> bool {
-    with_workspace(app, workspace, finish_plugins)
+    with_workspace(app, workspace, None, finish_plugins)
 }
 
 pub(crate) fn step_app(
     app: &mut BevyApp,
     workspace: &mut Workspace,
+    controller: &mut Box<dyn Controller>,
     context: &egui::Context,
     delta: f32,
 ) -> Option<f32> {
-    with_workspace(app, workspace, |app| {
+    with_workspace(app, workspace, Some(controller), |app| {
         if !finish_plugins(app) {
             return None;
         }
@@ -136,13 +145,22 @@ fn finish_plugins(app: &mut BevyApp) -> bool {
 fn with_workspace<T>(
     app: &mut BevyApp,
     workspace: &mut Workspace,
+    mut controller: Option<&mut Box<dyn Controller>>,
     update: impl FnOnce(&mut BevyApp) -> T,
 ) -> T {
     std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+    if let Some(controller) = controller.as_mut() {
+        let mut bevy_controller = app.world_mut().non_send_mut::<Box<dyn Controller>>();
+        std::mem::swap(*controller, &mut *bevy_controller);
+    }
     app.world_mut()
         .non_send_mut::<Workspace>()
         .refresh_registration();
-    let scope = WorkspaceScope { app, workspace };
+    let scope = WorkspaceScope {
+        app,
+        workspace,
+        controller,
+    };
     update(&mut *scope.app)
 }
 
@@ -151,10 +169,15 @@ fn with_workspace<T>(
 struct WorkspaceScope<'a> {
     app: &'a mut BevyApp,
     workspace: &'a mut Workspace,
+    controller: Option<&'a mut Box<dyn Controller>>,
 }
 
 impl Drop for WorkspaceScope<'_> {
     fn drop(&mut self) {
+        if let Some(controller) = &mut self.controller {
+            let mut bevy_controller = self.app.world_mut().non_send_mut::<Box<dyn Controller>>();
+            std::mem::swap(*controller, &mut *bevy_controller);
+        }
         std::mem::swap(
             self.workspace,
             &mut self.app.world_mut().non_send_mut::<Workspace>(),

@@ -28,6 +28,9 @@ pub trait DevtoolsHost {
     /// Returns mutable access to the workspace being inspected.
     fn workspace(&mut self) -> &mut Workspace;
 
+    /// Reports whether current input matches the active controller's movement binding.
+    fn has_movement_input(&mut self, input: &egui::InputState) -> bool;
+
     /// Returns the instance-tree root being inspected.
     fn root(&mut self) -> &mut dyn Instance {
         self.workspace()
@@ -179,14 +182,13 @@ impl Devtools {
         self.error = None;
     }
 
-    /// Activates the scene tab for camera movement unless a text editor has focus.
-    ///
-    /// Call before processing camera input to release keyboard capture in the same frame.
-    /// [`Self::show_docked`] also calls this for standalone integrations.
-    pub fn focus_scene_on_camera_input(&mut self, context: &egui::Context, workspace: &Workspace) {
-        if context.text_edit_focused()
-            || !context.input(|input| workspace.has_movement_input(input))
-        {
+    /// Activates the scene tab when controller movement input is active and a text editor has no focus.
+    pub fn focus_scene_on_movement_input(
+        &mut self,
+        context: &egui::Context,
+        has_movement_input: bool,
+    ) {
+        if context.text_edit_focused() || !has_movement_input {
             return;
         }
         context.memory_mut(|memory| {
@@ -217,7 +219,8 @@ impl Devtools {
         let scene_title = host.scene_title().to_owned();
         let workspace_id = host.workspace().id();
         self.prune(host.root());
-        self.focus_scene_on_camera_input(&context, host.workspace());
+        let has_movement_input = context.input(|input| host.has_movement_input(input));
+        self.focus_scene_on_movement_input(&context, has_movement_input);
 
         if !self.visible {
             host.render_scene(ui, &self.selected);

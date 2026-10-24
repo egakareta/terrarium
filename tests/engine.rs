@@ -2,6 +2,18 @@
 
 use terrarium::*;
 
+#[derive(Debug)]
+struct PlacePart(InstanceId);
+
+impl Controller for PlacePart {
+    fn step(&mut self, workspace: &mut Workspace, _: f32) {
+        workspace
+            .get_mut::<Part>(self.0)
+            .unwrap()
+            .with_position(glam::Vec3::X);
+    }
+}
+
 #[test]
 fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), AppCreationError> {
     let clear_color = [0.15, 0.25, 0.35, 1.0];
@@ -10,10 +22,20 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
         .with_env_logger(false)
         .with_headless(Some(0))
         .run(|engine| {
-            let parent = engine
-                .workspace_mut()
-                .add_child_ref(Part::new().with_name("parent"));
-            parent.add_child(Part::new().with_name("child"));
+            assert!(
+                engine
+                    .controller()
+                    .downcast_ref::<CameraController>()
+                    .is_some()
+            );
+            let parent_id = {
+                let parent = engine
+                    .workspace_mut()
+                    .add_child_ref(Part::new().with_name("parent"));
+                parent.add_child(Part::new().with_name("child"));
+                parent.id()
+            };
+            engine.set_controller(Box::new(PlacePart(parent_id)));
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
@@ -39,6 +61,21 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
         ["Workspace", "parent", "child"]
     );
     assert!(engine.try_clone_box().is_none());
+
+    let parent_id = engine
+        .get_all::<Part>()
+        .find(|part| part.name() == "parent")
+        .unwrap()
+        .id();
+    engine.update(&egui::Context::default());
+    assert_eq!(
+        engine
+            .workspace()
+            .get::<Part>(parent_id)
+            .unwrap()
+            .position(),
+        glam::Vec3::X
+    );
 
     let sibling = engine.add_child(Part::new().with_name("service"));
     assert!(engine.workspace().view::<dyn Instance>(sibling).is_none());

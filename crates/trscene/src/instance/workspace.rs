@@ -63,11 +63,6 @@ instance! {
         #[compose]
         camera: Camera,
         #[cfg_attr(feature = "devtools", inspect(skip))]
-        camera_controller: CameraController,
-        /// Additional controllers, updated in registration order before physics and the camera.
-        #[cfg_attr(feature = "devtools", inspect(skip))]
-        pub controllers: Controllers,
-        #[cfg_attr(feature = "devtools", inspect(skip))]
         tween_manager: TweenManager,
         #[cfg(feature = "physics")]
         #[cfg_attr(feature = "devtools", inspect(skip))]
@@ -122,8 +117,6 @@ impl Workspace {
         Self {
             instance,
             camera: Camera::default(),
-            camera_controller: CameraController::default(),
-            controllers: Controllers::default(),
             tween_manager: TweenManager::default(),
             #[cfg(feature = "physics")]
             physics: PhysicsWorld::default(),
@@ -299,28 +292,12 @@ impl Workspace {
         self.descendants()
     }
 
-    /// Applies pending input to the active camera.
-    ///
-    /// A spatial subject is followed at the configured offset and orbit distance.
-    /// Without a valid subject, input moves the camera freely.
-    pub fn step_camera(&mut self, delta: f32) {
-        let subject = self.camera.subject().and_then(|id| {
-            self.view::<dyn Instance>(id)
-                .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
-                .map(|pose| (id, pose))
-        });
-        self.camera_controller
-            .step_camera(&mut self.camera, subject, delta);
-    }
-
     /// Advances the simulation when enabled.
     pub fn step(&mut self, delta_seconds: f32) {
         self.step_tweens(delta_seconds);
         self.step_animations(delta_seconds);
-        self.step_controllers(delta_seconds);
         #[cfg(feature = "physics")]
         self.step_physics(delta_seconds);
-        self.step_camera(delta_seconds);
         #[cfg(feature = "sound")]
         for error in self.step_audio(delta_seconds) {
             log::error!("{error}");
@@ -340,7 +317,8 @@ impl Workspace {
     }
 
     #[cfg(feature = "physics")]
-    fn step_physics(&mut self, delta_seconds: f32) {
+    /// Advances the workspace's physics simulation and applies body transforms.
+    pub fn step_physics(&mut self, delta_seconds: f32) {
         let mut instances = Vec::new();
         for child in self.children() {
             PhysicsInstance::collect(child.as_ref(), &mut instances);
@@ -387,62 +365,6 @@ impl Workspace {
             update(child, delta_seconds);
         }
     }
-
-    /// Returns the active camera controller.
-    pub fn camera_controller(&self) -> &CameraController {
-        &self.camera_controller
-    }
-
-    /// Returns the active camera controller for configuration and input state access.
-    pub fn camera_controller_mut(&mut self) -> &mut CameraController {
-        &mut self.camera_controller
-    }
-
-    /// Feeds the current egui frame to the camera and registered controllers.
-    ///
-    /// Call once per frame before [`Self::update`]. Each controller receives the
-    /// same input and applies its own enabled-device and UI-capture settings.
-    pub fn process_input(&mut self, context: &crate::egui::Context) {
-        self.camera_controller.process_input(context);
-        self.controllers.process_input(context);
-    }
-
-    /// Sends a winit window event to the camera and registered controllers.
-    ///
-    /// Returns `true` if at least one controller reports using the event.
-    pub fn process_window_event(&mut self, event: &crate::winit::event::WindowEvent) -> bool {
-        let camera_used = self.camera_controller.process_window_event(event);
-        self.controllers.process_window_event(event) || camera_used
-    }
-
-    /// Sends an unfiltered device event to the camera and registered controllers.
-    pub fn process_device_event(&mut self, event: &crate::winit::event::DeviceEvent) {
-        self.camera_controller.process_device_event(event);
-        self.controllers.process_device_event(event);
-    }
-
-    /// Reports whether a bound movement key is down for any input-capable controller.
-    ///
-    /// The result ignores egui keyboard capture, allowing integrations to move
-    /// focus to the scene before processing the same key event.
-    pub fn has_movement_input(&self, input: &crate::egui::InputState) -> bool {
-        self.camera_controller.has_movement_input(input)
-            || self.controllers.iter().any(|(_, controller)| {
-                controller
-                    .input()
-                    .is_some_and(|controls| controls.has_movement_input(input))
-            })
-    }
-
-    /// Runs registered controllers without advancing physics or the camera.
-    ///
-    /// Controllers run in registration order. The frame delta is clamped to
-    /// `0..=0.1` seconds. Controllers added during this call begin on the next
-    /// call; removed controllers are skipped. The active controller cannot be
-    /// retrieved by handle until its update returns.
-    pub fn step_controllers(&mut self, delta_seconds: f32) {
-        Controllers::update(self, crate::controller::frame_delta(delta_seconds));
-    }
 }
 
 impl Clone for Workspace {
@@ -460,11 +382,9 @@ impl Clone for Workspace {
                 subject,
             ));
         }
-        let mut workspace = Self {
+        Self {
             instance,
             camera: current_camera,
-            camera_controller: self.camera_controller.clone(),
-            controllers: self.controllers.clone(),
             tween_manager: self.tween_manager.clone(),
             #[cfg(feature = "physics")]
             physics: self.physics.clone_configuration(),
@@ -478,11 +398,7 @@ impl Clone for Workspace {
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
             lighting: self.lighting.clone(),
-        };
-        workspace.controllers.remap_instances(&|id| {
-            cloned_instance_id(self.instance.children(), workspace.instance.children(), id)
-        });
-        workspace
+        }
     }
 }
 
@@ -696,29 +612,17 @@ mod tests {
     }
 
     #[test]
-    fn camera_controller_can_be_configured_through_workspace() {
-        let mut workspace = Workspace::new();
-
-        workspace.camera_controller_mut().key_bindings.forward =
-            vec![winit::keyboard::KeyCode::ArrowUp];
-
-        assert_eq!(
-            workspace.camera_controller().key_bindings.forward,
-            vec![winit::keyboard::KeyCode::ArrowUp]
-        );
-    }
-
-    #[test]
     fn camera_subject_follows_a_spatial_instance_and_can_be_cleared() {
         let mut workspace = Workspace::new();
         let subject_id = workspace.add_child(Part::new());
         workspace.camera_mut().set_subject(Some(subject_id));
-        workspace.camera_controller_mut().subject_distance = 8.0;
-        workspace.camera_controller_mut().subject_offset = Vec3::Y;
+        let mut controller = CameraController::default();
+        workspace.camera_mut().set_subject_distance(8.0);
+        workspace.camera_mut().set_subject_offset(Vec3::Y);
 
-        workspace.step_camera(1.0 / 60.0);
-        workspace.camera_controller_mut().mouse_look_delta = (0.0, 10.0);
-        workspace.step_camera(1.0 / 60.0);
+        controller.post_physics(&mut workspace, 1.0 / 60.0);
+        controller.mouse_look_delta = (0.0, 10.0);
+        controller.post_physics(&mut workspace, 1.0 / 60.0);
 
         let focus = Vec3::Y;
         let camera_position = workspace.camera().position();
@@ -735,7 +639,7 @@ mod tests {
         workspace.get_mut::<Part>(subject_id).unwrap().pivot_to(
             crate::glam::Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
         );
-        workspace.step_camera(1.0 / 60.0);
+        controller.post_physics(&mut workspace, 1.0 / 60.0);
 
         let moved_position = workspace.camera().position();
         assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
@@ -743,7 +647,7 @@ mod tests {
         let mut cloned_workspace = workspace.clone();
         let cloned_subject = cloned_workspace.camera().subject().unwrap();
         assert_ne!(cloned_subject, subject_id);
-        cloned_workspace.step_camera(1.0 / 60.0);
+        controller.post_physics(&mut cloned_workspace, 1.0 / 60.0);
         let cloned_camera_position = cloned_workspace.camera().position();
         cloned_workspace
             .get_mut::<Part>(cloned_subject)
@@ -751,33 +655,17 @@ mod tests {
             .pivot_to(crate::glam::Mat4::from_translation(Vec3::new(
                 20.0, 0.0, 0.0,
             )));
-        cloned_workspace.step_camera(1.0 / 60.0);
+        controller.post_physics(&mut cloned_workspace, 1.0 / 60.0);
         assert!(
             (cloned_workspace.camera().position().x - cloned_camera_position.x - 10.0).abs() < 1e-5
         );
 
         workspace.camera_mut().set_subject(None);
-        workspace.camera_controller_mut().forward = true;
-        workspace.step_camera(0.1);
+        controller.forward = true;
+        controller.post_physics(&mut workspace, 0.1);
 
         assert_eq!(workspace.camera().subject(), None);
         assert!(workspace.camera().position().z < moved_position.z);
-    }
-
-    #[test]
-    fn camera_controller_input_can_be_disabled_through_workspace() {
-        let mut workspace = Workspace::new();
-        assert!(workspace.camera_controller().is_enabled());
-
-        workspace.camera_controller_mut().set_enabled(false);
-        assert!(!workspace.camera_controller().keyboard_enabled);
-        assert!(!workspace.camera_controller().mouse_enabled);
-        assert!(!workspace.camera_controller().is_enabled());
-
-        workspace.camera_controller_mut().set_mouse_enabled(true);
-        assert!(!workspace.camera_controller().keyboard_enabled);
-        assert!(workspace.camera_controller().mouse_enabled);
-        assert!(workspace.camera_controller().is_enabled());
     }
 
     #[test]

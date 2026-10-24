@@ -19,6 +19,16 @@ struct CustomInstance {
 
 struct TestDevtoolsHost {
     workspace: Workspace,
+    controller: Box<dyn Controller>,
+}
+
+impl TestDevtoolsHost {
+    fn new(workspace: Workspace) -> Self {
+        Self {
+            workspace,
+            controller: Box::new(CameraController::default()),
+        }
+    }
 }
 
 impl DevtoolsHost for TestDevtoolsHost {
@@ -28,6 +38,12 @@ impl DevtoolsHost for TestDevtoolsHost {
 
     fn workspace(&mut self) -> &mut Workspace {
         &mut self.workspace
+    }
+
+    fn has_movement_input(&mut self, input: &egui::InputState) -> bool {
+        self.controller
+            .input()
+            .is_some_and(|controls| controls.has_movement_input(input))
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, _selected: &[InstanceId]) {
@@ -71,9 +87,12 @@ fn frame(
             ..Default::default()
         },
         |ui| {
-            devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
-            host.workspace.process_input(ui.ctx());
+            let has_movement_input = ui.ctx().input(|input| host.has_movement_input(input));
+            devtools.focus_scene_on_movement_input(ui.ctx(), has_movement_input);
+            host.controller.process_input(ui.ctx());
+            host.controller.step(&mut host.workspace, 0.1);
             host.workspace.step(0.1);
+            host.controller.post_physics(&mut host.workspace, 0.1);
             devtools.show_docked(ui, host);
         },
     );
@@ -114,9 +133,7 @@ fn contains_text(shape: &egui::Shape, target: &str) -> bool {
 
 #[test]
 fn hidden_inspector_renders_the_scene_and_development_notice() {
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
+    let mut host = TestDevtoolsHost::new(Workspace::new());
     let mut devtools = Devtools::default();
     let context = egui::Context::default();
     let raw_input = || egui::RawInput {
@@ -152,9 +169,7 @@ fn hidden_inspector_renders_the_scene_and_development_notice() {
 fn full_dock_uses_the_application_title_for_the_scene_tab() {
     let mut devtools = Devtools::default();
     devtools.set_visible(true);
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
+    let mut host = TestDevtoolsHost::new(Workspace::new());
     let context = egui::Context::default();
     let raw_input = || egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
@@ -197,9 +212,7 @@ fn camera_movement_resumes_after_focusing_the_explorer() {
     ] {
         let mut devtools = Devtools::default();
         devtools.set_visible(true);
-        let mut host = TestDevtoolsHost {
-            workspace: Workspace::new(),
-        };
+        let mut host = TestDevtoolsHost::new(Workspace::new());
         let context = egui::Context::default();
         frame(&context, &mut devtools, &mut host, Vec::new());
         frame(&context, &mut devtools, &mut host, Vec::new());
@@ -224,18 +237,19 @@ fn controller_focus_uses_custom_movement_bindings() {
     for player_controlled in [false, true] {
         let mut devtools = Devtools::default();
         devtools.set_visible(true);
-        let mut host = TestDevtoolsHost {
-            workspace: Workspace::new(),
-        };
+        let mut host = TestDevtoolsHost::new(Workspace::new());
         let rig = if player_controlled {
-            host.workspace.camera_controller_mut().set_enabled(false);
             let rig = host.workspace.add_child(Rig::new());
             let mut player = PlayerController::new(rig);
             player.key_bindings.forward = vec![KeyCode::ArrowUp];
-            host.workspace.controllers.add(player);
+            host.controller = Box::new(player);
             Some(rig)
         } else {
-            host.workspace.camera_controller_mut().key_bindings.forward = vec![KeyCode::ArrowUp];
+            host.controller
+                .downcast_mut::<CameraController>()
+                .unwrap()
+                .key_bindings
+                .forward = vec![KeyCode::ArrowUp];
             None
         };
         let position = |host: &TestDevtoolsHost| {
@@ -269,11 +283,10 @@ fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
     for (keyboard_enabled, movement_key) in [(false, Key::W), (true, Key::ShiftLeft)] {
         let mut devtools = Devtools::default();
         devtools.set_visible(true);
-        let mut host = TestDevtoolsHost {
-            workspace: Workspace::new(),
-        };
-        host.workspace
-            .camera_controller_mut()
+        let mut host = TestDevtoolsHost::new(Workspace::new());
+        host.controller
+            .downcast_mut::<CameraController>()
+            .unwrap()
             .set_keyboard_enabled(keyboard_enabled);
         let context = egui::Context::default();
         frame(&context, &mut devtools, &mut host, Vec::new());
@@ -298,9 +311,7 @@ fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
 fn camera_movement_keys_do_not_interrupt_text_editing() {
     let mut devtools = Devtools::default();
     devtools.set_visible(true);
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
+    let mut host = TestDevtoolsHost::new(Workspace::new());
     let context = egui::Context::default();
     let initial_position = host.workspace.camera().position();
     let mut text = String::new();
@@ -320,12 +331,12 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
                 ..Default::default()
             },
             |ui| {
-                devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
-                host.workspace
-                    .camera_controller_mut()
-                    .input
-                    .process_input(ui.ctx());
+                let has_movement_input = ui.ctx().input(|input| host.has_movement_input(input));
+                devtools.focus_scene_on_movement_input(ui.ctx(), has_movement_input);
+                host.controller.process_input(ui.ctx());
+                host.controller.step(&mut host.workspace, 0.1);
                 host.workspace.step(0.1);
+                host.controller.post_physics(&mut host.workspace, 0.1);
                 let response = ui.text_edit_singleline(&mut text);
                 if request_focus {
                     response.request_focus();
@@ -350,7 +361,7 @@ fn full_dock_deletes_the_selected_instance_on_delete_key() {
     let mut devtools = Devtools::default();
     devtools.set_visible(true);
     devtools.select(part, Modifiers::NONE, &[part]);
-    let mut host = TestDevtoolsHost { workspace };
+    let mut host = TestDevtoolsHost::new(workspace);
     let context = egui::Context::default();
     let mut output = context.run_ui(
         egui::RawInput {
@@ -371,9 +382,7 @@ fn full_dock_deletes_the_selected_instance_on_delete_key() {
 #[test]
 fn f12_toggles_the_inspector_once_per_key_press() {
     let mut devtools = Devtools::default();
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
+    let mut host = TestDevtoolsHost::new(Workspace::new());
     let context = egui::Context::default();
 
     assert!(!devtools.is_visible());
@@ -404,9 +413,7 @@ fn f12_toggles_the_inspector_once_per_key_press() {
 #[test]
 fn bottom_right_button_shows_the_inspector() {
     let mut devtools = Devtools::default();
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
+    let mut host = TestDevtoolsHost::new(Workspace::new());
     let context = egui::Context::default();
     frame(&context, &mut devtools, &mut host, Vec::new());
     frame(&context, &mut devtools, &mut host, Vec::new());
@@ -604,9 +611,7 @@ fn setters_preserve_field_invariants_and_root_edits_are_reflected() {
 
 #[test]
 fn deleting_nested_selection_preserves_root_and_unselected_siblings() {
-    let mut host = TestDevtoolsHost {
-        workspace: Workspace::new(),
-    };
+    let mut host = TestDevtoolsHost::new(Workspace::new());
     let mut parent = Part::new();
     let child = parent.add_child(Part::new());
     let parent = host.workspace.add_child(parent);
