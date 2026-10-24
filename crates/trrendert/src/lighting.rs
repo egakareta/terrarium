@@ -2,17 +2,6 @@ use glam::Vec3;
 
 use crate::*;
 
-/// The high-level lighting model used by a [`Lighting`] configuration.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
-pub enum LightingStyle {
-    /// Physically based lighting with directional shadows.
-    #[default]
-    Realistic,
-    /// A softer model with less directional contrast.
-    Soft,
-}
-
 /// Errors returned when parsing a time-of-day value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TimeOfDayError {
@@ -61,8 +50,6 @@ pub struct Lighting {
     pub geographic_latitude: f32,
     /// Whether directional shadows are enabled.
     pub global_shadows: bool,
-    /// The requested lighting style.
-    pub lighting_style: LightingStyle,
     /// Outdoor ambient color.
     pub outdoor_ambient: Color3,
     /// Tint used for fully shadowed direct light.
@@ -94,7 +81,6 @@ impl Default for Lighting {
             fog_end: 100_000.0,
             geographic_latitude: 0.0,
             global_shadows: true,
-            lighting_style: LightingStyle::Realistic,
             outdoor_ambient: Color3::new(0.5, 0.5, 0.5),
             shadow_color: Color3::BLACK,
             shadow_softness: 0.2,
@@ -282,16 +268,12 @@ impl Lighting {
     /// Returns the renderer's direct-light scaling factor.
     #[doc(hidden)]
     pub fn render_direct_scale(&self) -> f32 {
-        let style_scale = match self.lighting_style {
-            LightingStyle::Realistic => 1.0,
-            LightingStyle::Soft => 0.72,
-        };
         let brightness = if self.brightness.is_finite() {
             self.brightness.max(0.0)
         } else {
             0.0
         };
-        brightness * 1.5 * self.daylight_factor() * style_scale
+        brightness * 1.5 * self.daylight_factor()
     }
 
     /// Returns the renderer's exposure multiplier.
