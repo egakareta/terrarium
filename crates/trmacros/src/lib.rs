@@ -12,6 +12,8 @@ mod scene;
 ///
 /// See the [instance composition guide](https://egakareta.github.io/terrarium/docs/instance.html)
 /// for the field roles, property options, generated methods, overrides, and examples.
+///
+/// `#[property(deref)]` borrows a property's [`std::ops::Deref::Target`] without cloning it.
 #[cfg(feature = "scene")]
 #[proc_macro]
 pub fn instance(input: proc_macro::TokenStream) -> proc_macro::TokenStream {

@@ -30,6 +30,7 @@ impl Plugin for TerrariumPlugin {
             app.add_plugins(TimePlugin);
         }
         app.world_mut().init_non_send::<Workspace>();
+        app.world_mut().init_non_send::<Box<dyn Controller>>();
         app.world_mut().init_non_send::<EguiContext>();
         app.add_systems(PostUpdate, advance_workspace.in_set(TerrariumSet::Advance));
     }
@@ -56,8 +57,12 @@ impl EguiContext {
     }
 }
 
-fn advance_workspace(time: Res<Time>, mut workspace: NonSendMut<Workspace>) {
-    workspace.update(time.delta_secs());
+fn advance_workspace(
+    time: Res<Time>,
+    mut workspace: NonSendMut<Workspace>,
+    mut controller: NonSendMut<Box<dyn Controller>>,
+) {
+    workspace.update_with_controller(&mut **controller, time.delta_secs());
 }
 
 pub(crate) fn attach_app(
@@ -88,28 +93,37 @@ pub(crate) fn attach_app(
     Ok(app)
 }
 
-pub(crate) fn finalize_app(app: &mut BevyApp, workspace: &mut Workspace) -> bool {
-    with_workspace(app, workspace, finish_plugins)
+pub(crate) fn finalize_app(
+    app: &mut BevyApp,
+    workspace: &mut Workspace,
+    controller: &mut Box<dyn Controller>,
+) -> bool {
+    with_workspace(app, workspace, |app| {
+        with_controller(app, controller, finish_plugins)
+    })
 }
 
 pub(crate) fn update_app(
     app: &mut BevyApp,
     workspace: &mut Workspace,
+    controller: &mut Box<dyn Controller>,
     context: &egui::Context,
     delta: f32,
 ) -> Option<f32> {
     with_workspace(app, workspace, |app| {
-        if !finish_plugins(app) {
-            return None;
-        }
-        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
-            delta,
-        )));
-        app.update();
-        if app.should_exit().is_some() {
-            context.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
-        Some(app.world().resource::<Time>().delta_secs())
+        with_controller(app, controller, |app| {
+            if !finish_plugins(app) {
+                return None;
+            }
+            app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_secs_f32(
+                delta,
+            )));
+            app.update();
+            if app.should_exit().is_some() {
+                context.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            Some(app.world().resource::<Time>().delta_secs())
+        })
     })
 }
 
@@ -160,5 +174,32 @@ impl Drop for WorkspaceScope<'_> {
             &mut self.app.world_mut().non_send_mut::<Workspace>(),
         );
         self.workspace.refresh_registration();
+    }
+}
+
+fn with_controller<T>(
+    app: &mut BevyApp,
+    controller: &mut Box<dyn Controller>,
+    update: impl FnOnce(&mut BevyApp) -> T,
+) -> T {
+    std::mem::swap(
+        controller,
+        &mut *app.world_mut().non_send_mut::<Box<dyn Controller>>(),
+    );
+    let scope = ControllerScope { app, controller };
+    update(&mut *scope.app)
+}
+
+struct ControllerScope<'a> {
+    app: &'a mut BevyApp,
+    controller: &'a mut Box<dyn Controller>,
+}
+
+impl Drop for ControllerScope<'_> {
+    fn drop(&mut self) {
+        std::mem::swap(
+            self.controller,
+            &mut *self.app.world_mut().non_send_mut::<Box<dyn Controller>>(),
+        );
     }
 }

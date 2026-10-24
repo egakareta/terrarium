@@ -167,6 +167,13 @@ fn add_map(workspace: &mut Workspace) {
     }
 }
 
+fn player_controller(rig: InstanceId) -> PlayerController {
+    let mut controller = PlayerController::new(rig);
+    controller.camera.subject_offset = Vec3::Y;
+    controller.camera.subject_distance = 7.6;
+    controller
+}
+
 fn create_scene(workspace: &mut Workspace) -> InstanceId {
     add_map(workspace);
     workspace.lighting.with_clock_time(15.0);
@@ -190,11 +197,6 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
             .with_color(Color3::new(0.2, 0.5, 0.9)),
     );
     let rig = workspace.add_child(rig);
-    workspace.add_child(PlayerController::new(rig));
-    workspace
-        .camera_controller_mut()
-        .unwrap()
-        .set_enabled(false);
     workspace.current_camera = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
         SPAWN + Vec3::Y,
@@ -202,15 +204,13 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     )
     .with_subject(Some(rig))
     .with_zfar(150.0);
-    workspace.camera_controller_mut().unwrap().subject_offset = Vec3::Y;
-    workspace.camera_controller_mut().unwrap().subject_distance = 7.6;
-    workspace.update_camera(0.0);
     rig
 }
 
 #[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
     let rig = create_scene(workspace);
+    engine.set_controller(player_controller(rig));
     Ok(PlayerApp { rig })
 }
 
@@ -237,6 +237,53 @@ fn player_example_loads_headlessly() -> Result<(), AppCreationError> {
 mod tests {
     use super::*;
 
+    struct PlayerScene {
+        workspace: Workspace,
+        controller: Option<PlayerController>,
+    }
+    impl PlayerScene {
+        fn new() -> Self {
+            Self {
+                workspace: Workspace::new(),
+                controller: None,
+            }
+        }
+        fn update(&mut self, delta: f32) {
+            self.workspace
+                .update_with_controller(self.controller.as_mut().unwrap(), delta);
+        }
+        fn process_input(&mut self, context: &egui::Context) {
+            self.controller.as_mut().unwrap().process_input(context);
+        }
+        fn process_device_event(&mut self, event: &terrarium::winit::event::DeviceEvent) {
+            self.controller
+                .as_mut()
+                .unwrap()
+                .process_device_event(event);
+        }
+        fn camera_controller(&self) -> Option<&CameraController> {
+            self.controller.as_ref().map(|p| &p.camera)
+        }
+    }
+    impl std::ops::Deref for PlayerScene {
+        type Target = Workspace;
+        fn deref(&self) -> &Workspace {
+            &self.workspace
+        }
+    }
+    impl std::ops::DerefMut for PlayerScene {
+        fn deref_mut(&mut self) -> &mut Workspace {
+            &mut self.workspace
+        }
+    }
+    fn create_scene(scene: &mut PlayerScene) -> InstanceId {
+        let rig = super::create_scene(&mut scene.workspace);
+        let mut controller = player_controller(rig);
+        controller.post_update(&mut scene.workspace, 0.0);
+        scene.controller = Some(controller);
+        rig
+    }
+
     fn key_event(key: egui::Key, pressed: bool) -> egui::Event {
         egui::Event::Key {
             key,
@@ -247,7 +294,7 @@ mod tests {
         }
     }
 
-    fn input_frame(context: &egui::Context, workspace: &mut Workspace, events: Vec<egui::Event>) {
+    fn input_frame(context: &egui::Context, workspace: &mut PlayerScene, events: Vec<egui::Event>) {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -260,7 +307,7 @@ mod tests {
         output.textures_delta.clear();
     }
 
-    fn walk_forward(workspace: &mut Workspace) {
+    fn walk_forward(workspace: &mut PlayerScene) {
         input_frame(
             &egui::Context::default(),
             workspace,
@@ -268,7 +315,7 @@ mod tests {
         );
     }
 
-    fn advance(workspace: &mut Workspace, frames: usize) {
+    fn advance(workspace: &mut PlayerScene, frames: usize) {
         for _ in 0..frames {
             workspace.update(1.0 / 60.0);
         }
@@ -276,7 +323,7 @@ mod tests {
 
     #[test]
     fn walking_and_turning_preserve_gravity_and_the_player_lands_upright() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         walk_forward(&mut workspace);
         for _ in 0..30 {
@@ -305,7 +352,7 @@ mod tests {
 
     #[test]
     fn map_walls_stop_the_walking_player() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         walk_forward(&mut workspace);
         advance(&mut workspace, 720);
@@ -316,7 +363,7 @@ mod tests {
 
     #[test]
     fn the_lookout_is_reachable_by_walking_up_the_ramp() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         workspace
             .get_mut::<Rig>(rig)
@@ -331,7 +378,7 @@ mod tests {
 
     #[test]
     fn strafing_turns_toward_travel_and_releasing_movement_stops_mid_turn() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         advance(&mut workspace, 120);
         let initial = workspace.get::<Rig>(rig).unwrap().position();
@@ -379,7 +426,7 @@ mod tests {
 
     #[test]
     fn mouse_look_orbits_without_turning_or_moving_an_idle_player() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         advance(&mut workspace, 120);
         let position = workspace.get::<Rig>(rig).unwrap().position();
@@ -403,7 +450,7 @@ mod tests {
 
     #[test]
     fn movement_follows_the_camera_even_while_the_rig_is_still_turning() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         advance(&mut workspace, 120);
         let initial = workspace.get::<Rig>(rig).unwrap().position();
@@ -429,7 +476,7 @@ mod tests {
 
     #[test]
     fn touch_look_orbits_the_camera_once_without_turning_the_idle_player() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         advance(&mut workspace, 120);
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
@@ -463,7 +510,7 @@ mod tests {
 
     #[test]
     fn turning_takes_the_short_path_across_the_yaw_wrap() {
-        let mut workspace = Workspace::new();
+        let mut workspace = PlayerScene::new();
         let rig = create_scene(&mut workspace);
         advance(&mut workspace, 120);
         workspace

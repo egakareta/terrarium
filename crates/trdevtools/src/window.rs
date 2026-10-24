@@ -33,6 +33,11 @@ pub trait DevtoolsHost {
         self.workspace()
     }
 
+    /// Returns the selected controller, if the host uses one.
+    fn scene_controller(&self) -> Option<&dyn Controller> {
+        None
+    }
+
     /// Renders the application's scene content with the current DevTools selection.
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]);
 }
@@ -183,9 +188,17 @@ impl Devtools {
     ///
     /// Call before processing camera input to release keyboard capture in the same frame.
     /// [`Self::show_docked`] also calls this for standalone integrations.
-    pub fn focus_scene_on_camera_input(&mut self, context: &egui::Context, workspace: &Workspace) {
+    pub fn focus_scene_on_camera_input(
+        &mut self,
+        context: &egui::Context,
+        controller: &dyn Controller,
+    ) {
         if context.text_edit_focused()
-            || !context.input(|input| workspace.has_eframe_movement_input(input))
+            || !context.input(|input| {
+                controller
+                    .input()
+                    .is_some_and(|controls| controls.has_eframe_movement_input(input))
+            })
         {
             return;
         }
@@ -217,7 +230,9 @@ impl Devtools {
         let scene_title = host.scene_title().to_owned();
         let workspace_id = host.workspace().id();
         self.prune(host.root());
-        self.focus_scene_on_camera_input(&context, host.workspace());
+        if let Some(controller) = host.scene_controller() {
+            self.focus_scene_on_camera_input(&context, controller);
+        }
 
         if !self.visible {
             host.render_scene(ui, &self.selected);

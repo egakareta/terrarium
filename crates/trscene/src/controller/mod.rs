@@ -3,8 +3,8 @@
 //! [`ControllerInput`] translates device events into [`ControllerActions`],
 //! separating input collection from per-frame behavior. Actions can also be
 //! created directly for scripted control. Controllers receive input and updates
-//! only while parented directly to a workspace. Camera controllers update after
-//! physics; other controllers update before it, in child order.
+//! when selected by the host. An engine owns its active controller as a property;
+//! scene parenting does not activate behavior.
 //!
 //! ```
 //! use trscene::{Controller, ControllerActions, PVInstanceExt, Instance, InstanceData, InstanceId, Rig, Workspace, instance};
@@ -36,8 +36,8 @@
 //!
 //! let mut workspace = Workspace::new();
 //! let rig = workspace.add_child(Rig::new());
-//! workspace.add_child(Autopilot { instance: InstanceData::new("Autopilot"), rig: Some(rig) });
-//! workspace.update(0.1);
+//! let mut controller = Autopilot { instance: InstanceData::new("Autopilot"), rig: Some(rig) };
+//! workspace.update_with_controller(&mut controller, 0.1);
 //! assert!(workspace.get::<Rig>(rig).unwrap().position().z < 0.0);
 //! ```
 
@@ -56,16 +56,15 @@ pub use actions::*;
 pub use input::*;
 pub use player::*;
 
-/// Per-frame behavior of an instance parented directly to a [`Workspace`].
+/// Input and per-frame behavior selected by the host.
 ///
 /// Use [`crate::instance!`] to expose this capability on a custom instance.
 ///
 /// The default event handlers use [`Self::input_mut`]; override
 /// them when input should be translated differently or shared with other state.
 ///
-/// The workspace sends each event to every direct controller child, then calls
-/// [`Self::update`] in child order. Camera controllers update after physics;
-/// other controllers update before physics.
+/// The host forwards input to its active controller. [`Self::update`] runs before
+/// physics, and [`Self::post_update`] runs afterward.
 pub trait Controller: Instance {
     /// Returns input state for inspection, or `None` for controllers without it.
     ///
@@ -105,15 +104,41 @@ pub trait Controller: Instance {
 
     /// Applies this controller's behavior for one frame.
     ///
-    /// Runs after animation updates, before physics for general controllers or
-    /// after physics for [`crate::CameraController`].
+    /// Runs after animation updates and before physics.
     /// `delta_seconds` is finite and clamped to `0..=0.1` by the workspace.
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32);
 
-    /// Replaces scene instance IDs when the workspace is cloned.
+    /// Applies camera or other behavior after physics has updated scene poses.
+    fn post_update(&mut self, _workspace: &mut Workspace, _delta_seconds: f32) {}
+
+    /// Remaps stored targets to another scene using a caller-supplied mapping.
     ///
     /// The mapping returns the corresponding cloned ID, or `None` when the
-    /// original ID is not part of the cloned workspace. Update any stored scene
+    /// original ID is not part of the destination scene. Update any stored scene
     /// references here; the default leaves controller state unchanged.
     fn remap_instances(&mut self, _map: &dyn Fn(InstanceId) -> Option<InstanceId>) {}
+}
+
+impl<T: Controller> From<T> for Box<dyn Controller> {
+    fn from(controller: T) -> Self {
+        Box::new(controller)
+    }
+}
+
+impl Default for Box<dyn Controller> {
+    fn default() -> Self {
+        Box::new(CameraController::default())
+    }
+}
+
+impl dyn Controller {
+    /// Borrows the selected controller as its concrete type.
+    pub fn downcast_ref<T: Controller>(&self) -> Option<&T> {
+        self.as_any().downcast_ref()
+    }
+
+    /// Mutably borrows the selected controller as its concrete type.
+    pub fn downcast_mut<T: Controller>(&mut self) -> Option<&mut T> {
+        self.as_any_mut().downcast_mut()
+    }
 }

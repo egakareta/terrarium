@@ -10,7 +10,74 @@ use trscene::{
     *,
 };
 
-fn frame(context: &Context, workspace: &mut Workspace, events: Vec<Event>) {
+struct ControlledWorkspace {
+    workspace: Workspace,
+    controller: Box<dyn Controller>,
+}
+impl ControlledWorkspace {
+    fn new() -> Self {
+        Self {
+            workspace: Workspace::new(),
+            controller: Box::default(),
+        }
+    }
+    fn set_controller(&mut self, controller: impl Into<Box<dyn Controller>>) {
+        self.controller = controller.into();
+    }
+    fn player_mut(&mut self) -> Option<&mut PlayerController> {
+        self.controller.downcast_mut()
+    }
+    fn camera_controller(&self) -> Option<&CameraController> {
+        if let Some(player) = self.controller.downcast_ref::<PlayerController>() {
+            Some(&player.camera)
+        } else {
+            self.controller.downcast_ref()
+        }
+    }
+    fn camera_controller_mut(&mut self) -> Option<&mut CameraController> {
+        if self.controller.downcast_ref::<PlayerController>().is_some() {
+            Some(
+                &mut self
+                    .controller
+                    .downcast_mut::<PlayerController>()
+                    .unwrap()
+                    .camera,
+            )
+        } else {
+            self.controller.downcast_mut()
+        }
+    }
+    fn process_input(&mut self, context: &Context) {
+        self.controller.process_input(context);
+    }
+    fn process_device_event(&mut self, event: &DeviceEvent) {
+        self.controller.process_device_event(event);
+    }
+
+    fn update(&mut self, delta: f32) {
+        self.workspace
+            .update_with_controller(self.controller.as_mut(), delta);
+    }
+    fn update_controllers(&mut self, delta: f32) {
+        self.controller.update(&mut self.workspace, delta);
+    }
+    fn update_camera(&mut self, delta: f32) {
+        self.controller.post_update(&mut self.workspace, delta);
+    }
+}
+impl std::ops::Deref for ControlledWorkspace {
+    type Target = Workspace;
+    fn deref(&self) -> &Workspace {
+        &self.workspace
+    }
+}
+impl std::ops::DerefMut for ControlledWorkspace {
+    fn deref_mut(&mut self) -> &mut Workspace {
+        &mut self.workspace
+    }
+}
+
+fn frame(context: &Context, workspace: &mut ControlledWorkspace, events: Vec<Event>) {
     let input = RawInput {
         screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
         events,
@@ -137,7 +204,7 @@ fn dynamic_player_rig(position: Vec3) -> Rig {
 #[cfg(feature = "physics")]
 #[test]
 fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
-    let mut workspace = Workspace::new();
+    let mut workspace = ControlledWorkspace::new();
     workspace.add_child(
         Part::new()
             .with_size(Vec3::new(10.0, 1.0, 10.0))
@@ -152,7 +219,7 @@ fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
 
     let mut player = PlayerController::new(rig);
     assert!(player.process_key(KeyCode::Space, true));
-    workspace.add_child(player);
+    workspace.set_controller(player);
     workspace.update(1.0 / 60.0);
 
     let airborne_position = workspace.get::<Rig>(rig).unwrap().position();
@@ -172,11 +239,11 @@ fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
 
 #[test]
 fn player_mouse_wheel_changes_camera_orbit_distance() {
-    let mut workspace = Workspace::new();
+    let mut workspace = ControlledWorkspace::new();
     let rig = workspace.add_child(Rig::new());
     workspace.current_camera.set_subject(Some(rig));
     workspace.camera_controller_mut().unwrap().subject_distance = 5.0;
-    workspace.add_child(PlayerController::new(rig));
+    workspace.set_controller(PlayerController::new(rig));
 
     let context = Context::default();
     frame(
@@ -197,7 +264,7 @@ fn player_mouse_wheel_changes_camera_orbit_distance() {
 #[cfg(feature = "physics")]
 #[test]
 fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
-    let mut workspace = Workspace::new();
+    let mut workspace = ControlledWorkspace::new();
     workspace
         .camera_controller_mut()
         .unwrap()
@@ -207,7 +274,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     workspace.current_camera.set_subject(Some(rig));
     let mut player = PlayerController::new(rig);
     player.process_key(KeyCode::KeyW, true);
-    let controller = workspace.add_child(player);
+    workspace.set_controller(player);
     workspace.update(1.0 / 60.0);
     let first_position = workspace.get::<Rig>(rig).unwrap().position();
     assert!(first_position.z < -0.09, "{first_position:?}");
@@ -224,7 +291,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     let position = player.position();
     let facing = player.forward();
     workspace
-        .get_mut::<PlayerController>(controller)
+        .player_mut()
         .unwrap()
         .process_key(KeyCode::KeyW, false);
     workspace.update(1.0 / 60.0);
@@ -237,7 +304,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
 #[cfg(feature = "physics")]
 #[test]
 fn dynamic_player_movement_applies_immediately_after_repositioning() {
-    let mut workspace = Workspace::new();
+    let mut workspace = ControlledWorkspace::new();
     workspace
         .camera_controller_mut()
         .unwrap()
@@ -245,7 +312,7 @@ fn dynamic_player_movement_applies_immediately_after_repositioning() {
     let rig = workspace.add_child(dynamic_player_rig(Vec3::Y * 4.0));
     let mut player = PlayerController::new(rig);
     player.process_key(KeyCode::KeyW, true);
-    workspace.add_child(player);
+    workspace.set_controller(player);
     for _ in 0..30 {
         workspace.update(1.0 / 60.0);
     }
@@ -266,21 +333,22 @@ fn every_device_subset_can_drive_a_registered_player_independently() {
         let keyboard = mask & 1 != 0;
         let mouse = mask & 2 != 0;
         let touchscreen = mask & 4 != 0;
-        let mut workspace = Workspace::new();
+        let mut workspace = ControlledWorkspace::new();
         workspace
             .camera_controller_mut()
             .unwrap()
             .set_enabled(false);
         let rig = workspace.add_child(Rig::new());
         workspace.current_camera.set_subject(Some(rig));
-        workspace.camera_controller_mut().unwrap().subject_offset = Vec3::Y;
-        workspace.update_camera(0.0);
-        let id = workspace.add_child(
+
+        workspace.set_controller(
             PlayerController::new(rig)
                 .with_keyboard_enabled(keyboard)
                 .with_mouse_enabled(mouse)
                 .with_touch_enabled(touchscreen),
         );
+        workspace.camera_controller_mut().unwrap().subject_offset = Vec3::Y;
+        workspace.update_camera(0.0);
         let context = Context::default();
 
         frame(&context, &mut workspace, vec![key(egui::Key::W, true)]);
@@ -338,10 +406,7 @@ fn every_device_subset_can_drive_a_registered_player_independently() {
                 < 1e-5
         );
 
-        workspace
-            .get_mut::<PlayerController>(id)
-            .unwrap()
-            .set_enabled(false);
+        workspace.player_mut().unwrap().set_enabled(false);
         let pose = workspace.get::<Rig>(rig).unwrap().pose();
         workspace.update(0.1);
         assert!(
@@ -356,16 +421,17 @@ fn every_device_subset_can_drive_a_registered_player_independently() {
 
 #[test]
 fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
-    let mut workspace = Workspace::new();
+    let mut workspace = ControlledWorkspace::new();
     workspace
         .camera_controller_mut()
         .unwrap()
         .set_enabled(false);
     let rig = workspace.add_child(Rig::new());
     workspace.current_camera.set_subject(Some(rig));
+
+    workspace.set_controller(PlayerController::new(rig));
     workspace.camera_controller_mut().unwrap().subject_offset = Vec3::Y;
     workspace.update_camera(0.0);
-    let id = workspace.add_child(PlayerController::new(rig));
     let keyboard_context = Context::default();
     let mut text = String::new();
     let mut output = keyboard_context.run_ui(
@@ -386,7 +452,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
         },
         |ui| {
             ui.text_edit_singleline(&mut text);
-            let player = workspace.get_mut::<PlayerController>(id).unwrap();
+            let player = workspace.player_mut().unwrap();
             player.process_mouse_motion((20.0, 0.0));
             player.process_input(ui.ctx());
         },
@@ -433,7 +499,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
         },
         |ui| {
             let _ = ui.button("capture");
-            let player = workspace.get_mut::<PlayerController>(id).unwrap();
+            let player = workspace.player_mut().unwrap();
             player.process_mouse_motion((20.0, 0.0));
             player.process_input(ui.ctx());
         },
@@ -455,7 +521,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             .abs_diff_eq(forward, 1e-5)
     );
 
-    let player = workspace.get_mut::<PlayerController>(id).unwrap();
+    let player = workspace.player_mut().unwrap();
     player.process_mouse_motion((20.0, 0.0));
     player.process_window_event(&WindowEvent::Focused(false));
     let pose = workspace.get::<Rig>(rig).unwrap().pose();
@@ -514,169 +580,73 @@ impl Controller for CustomController {
 
 #[test]
 fn downstream_controllers_can_compose_reusable_input_or_run_without_devices() {
-    let mut workspace = Workspace::new();
-    workspace
-        .camera_controller_mut()
-        .unwrap()
-        .set_enabled(false);
-    let controlled = workspace.add_child(Rig::new());
-    let autonomous = workspace.add_child(Rig::new());
-    let mut input = ControllerInput::default()
-        .with_mouse_enabled(false)
-        .with_touch_enabled(false);
-    input.key_bindings.forward = vec![KeyCode::KeyJ];
-    workspace.add_child(CustomController {
-        instance: InstanceData::new("CustomController"),
-        rig: controlled,
-        input: Some(input),
-        actions: ControllerActions::default(),
-    });
-    workspace.add_child(CustomController {
-        instance: InstanceData::new("CustomController"),
-        rig: autonomous,
-        input: None,
-        actions: ControllerActions {
-            movement: Vec3::X,
-            ..Default::default()
-        },
-    });
-
-    frame(
-        &Context::default(),
-        &mut workspace,
-        vec![key(egui::Key::J, true)],
-    );
-    workspace.update(0.1);
-    assert!(
-        workspace
-            .get::<Rig>(controlled)
-            .unwrap()
-            .position()
-            .abs_diff_eq(Vec3::NEG_Z * 0.4, 1e-5)
-    );
-    assert!(
-        workspace
-            .get::<Rig>(autonomous)
-            .unwrap()
-            .position()
-            .abs_diff_eq(Vec3::X * 0.4, 1e-5)
-    );
-}
-
-instance! {
-    #[instance(default = false)]
-    #[derive(Clone, Debug)]
-    struct PlaceRig {
-        #[data]
-        instance: InstanceData,
-        rig: InstanceId,
-        position: Vec3,
-    }
-}
-
-impl Controller for PlaceRig {
-    fn update(&mut self, workspace: &mut Workspace, _: f32) {
-        workspace
-            .get_mut::<Rig>(self.rig)
-            .unwrap()
-            .with_position(self.position);
+    for scripted in [false, true] {
+        let mut workspace = ControlledWorkspace::new();
+        let rig = workspace.add_child(Rig::new());
+        let mut input = ControllerInput::default()
+            .with_mouse_enabled(false)
+            .with_touch_enabled(false);
+        input.key_bindings.forward = vec![KeyCode::KeyJ];
+        workspace.set_controller(CustomController {
+            instance: InstanceData::new("CustomController"),
+            rig,
+            input: (!scripted).then_some(input),
+            actions: ControllerActions {
+                movement: Vec3::X,
+                ..Default::default()
+            },
+        });
+        frame(
+            &Context::default(),
+            &mut workspace,
+            vec![key(egui::Key::J, true)],
+        );
+        workspace.update(0.1);
+        assert!(workspace.get::<Rig>(rig).unwrap().position().abs_diff_eq(
+            if scripted {
+                Vec3::X * 0.4
+            } else {
+                Vec3::NEG_Z * 0.4
+            },
+            1e-5
+        ));
     }
 }
 
 #[test]
-fn child_order_removal_and_reconfiguration_control_the_observable_result() {
-    let mut workspace = Workspace::new();
-    let rig = workspace.add_child(Rig::new());
-    let place = workspace.add_child(PlaceRig {
-        instance: InstanceData::new("PlaceRig"),
-        rig,
-        position: Vec3::X,
-    });
-    let mut player = PlayerController::new(rig);
-    player.process_key(KeyCode::KeyW, true);
-    let player = workspace.add_child(player);
-    workspace.update_controllers(0.1);
-    assert!(
-        workspace
-            .get::<Rig>(rig)
-            .unwrap()
-            .position()
-            .abs_diff_eq(Vec3::new(1.0, 0.0, -0.6), 1e-5)
-    );
-    assert!(workspace.remove_child(place));
-    workspace.get_mut::<PlayerController>(player).unwrap().speed = 2.0;
-    workspace.update_controllers(0.1);
-    assert!(
-        workspace
-            .get::<Rig>(rig)
-            .unwrap()
-            .position()
-            .abs_diff_eq(Vec3::new(1.0, 0.0, -0.8), 1e-5)
-    );
-    workspace.add_child(PlaceRig {
-        instance: InstanceData::new("PlaceRig"),
-        rig,
-        position: Vec3::Y,
-    });
-    workspace.update_controllers(0.1);
-    assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::Y);
-}
-
-#[test]
-fn workspace_cloning_retargets_players_and_custom_controllers_to_cloned_rigs() {
-    let mut workspace = Workspace::new();
-    workspace
-        .camera_controller_mut()
-        .unwrap()
-        .set_enabled(false);
+fn cloning_a_workspace_does_not_copy_its_hosts_controller() {
+    let mut workspace = ControlledWorkspace::new();
     let rig = workspace.add_child(Rig::new().with_name("Player"));
     workspace.current_camera.set_subject(Some(rig));
     let mut player = PlayerController::new(rig);
     player.process_key(KeyCode::KeyW, true);
-    workspace.add_child(player);
-    workspace.add_child(CustomController {
-        instance: InstanceData::new("CustomController"),
-        rig,
-        input: None,
-        actions: ControllerActions {
-            movement: Vec3::X,
-            ..Default::default()
-        },
-    });
-    let mut cloned = workspace.clone();
+    workspace.set_controller(player);
+    let mut cloned = workspace.workspace.clone();
     cloned.update(0.1);
     let cloned_rig = cloned.get_all::<Rig>().next().unwrap();
     assert_ne!(cloned_rig.id(), rig);
-    assert!(
-        cloned_rig
-            .position()
-            .abs_diff_eq(Vec3::new(0.4, 0.0, -0.6), 1e-5)
-    );
-    assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::ZERO);
+    assert_eq!(cloned_rig.position(), Vec3::ZERO);
     assert_eq!(cloned.current_camera.subject(), Some(cloned_rig.id()));
-    assert!(
-        (cloned
-            .current_camera
-            .position()
-            .distance(cloned_rig.position())
-            - 5.0)
-            .abs()
-            < 1e-5
+    workspace.update(0.1);
+    assert!(workspace.get::<Rig>(rig).unwrap().position().z < -0.5);
+    assert_eq!(
+        cloned.get_all::<Rig>().next().unwrap().position(),
+        Vec3::ZERO
     );
 }
 
 #[test]
 fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected() {
-    let mut workspace = Workspace::new();
+    let mut workspace = ControlledWorkspace::new();
     let missing = workspace.add_child(Rig::new());
     workspace.remove_child(missing);
-    let id = workspace.add_child(PlayerController::new(missing));
+    workspace.set_controller(PlayerController::new(missing));
     workspace.process_device_event(&DeviceEvent::MouseMotion {
         delta: (100.0, 0.0),
     });
     workspace.update_controllers(0.1);
     let part = workspace.add_child(Part::new());
-    workspace.get_mut::<PlayerController>(id).unwrap().rig = Some(part);
+    workspace.player_mut().unwrap().rig = Some(part);
     workspace.process_device_event(&DeviceEvent::MouseMotion {
         delta: (100.0, 0.0),
     });
@@ -689,7 +659,7 @@ fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected()
             .abs_diff_eq(Mat4::IDENTITY, 1e-5)
     );
     let rig = workspace.add_child(Rig::new());
-    workspace.get_mut::<PlayerController>(id).unwrap().rig = Some(rig);
+    workspace.player_mut().unwrap().rig = Some(rig);
     workspace.update_controllers(0.1);
     assert!(
         workspace
@@ -711,143 +681,4 @@ fn invalid_frame_durations_do_not_move_players_and_long_frames_are_capped() {
     }
     player.update_rig(&mut rig, 10.0);
     assert!(rig.position().abs_diff_eq(Vec3::NEG_Z * 0.6, 1e-5));
-}
-
-instance! {
-    #[instance(default = false)]
-    #[derive(Clone, Debug)]
-    struct ReplaceController {
-        #[data]
-        instance: InstanceData,
-        rig: InstanceId,
-        remove: Option<InstanceId>,
-    }
-}
-
-impl Controller for ReplaceController {
-    fn update(&mut self, workspace: &mut Workspace, _: f32) {
-        workspace.remove_child(self.id());
-        if let Some(id) = self.remove {
-            workspace.remove_child(id);
-        }
-        workspace.add_child(PlaceRig {
-            instance: InstanceData::new("PlaceRig"),
-            rig: self.rig,
-            position: Vec3::Y,
-        });
-    }
-}
-
-#[test]
-fn controllers_can_remove_children_and_defer_new_behaviors_until_the_next_update() {
-    let mut workspace = Workspace::new();
-    let rig = workspace.add_child(Rig::new());
-    let id = workspace.add_child(ReplaceController {
-        instance: InstanceData::new("ReplaceController"),
-        rig,
-        remove: None,
-    });
-    let removed = workspace.add_child(PlaceRig {
-        instance: InstanceData::new("PlaceRig"),
-        rig,
-        position: Vec3::X,
-    });
-    workspace.get_mut::<ReplaceController>(id).unwrap().remove = Some(removed);
-    workspace.update_controllers(0.1);
-    assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::ZERO);
-    assert!(workspace.view::<dyn Instance>(id).is_none());
-    workspace.update_controllers(0.1);
-    assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::Y);
-}
-
-#[test]
-fn nested_controllers_do_not_receive_input_or_update_the_scene() {
-    let mut workspace = Workspace::new();
-    let camera = workspace.camera_controller().unwrap().id();
-    workspace.remove_child(camera);
-    let nested_rig = workspace.add_child(Rig::new());
-    let direct_rig = workspace.add_child(Rig::new());
-    let mut parent = Part::new();
-    let mut player = PlayerController::new(nested_rig);
-    player.process_key(KeyCode::KeyW, true);
-    parent.add_child(player);
-    let mut camera = CameraController::default();
-    camera.process_key(KeyCode::KeyW, true);
-    let camera = parent.add_child(camera);
-    workspace.add_child(parent);
-    let player = workspace.add_child(PlayerController::new(direct_rig).with_name("Player input"));
-    let initial_camera = workspace.current_camera.pose();
-    let context = Context::default();
-    frame(&context, &mut workspace, vec![key(egui::Key::W, true)]);
-    workspace.process_device_event(&DeviceEvent::MouseMotion {
-        delta: (100.0, 0.0),
-    });
-    workspace.process_window_event(&WindowEvent::Focused(false));
-    frame(&context, &mut workspace, vec![]);
-    workspace.update(0.1);
-    assert_eq!(
-        workspace.get::<Rig>(nested_rig).unwrap().position(),
-        Vec3::ZERO
-    );
-    assert!(workspace.get::<Rig>(direct_rig).unwrap().position().z < -0.5);
-    assert_eq!(workspace.current_camera.pose(), initial_camera);
-    assert!(workspace.camera_controller().is_none());
-    assert!(workspace.camera_controller_mut().is_none());
-    assert!(workspace.get::<CameraController>(camera).unwrap().forward);
-    assert_eq!(
-        workspace.get::<PlayerController>(player).unwrap().name(),
-        "Player input"
-    );
-
-    workspace
-        .get_mut::<PlayerController>(player)
-        .unwrap()
-        .destroy();
-    let position = workspace.get::<Rig>(direct_rig).unwrap().position();
-    frame(&context, &mut workspace, vec![key(egui::Key::W, true)]);
-    workspace.update(0.1);
-    assert_eq!(
-        workspace.get::<Rig>(direct_rig).unwrap().position(),
-        position
-    );
-}
-
-#[test]
-fn camera_control_requires_a_direct_child_and_stops_after_destruction() {
-    let mut workspace = Workspace::new();
-    let camera = workspace.camera_controller().unwrap().id();
-    assert_eq!(
-        workspace.get::<CameraController>(camera).unwrap().parent(),
-        Some(workspace.id())
-    );
-    workspace
-        .get_mut::<CameraController>(camera)
-        .unwrap()
-        .destroy();
-    let initial = workspace.current_camera.pose();
-    frame(
-        &Context::default(),
-        &mut workspace,
-        vec![key(egui::Key::W, true)],
-    );
-    workspace.process_device_event(&DeviceEvent::MouseMotion { delta: (20.0, 0.0) });
-    workspace.update(0.1);
-    assert_eq!(workspace.current_camera.pose(), initial);
-
-    let id = CameraController::default()
-        .with_name("Flight")
-        .set_parent(&mut workspace);
-    frame(
-        &Context::default(),
-        &mut workspace,
-        vec![key(egui::Key::W, true)],
-    );
-    workspace.process_device_event(&DeviceEvent::MouseMotion { delta: (20.0, 0.0) });
-    workspace.update(0.1);
-    assert!(!workspace.current_camera.pose().abs_diff_eq(initial, 1e-5));
-    assert!(workspace.current_camera.forward().x > 0.0);
-    workspace.get_mut::<CameraController>(id).unwrap().destroy();
-    let stopped = workspace.current_camera.pose();
-    workspace.update(0.1);
-    assert_eq!(workspace.current_camera.pose(), stopped);
 }

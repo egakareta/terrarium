@@ -239,7 +239,7 @@ fn custom_primitives_render_with_the_outer_identity_and_materials() {
     );
 
     let scene = workspace.render_scene();
-    let node = scene.nodes.iter().find(|node| node.mesh.is_some()).unwrap();
+    let node = &scene.nodes[0];
     assert_eq!(node.name, "SpringPart");
     let mesh = node.mesh.as_ref().unwrap();
     assert!(matches!(
@@ -497,12 +497,7 @@ fn custom_lights_are_included_in_render_snapshots() {
     let mut workspace = Workspace::new();
     workspace.add_child(part);
     let scene = workspace.render_scene();
-    let light = scene
-        .nodes
-        .iter()
-        .flat_map(|node| &node.children)
-        .find_map(|node| node.light.as_ref())
-        .unwrap();
+    let light = scene.nodes[0].children[0].light.as_ref().unwrap();
     assert!(matches!(
         light.kind,
         trscene::RenderLightKind::Point { range: 12.0 }
@@ -535,11 +530,7 @@ fn custom_meshes_render_updated_geometry() {
         "CustomMesh"
     );
     let scene = workspace.render_scene();
-    let mesh = scene
-        .nodes
-        .iter()
-        .find_map(|node| node.mesh.as_ref())
-        .unwrap();
+    let mesh = scene.nodes[0].mesh.as_ref().unwrap();
     assert!(matches!(
         mesh.geometry,
         trscene::RenderGeometry::Custom { revision: 1, .. }

@@ -110,10 +110,9 @@ impl Workspace {
             })
     }
 
-    /// Creates a workspace without geometry and with a default camera controller child.
+    /// Creates an empty workspace with the default camera and controller.
     pub fn new() -> Self {
-        let mut instance = InstanceData::new_root("Workspace");
-        instance.add_child(Box::new(CameraController::default()));
+        let instance = InstanceData::new_root("Workspace");
         Self {
             instance,
             current_camera: Camera::default(),
@@ -292,31 +291,30 @@ impl Workspace {
         self.descendants()
     }
 
-    /// Updates the active camera from direct camera controller children in child order.
-    ///
-    /// A spatial subject is followed at the configured offset and orbit distance.
-    /// Without a valid subject, input moves the camera freely.
-    pub fn update_camera(&mut self, delta: f32) {
-        let subject = self.current_camera.subject().and_then(|id| {
-            self.view::<dyn Instance>(id)
-                .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
-                .map(|pose| (id, pose))
-        });
-        for child in self.instance.children_mut() {
-            if let Some(controller) = child.downcast_mut::<CameraController>() {
-                controller.update_camera(&mut self.current_camera, subject, delta);
-            }
-        }
+    /// Advances animation, physics, and audio without applying a controller.
+    pub fn update(&mut self, delta_seconds: f32) {
+        self.advance(delta_seconds, None);
     }
 
-    /// Advances the simulation when enabled.
-    pub fn update(&mut self, delta_seconds: f32) {
+    /// Advances the scene with an externally owned controller.
+    ///
+    /// Controller movement runs before physics; camera behavior runs afterward.
+    pub fn update_with_controller(&mut self, controller: &mut dyn Controller, delta_seconds: f32) {
+        self.advance(delta_seconds, Some(controller));
+    }
+
+    fn advance(&mut self, delta_seconds: f32, mut controller: Option<&mut dyn Controller>) {
         self.update_tweens(delta_seconds);
         self.update_animations(delta_seconds);
-        self.update_controllers(delta_seconds);
+        let delta = crate::controller::frame_delta(delta_seconds);
+        if let Some(controller) = controller.as_deref_mut() {
+            controller.update(self, delta);
+        }
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
-        self.update_camera(delta_seconds);
+        if let Some(controller) = controller {
+            controller.post_update(self, delta);
+        }
         #[cfg(feature = "sound")]
         for error in self.update_audio(delta_seconds) {
             log::error!("{error}");
@@ -383,96 +381,6 @@ impl Workspace {
             update(child, delta_seconds);
         }
     }
-
-    /// Returns the first camera controller parented directly to this workspace.
-    pub fn camera_controller(&self) -> Option<&CameraController> {
-        self.children()
-            .iter()
-            .find_map(|child| child.downcast_ref())
-    }
-
-    /// Returns the first direct camera controller for configuration and input access.
-    pub fn camera_controller_mut(&mut self) -> Option<&mut CameraController> {
-        self.children_mut().find_map(|child| child.downcast_mut())
-    }
-
-    /// Feeds the current egui frame to controllers parented directly to this workspace.
-    ///
-    /// Call once per frame before [`Self::update`]. Each controller receives the
-    /// same input and applies its own enabled-device and UI-capture settings.
-    pub fn process_input(&mut self, context: &crate::egui::Context) {
-        for child in self.children_mut() {
-            if let Some(controller) = child.controller_mut() {
-                controller.process_input(context);
-            }
-        }
-    }
-
-    /// Sends a winit window event to direct controller children.
-    ///
-    /// Returns `true` if at least one controller reports using the event.
-    pub fn process_window_event(&mut self, event: &crate::winit::event::WindowEvent) -> bool {
-        let mut used = false;
-        for child in self.children_mut() {
-            if let Some(controller) = child.controller_mut() {
-                used |= controller.process_window_event(event);
-            }
-        }
-        used
-    }
-
-    /// Sends an unfiltered device event to direct controller children.
-    pub fn process_device_event(&mut self, event: &crate::winit::event::DeviceEvent) {
-        for child in self.children_mut() {
-            if let Some(controller) = child.controller_mut() {
-                controller.process_device_event(event);
-            }
-        }
-    }
-
-    /// Reports whether a bound movement key is down for any input-capable controller.
-    ///
-    /// The result ignores egui keyboard capture, allowing integrations to move
-    /// focus to the scene before processing the same key event.
-    pub fn has_eframe_movement_input(&self, input: &crate::egui::InputState) -> bool {
-        self.children()
-            .iter()
-            .filter_map(|child| child.controller())
-            .any(|controller| {
-                controller
-                    .input()
-                    .is_some_and(|controls| controls.has_eframe_movement_input(input))
-            })
-    }
-
-    /// Runs direct controller children without advancing physics or the camera.
-    ///
-    /// Controllers run in child order. The frame delta is clamped to
-    /// `0..=0.1` seconds. Controllers added during this call begin on the next
-    /// call; removed controllers are skipped. The active controller and its
-    /// descendants cannot be retrieved from the workspace until its update returns.
-    /// To remove the active controller, call [`Instance::remove_child`] on the workspace.
-    pub fn update_controllers(&mut self, delta_seconds: f32) {
-        let ids: Vec<_> = self
-            .children()
-            .iter()
-            .filter(|child| child.controller().is_some() && !child.is::<CameraController>())
-            .map(|child| child.id())
-            .collect();
-        for id in ids {
-            self.update_controller(id, crate::controller::frame_delta(delta_seconds));
-        }
-    }
-
-    fn update_controller(&mut self, id: InstanceId, delta_seconds: f32) {
-        let Some((index, mut instance)) = self.instance.take_child_for_update(id) else {
-            return;
-        };
-        if let Some(controller) = instance.controller_mut() {
-            controller.update(self, delta_seconds);
-        }
-        self.instance.finish_child_update(index, instance);
-    }
 }
 
 impl Clone for Workspace {
@@ -490,7 +398,7 @@ impl Clone for Workspace {
                 subject,
             ));
         }
-        let mut workspace = Self {
+        Self {
             instance,
             current_camera,
             tween_manager: self.tween_manager.clone(),
@@ -506,33 +414,7 @@ impl Clone for Workspace {
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
             lighting: self.lighting.clone(),
-        };
-        let mut ids = std::collections::HashMap::new();
-        fn collect_ids(
-            original: &dyn Instance,
-            cloned: &dyn Instance,
-            ids: &mut std::collections::HashMap<InstanceId, InstanceId>,
-        ) {
-            ids.insert(original.id(), cloned.id());
-            for (original, cloned) in original.children().iter().zip(cloned.children()) {
-                collect_ids(original.as_ref(), cloned.as_ref(), ids);
-            }
         }
-        fn remap(
-            instance: &mut dyn Instance,
-            ids: &std::collections::HashMap<InstanceId, InstanceId>,
-        ) {
-            if let Some(controller) = instance.controller_mut() {
-                controller.remap_instances(&|id| ids.get(&id).copied());
-            }
-            for child in instance.children_mut() {
-                remap(child, ids);
-            }
-        }
-        collect_ids(self, &workspace, &mut ids);
-        ids.insert(self.current_camera.id(), workspace.current_camera.id());
-        remap(&mut workspace, &ids);
-        workspace
     }
 }
 
@@ -605,7 +487,8 @@ mod tests {
         let returned_id = part.set_parent(&mut workspace);
 
         assert_eq!(returned_id, part_id);
-        assert_eq!(workspace.children().len(), 2);
+        assert_eq!(workspace.children().len(), 1);
+        assert_eq!(workspace.children()[0].id(), part_id);
         let child = workspace.view::<dyn Instance>(part_id).unwrap();
         assert_eq!(child.class_name(), "Part");
         assert_eq!(child.parent(), Some(workspace_id));
@@ -642,17 +525,17 @@ mod tests {
                 .instances()
                 .map(Instance::class_name)
                 .collect::<Vec<_>>(),
-            vec!["CameraController", "Part", "BasePart", "Camera"]
+            vec!["Part", "BasePart", "Camera"]
         );
 
         let cloned_workspace = workspace.clone();
-        assert_eq!(cloned_workspace.children().len(), 4);
+        assert_eq!(cloned_workspace.children().len(), 3);
         assert!(
             cloned_workspace
                 .instances()
                 .all(|instance| instance.parent() == Some(cloned_workspace.id()))
         );
-        let cloned_part_id = cloned_workspace.get_all::<Part>().next().unwrap().id();
+        let cloned_part_id = cloned_workspace.children()[0].id();
         assert!(cloned_workspace.get::<Part>(cloned_part_id).is_some());
     }
 
@@ -698,7 +581,7 @@ mod tests {
         );
         assert!(workspace.view::<dyn Instance>(parent_id).is_none());
         assert!(workspace.view::<dyn Instance>(child_id).is_none());
-        assert!(workspace.get_all::<Part>().next().is_none());
+        assert!(workspace.children().is_empty());
     }
 
     #[test]
@@ -745,32 +628,17 @@ mod tests {
     }
 
     #[test]
-    fn camera_controller_can_be_configured_through_workspace() {
-        let mut workspace = Workspace::new();
-
-        workspace
-            .camera_controller_mut()
-            .unwrap()
-            .key_bindings
-            .forward = vec![winit::keyboard::KeyCode::ArrowUp];
-
-        assert_eq!(
-            workspace.camera_controller().unwrap().key_bindings.forward,
-            vec![winit::keyboard::KeyCode::ArrowUp]
-        );
-    }
-
-    #[test]
     fn camera_subject_follows_a_spatial_instance_and_can_be_cleared() {
         let mut workspace = Workspace::new();
+        let mut controller = CameraController::default();
         let subject_id = workspace.add_child(Part::new());
         workspace.current_camera.set_subject(Some(subject_id));
-        workspace.camera_controller_mut().unwrap().subject_distance = 8.0;
-        workspace.camera_controller_mut().unwrap().subject_offset = Vec3::Y;
+        controller.subject_distance = 8.0;
+        controller.subject_offset = Vec3::Y;
 
-        workspace.update_camera(1.0 / 60.0);
-        workspace.camera_controller_mut().unwrap().mouse_look_delta = (0.0, 10.0);
-        workspace.update_camera(1.0 / 60.0);
+        workspace.update_with_controller(&mut controller, 1.0 / 60.0);
+        controller.mouse_look_delta = (0.0, 10.0);
+        workspace.update_with_controller(&mut controller, 1.0 / 60.0);
 
         let focus = Vec3::Y;
         let camera_position = workspace.current_camera.position();
@@ -787,7 +655,7 @@ mod tests {
         workspace.get_mut::<Part>(subject_id).unwrap().pivot_to(
             crate::glam::Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
         );
-        workspace.update_camera(1.0 / 60.0);
+        workspace.update_with_controller(&mut controller, 1.0 / 60.0);
 
         let moved_position = workspace.current_camera.position();
         assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
@@ -795,7 +663,7 @@ mod tests {
         let mut cloned_workspace = workspace.clone();
         let cloned_subject = cloned_workspace.current_camera.subject().unwrap();
         assert_ne!(cloned_subject, subject_id);
-        cloned_workspace.update_camera(1.0 / 60.0);
+        cloned_workspace.update_with_controller(&mut controller, 1.0 / 60.0);
         let cloned_camera_position = cloned_workspace.current_camera.position();
         cloned_workspace
             .get_mut::<Part>(cloned_subject)
@@ -803,40 +671,18 @@ mod tests {
             .pivot_to(crate::glam::Mat4::from_translation(Vec3::new(
                 20.0, 0.0, 0.0,
             )));
-        cloned_workspace.update_camera(1.0 / 60.0);
+        cloned_workspace.update_with_controller(&mut controller, 1.0 / 60.0);
         assert!(
             (cloned_workspace.current_camera.position().x - cloned_camera_position.x - 10.0).abs()
                 < 1e-5
         );
 
         workspace.current_camera.set_subject(None);
-        workspace.camera_controller_mut().unwrap().forward = true;
-        workspace.update_camera(0.1);
+        controller.forward = true;
+        workspace.update_with_controller(&mut controller, 0.1);
 
         assert_eq!(workspace.current_camera.subject(), None);
         assert!(workspace.current_camera.position().z < moved_position.z);
-    }
-
-    #[test]
-    fn camera_controller_input_can_be_disabled_through_workspace() {
-        let mut workspace = Workspace::new();
-        assert!(workspace.camera_controller().unwrap().is_enabled());
-
-        workspace
-            .camera_controller_mut()
-            .unwrap()
-            .set_enabled(false);
-        assert!(!workspace.camera_controller().unwrap().keyboard_enabled);
-        assert!(!workspace.camera_controller().unwrap().mouse_enabled);
-        assert!(!workspace.camera_controller().unwrap().is_enabled());
-
-        workspace
-            .camera_controller_mut()
-            .unwrap()
-            .set_mouse_enabled(true);
-        assert!(!workspace.camera_controller().unwrap().keyboard_enabled);
-        assert!(workspace.camera_controller().unwrap().mouse_enabled);
-        assert!(workspace.camera_controller().unwrap().is_enabled());
     }
 
     #[test]

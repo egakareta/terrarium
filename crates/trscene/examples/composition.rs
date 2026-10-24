@@ -57,13 +57,6 @@ fn main() {
         spring.position(),
         spring.transparency(),
     );
-    assert!(
-        workspace
-            .render_scene()
-            .nodes
-            .iter()
-            .flat_map(|node| &node.children)
-            .any(|node| node.mesh.is_some())
-    );
+    assert!(workspace.render_scene().nodes[0].children[0].mesh.is_some());
     println!("Custom primitive renders inside a custom rig; exact downcasts remain exact.");
 }

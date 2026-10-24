@@ -622,6 +622,7 @@ fn expand(
         })?;
         let mut sanitize: Option<Expr> = None;
         let mut borrow = false;
+        let mut deref = false;
         let mut into = false;
         take_attrs(&mut field.attrs, "property", |attr| {
             property = true;
@@ -637,8 +638,10 @@ fn expand(
                     into = true;
                 } else if meta.path.is_ident("borrow") {
                     borrow = true;
+                } else if meta.path.is_ident("deref") {
+                    deref = true;
                 } else {
-                    return Err(meta.error("expected default, sanitize, borrow, or into"));
+                    return Err(meta.error("expected default, sanitize, borrow, deref, or into"));
                 }
                 Ok(())
             })
@@ -663,7 +666,12 @@ fn expand(
                 .filter(|attr| attr.path().is_ident("doc"))
                 .cloned()
                 .collect();
-            let (return_type, read) = if borrow {
+            let (return_type, read) = if deref {
+                (
+                    quote!(&<#ty as ::core::ops::Deref>::Target),
+                    quote!(::core::ops::Deref::deref(&#runtime::Project::<#class>::project(self).#field_name)),
+                )
+            } else if borrow {
                 (
                     quote!(&#ty),
                     quote!(&#runtime::Project::<#class>::project(self).#field_name),
@@ -681,10 +689,6 @@ fn expand(
                 #[doc = concat!("Returns `", stringify!(#field_name), "`.")]
                 fn #field_name(&self) -> #return_type { #read }
             });
-            methods.push(parse_quote! {
-                #(#cfg)* #[doc = concat!("Sets `", stringify!(#field_name), "`.")] #(#docs)*
-                fn #setter(&mut self, value: #ty) { #runtime::Project::<#class>::project_mut(self).#field_name = #value; }
-            });
             let builder_ty = if into {
                 quote!(impl Into<#ty>)
             } else {
@@ -696,17 +700,23 @@ fn expand(
                 quote!(value)
             };
             methods.push(parse_quote! {
+                #(#cfg)* #[doc = concat!("Sets `", stringify!(#field_name), "`.")] #(#docs)*
+                fn #setter(&mut self, value: #ty) { #runtime::Project::<#class>::project_mut(self).#field_name = #value; }
+            });
+            methods.push(parse_quote! {
                 #(#cfg)* #[doc = concat!("Returns this instance with `", stringify!(#field_name), "` set.")] #(#docs)*
                 fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized { self.#setter(#builder_value); self }
             });
-            property_inspect.push(PropertyApi {
-                getter: field_name.clone(),
-                setter,
-                ty: ty.clone(),
-                cfg,
-                flatten: false,
-                validate: None,
-            });
+            if !deref {
+                property_inspect.push(PropertyApi {
+                    getter: field_name.clone(),
+                    setter,
+                    ty: ty.clone(),
+                    cfg,
+                    flatten: false,
+                    validate: None,
+                });
+            }
         }
     }
     let public_prefix: Tokens = {
@@ -1111,15 +1121,6 @@ fn expand(
             #runtime::__impl_instance_inspection!(#class);
 
             #spatial
-
-            fn controller(&self) -> Option<&dyn #runtime::Controller> {
-                use #runtime::__DetectController as _;
-                (&&#runtime::__ControllerProbe::<Self>(::core::marker::PhantomData)).get(self)
-            }
-            fn controller_mut(&mut self) -> Option<&mut dyn #runtime::Controller> {
-                use #runtime::__DetectController as _;
-                (&&#runtime::__ControllerProbe::<Self>(::core::marker::PhantomData)).get_mut(self)
-            }
 
             fn class_name(&self) -> &'static str {
                 stringify!(#class)

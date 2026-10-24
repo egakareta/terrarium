@@ -97,7 +97,7 @@ instance! {
     /// movement changes pitch, and forward/backward movement adjusts distance.
     /// [`Self::update_camera_with_actions`] also accepts actions directly.
     ///
-    /// Parent this instance directly to a workspace to receive input and update its
+    /// Select this controller on the engine to receive input and update its
     /// active camera after physics.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
@@ -397,7 +397,9 @@ impl Controller for CameraController {
         Some(&mut self.input)
     }
 
-    fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+    fn update(&mut self, _workspace: &mut Workspace, _delta_seconds: f32) {}
+
+    fn post_update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
         let subject = workspace.current_camera.subject().and_then(|id| {
             workspace
                 .view::<dyn Instance>(id)

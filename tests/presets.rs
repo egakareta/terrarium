@@ -3,13 +3,7 @@ use terrarium::{glam::Vec3, *};
 
 fn assert_preset(workspace: &Workspace, preset: WorkspacePreset) {
     match preset {
-        WorkspacePreset::Empty => {
-            assert!(
-                workspace
-                    .instances()
-                    .all(|instance| instance.spatial().is_none())
-            );
-        }
+        WorkspacePreset::Empty => assert!(workspace.instances().next().is_none()),
         WorkspacePreset::Baseplate => {
             let plate = workspace
                 .get_all::<Part>()

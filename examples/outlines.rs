@@ -91,8 +91,8 @@ fn main() {
             };
             let mesh_part = engine.workspace_mut().add_child(MeshPart::new(mesh));
             engine
-                .workspace_mut()
-                .camera_controller_mut()
+                .controller_mut()
+                .downcast_mut::<CameraController>()
                 .unwrap()
                 .subject_offset = focus_offset;
 

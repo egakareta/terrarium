@@ -36,7 +36,7 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
     );
     assert_eq!(
         root.descendants().map(Instance::name).collect::<Vec<_>>(),
-        ["Workspace", "CameraController", "parent", "child"]
+        ["Workspace", "parent", "child"]
     );
     assert!(engine.try_clone_box().is_none());
 
@@ -76,5 +76,80 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
     assert!(engine.view_mut::<dyn Instance>(sibling).unwrap().destroy());
     assert!(engine.view::<dyn Instance>(sibling).is_none());
     assert_eq!(engine.workspace().id(), workspace);
+    Ok(())
+}
+
+#[test]
+fn selected_owned_controllers_drive_the_scene_and_can_be_replaced() -> Result<(), AppCreationError>
+{
+    for use_bevy in [false, true] {
+        #[cfg(not(feature = "bevy"))]
+        if use_bevy {
+            continue;
+        }
+        let launcher = Terrarium::new();
+        #[cfg(feature = "bevy")]
+        let launcher = if use_bevy {
+            launcher.with_bevy(bevy::app::App::new())
+        } else {
+            launcher
+        };
+        let mut engine = launcher
+            .with_size([32, 32])
+            .with_env_logger(false)
+            .with_headless(Some(0))
+            .run(|engine| {
+                engine
+                    .workspace_mut()
+                    .add_child(Rig::new().with_name("Player"));
+                Ok::<(), AppCreationError>(())
+            })?
+            .unwrap();
+        let rig = engine.workspace().get_all::<Rig>().next().unwrap().id();
+        let stored = engine.workspace_mut().add_child(PlayerController::new(rig));
+        let context = egui::Context::default();
+        let frame = |engine: &mut Engine, pressed| {
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::W,
+                        physical_key: Some(egui::Key::W),
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| engine.update(ui.ctx()),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut engine, true);
+        assert_eq!(
+            engine.workspace().get::<Rig>(rig).unwrap().position(),
+            glam::Vec3::ZERO
+        );
+        engine.set_controller(PlayerController::new(rig));
+        frame(&mut engine, true);
+        let moved = engine.workspace().get::<Rig>(rig).unwrap().position();
+        assert!(moved.z < 0.0);
+        engine
+            .workspace_mut()
+            .get_mut::<PlayerController>(stored)
+            .unwrap()
+            .destroy();
+        frame(&mut engine, true);
+        assert!(engine.workspace().get::<Rig>(rig).unwrap().position().z < moved.z);
+        let position = engine.workspace().get::<Rig>(rig).unwrap().position();
+        engine = engine.with_controller(CameraController::default());
+        frame(&mut engine, true);
+        assert_eq!(
+            engine.workspace().get::<Rig>(rig).unwrap().position(),
+            position
+        );
+        engine = engine.with_controller(PlayerController::new(rig));
+        frame(&mut engine, true);
+        assert!(engine.workspace().get::<Rig>(rig).unwrap().position().z < position.z);
+    }
     Ok(())
 }

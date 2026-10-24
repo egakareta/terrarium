@@ -85,17 +85,12 @@ fn engine_explorer_opens_the_workspace_and_inspects_the_root()
     assert_eq!(engine.name(), "Application");
 
     let workspace = engine.workspace().id();
-    let child = engine
-        .workspace()
-        .get_all::<Part>()
-        .find(|part| part.name() == "Scene child")
-        .unwrap()
-        .id();
+    let child = engine.workspace().children()[0].id();
     let order = [root, workspace, child];
     devtools.select(root, Modifiers::NONE, &order);
     devtools.select(child, Modifiers::SHIFT, &order);
     devtools.destroy_selection(&mut engine);
     assert_eq!(devtools.selected(), &[root, workspace]);
-    assert!(engine.workspace().get_all::<Part>().next().is_none());
+    assert!(engine.workspace().children().is_empty());
     Ok(())
 }

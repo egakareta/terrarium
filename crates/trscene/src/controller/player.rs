@@ -16,10 +16,10 @@ instance! {
     /// Anchored rigs, and builds without physics, move their poses directly. Descendants
     /// and scale are preserved in both cases.
     /// Movement uses the active camera's horizontal heading. To orbit around the
-    /// player, set the camera subject to this rig. Disable duplicate camera input
-    /// when both controllers would otherwise respond to the same device.
+    /// player, set the camera subject to this rig. Orbit settings are stored in
+    /// [`Self::camera`].
     ///
-    /// Parent this instance directly to a workspace to receive input and updates.
+    /// Select this controller on the engine to receive input and updates.
     #[derive(Clone, Debug)]
     #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct PlayerController {
@@ -32,6 +32,9 @@ instance! {
         /// Device state and bindings used to generate controller actions.
         #[cfg_attr(feature = "devtools", inspect(skip))]
         pub input: ControllerInput,
+        /// Camera orbit configuration applied after the player has moved.
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub camera: CameraController,
         /// Movement speed in world units per second.
         pub speed: f32,
         /// Upward jump velocity in world units per second.
@@ -58,6 +61,7 @@ impl PlayerController {
             instance: InstanceData::new("PlayerController"),
             rig: Some(rig),
             input,
+            camera: CameraController::default().with_enabled(false),
             speed: 6.0,
             jump_speed: 7.0,
             sensitivity: 0.0025,
@@ -114,7 +118,7 @@ impl PlayerController {
     /// Applies accumulated input directly to a rig without a workspace.
     ///
     /// Horizontal movement is world-aligned, look and jumping are discarded, and
-    /// no physics step is performed. Parent the controller directly to a workspace for
+    /// no physics step is performed. Select the controller on the engine for
     /// camera-relative movement, camera orbit, and physics integration.
     pub fn update_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
         let actions = self.input.take_actions();
@@ -142,7 +146,7 @@ impl PlayerController {
     /// queued for the next physics step; anchored rigs move immediately. This
     /// method does not read or consume device input.
     pub fn update_workspace_with_actions(
-        &self,
+        &mut self,
         workspace: &mut Workspace,
         actions: ControllerActions,
         delta_seconds: f32,
@@ -158,11 +162,9 @@ impl PlayerController {
         let anchored = rig.anchored();
 
         let mut reference = ControllerActions::default();
-        if workspace.current_camera.subject() == Some(id)
-            && let Some(camera) = workspace.camera_controller_mut()
-        {
-            camera.queue_look(actions.look * self.sensitivity);
-            reference.look = camera.queued_look();
+        if workspace.current_camera.subject() == Some(id) {
+            self.camera.queue_look(actions.look * self.sensitivity);
+            reference.look = self.camera.queued_look();
         }
         let movement_rotation = reference.yaw_rotation(workspace.current_camera.pose(), 1.0);
         let delta_seconds = super::frame_delta(delta_seconds);
@@ -262,13 +264,18 @@ impl Controller for PlayerController {
             let follows_rig = self
                 .rig
                 .is_some_and(|id| workspace.current_camera.subject() == Some(id));
-            if follows_rig && let Some(camera) = workspace.camera_controller_mut() {
-                camera.queue_subject_zoom(scroll_delta);
+            if follows_rig {
+                self.camera.queue_subject_zoom(scroll_delta);
             }
         }
     }
 
+    fn post_update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+        self.camera.post_update(workspace, delta_seconds);
+    }
+
     fn remap_instances(&mut self, map: &dyn Fn(InstanceId) -> Option<InstanceId>) {
         self.rig = self.rig.and_then(map);
+        self.camera.remap_instances(map);
     }
 }

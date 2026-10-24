@@ -208,43 +208,6 @@ impl<T: Spatial> __DetectSpatial<T> for &&__SpatialProbe<T> {
     }
 }
 
-/// Concrete type marker for controller capability detection in [`instance!`].
-#[doc(hidden)]
-pub struct __ControllerProbe<T>(
-    /// Carries the concrete instance type without storing an instance.
-    pub std::marker::PhantomData<T>,
-);
-
-/// Compile-time controller capability selection for [`instance!`].
-#[doc(hidden)]
-pub trait __DetectController<T> {
-    /// Returns shared controller access when supported by the concrete type.
-    fn get(self, instance: &T) -> Option<&dyn crate::Controller>;
-
-    /// Returns mutable controller access when supported by the concrete type.
-    fn get_mut(self, instance: &mut T) -> Option<&mut dyn crate::Controller>;
-}
-
-impl<T> __DetectController<T> for &__ControllerProbe<T> {
-    fn get(self, _instance: &T) -> Option<&dyn crate::Controller> {
-        None
-    }
-
-    fn get_mut(self, _instance: &mut T) -> Option<&mut dyn crate::Controller> {
-        None
-    }
-}
-
-impl<T: crate::Controller> __DetectController<T> for &&__ControllerProbe<T> {
-    fn get(self, instance: &T) -> Option<&dyn crate::Controller> {
-        Some(instance)
-    }
-
-    fn get_mut(self, instance: &mut T) -> Option<&mut dyn crate::Controller> {
-        Some(instance)
-    }
-}
-
 /// Implements the feature-dependent portion of [`instance!`].
 #[doc(hidden)]
 #[cfg(feature = "devtools")]
@@ -302,8 +265,6 @@ pub struct InstanceData {
     #[cfg_attr(feature = "devtools", inspect(skip))]
     children: Vec<Box<dyn Instance>>,
     #[cfg_attr(feature = "devtools", inspect(skip))]
-    updating_children: Vec<(InstanceId, bool)>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
     sibling_index: usize,
     #[cfg_attr(feature = "devtools", inspect(skip))]
     lookup: Weak<InstanceLookup>,
@@ -328,7 +289,6 @@ impl InstanceData {
             id: InstanceId::new(),
             parent: None,
             children: Vec::new(),
-            updating_children: Vec::new(),
             sibling_index: usize::MAX,
             lookup: Weak::new(),
             root_lookup: None,
@@ -440,17 +400,6 @@ impl InstanceData {
     }
 
     pub(crate) fn remove_child(&mut self, id: InstanceId) -> bool {
-        if let Some(index) = self
-            .updating_children
-            .iter()
-            .position(|(child, _)| *child == id)
-        {
-            if self.updating_children[index].1 {
-                return false;
-            }
-            self.updating_children.swap_remove(index);
-            return true;
-        }
         let indexed_position = self.lookup().and_then(|lookup| {
             let instance = lookup.get(id)?;
             // Registered instances remain boxed at stable addresses while parented.
@@ -478,39 +427,6 @@ impl InstanceData {
         data.set_sibling_index(usize::MAX);
         set_instance_lookup(child.as_mut(), None);
         true
-    }
-
-    pub(crate) fn take_child_for_update(
-        &mut self,
-        id: InstanceId,
-    ) -> Option<(usize, Box<dyn Instance>)> {
-        let index = self.children.iter().position(|child| child.id() == id)?;
-        let mut child = self.children.remove(index);
-        for (index, child) in self.children.iter_mut().enumerate().skip(index) {
-            instance_data_mut(child.as_mut()).set_sibling_index(index);
-        }
-        // The callback owns this subtree exclusively until its update returns.
-        set_instance_lookup(child.as_mut(), None);
-        self.updating_children
-            .push((id, child.__instance_data().persistent));
-        Some((index, child))
-    }
-
-    pub(crate) fn finish_child_update(&mut self, index: usize, mut child: Box<dyn Instance>) {
-        let Some(updating_index) = self
-            .updating_children
-            .iter()
-            .position(|(id, _)| *id == child.id())
-        else {
-            return;
-        };
-        self.updating_children.swap_remove(updating_index);
-        let index = index.min(self.children.len());
-        set_instance_lookup(child.as_mut(), self.lookup());
-        self.children.insert(index, child);
-        for (index, child) in self.children.iter_mut().enumerate().skip(index) {
-            instance_data_mut(child.as_mut()).set_sibling_index(index);
-        }
     }
 }
 
@@ -558,16 +474,6 @@ fn set_instance_lookup(instance: &mut dyn Instance, lookup: Option<Rc<InstanceLo
 /// heterogeneous collection such as [`Workspace`] to recover typed instances
 /// without requiring callers to maintain parallel type-specific collections.
 pub trait Instance: Any + Debug + InstanceClone + __InstanceDataAccess + InstanceReceiver {
-    /// Returns this instance's per-frame controller capability, when present.
-    fn controller(&self) -> Option<&dyn Controller> {
-        None
-    }
-
-    /// Returns mutable controller access, when present.
-    fn controller_mut(&mut self) -> Option<&mut dyn Controller> {
-        None
-    }
-
     /// Returns the generated composition descriptor, when available.
     fn instance_class(&self) -> Option<&'static InstanceClass> {
         None
@@ -1136,7 +1042,7 @@ mod tests {
 
         let mut workspace = Workspace::new();
         model.set_parent(&mut workspace);
-        assert_eq!(workspace.children().len(), 2);
+        assert_eq!(workspace.children().len(), 1);
         assert_eq!(
             workspace
                 .view::<dyn Instance>(model_id)
@@ -1155,21 +1061,19 @@ mod tests {
                 .is::<Camera>()
         );
         assert_eq!(workspace.get_all::<Part>().count(), 1);
-        assert_eq!(workspace.instances().count(), 4);
+        assert_eq!(workspace.instances().count(), 3);
         assert_eq!(
             workspace
                 .instances()
                 .map(|instance| instance.name())
                 .collect::<Vec<_>>(),
-            ["CameraController", "model", "part", "Camera"]
+            ["model", "part", "Camera"]
         );
     }
 
     #[test]
     fn mutable_children_are_iterated_without_exposing_the_backing_slice() {
         let mut workspace = Workspace::new();
-        let camera = workspace.camera_controller().unwrap().id();
-        workspace.remove_child(camera);
         let first_id = Part::new().with_name("first").set_parent(&mut workspace);
         let second_id = Part::new().with_name("second").set_parent(&mut workspace);
 

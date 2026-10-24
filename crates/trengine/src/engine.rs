@@ -164,6 +164,9 @@ trscene::instance! {
         #[property]
         /// The color used to clear the window and rendered scene.
         clear_color: [f32; 4],
+        /// The controller receiving input and driving this engine's workspace.
+        #[property(deref, into)]
+        controller: Box<dyn Controller>,
         #[cfg(feature = "bevy")]
         bevy_app: Option<bevy_app::App>,
     }
@@ -257,21 +260,6 @@ impl Engine {
             .map_or(fallback_size, |size| [size.width, size.height]);
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let size = fallback_size;
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        let mut workspace = workspace;
-        #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
-            use trscene::Instance as _;
-
-            for child in workspace.children_mut() {
-                if let Some(controller) = child.controller_mut()
-                    && let Some(input) = controller.input_mut()
-                {
-                    input.set_touchscreen_detected(true);
-                }
-            }
-        }
-
         let render_state = creation_context
             .wgpu_render_state
             .as_ref()
@@ -305,6 +293,7 @@ impl Engine {
             #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
             renderer_id,
             clear_color: DEFAULT_CLEAR_COLOR,
+            controller: Box::default(),
             #[cfg(feature = "bevy")]
             bevy_app: None,
         })
@@ -352,20 +341,40 @@ impl Engine {
         self.renderer.borrow_mut()
     }
 
-    /// Processes controller input, advances the workspace, and requests the next frame.
+    /// Selects an owned controller to receive input and drive the workspace.
+    pub fn set_controller(&mut self, controller: impl Into<Box<dyn Controller>>) {
+        EngineExt::set_controller(self, controller.into());
+    }
+
+    /// Returns the active controller for configuration and input access.
+    pub fn controller_mut(&mut self) -> &mut dyn Controller {
+        self.controller.as_mut()
+    }
+
+    /// Sends a window event to the active controller.
+    pub fn process_window_event(&mut self, event: &winit::event::WindowEvent) -> bool {
+        self.controller.process_window_event(event)
+    }
+
+    /// Sends an unfiltered device event to the active controller.
+    pub fn process_device_event(&mut self, event: &winit::event::DeviceEvent) {
+        self.controller.process_device_event(event);
+    }
+
+    /// Processes the active controller, advances the workspace, and requests the next frame.
     pub fn update(&mut self, context: &egui::Context) {
         let workspace = engine_workspace(&mut self.instance);
         #[cfg(feature = "devtools")]
         self.devtools
-            .focus_scene_on_camera_input(context, workspace);
-        let delta = process_workspace_input(workspace, context);
+            .focus_scene_on_camera_input(context, self.controller.as_ref());
+        let delta = process_controller_input(self.controller.as_mut(), context);
         #[cfg(feature = "bevy")]
         if let Some(app) = self.bevy_app.as_mut() {
-            crate::bevy::update_app(app, workspace, context, delta);
+            crate::bevy::update_app(app, workspace, &mut self.controller, context, delta);
             context.request_repaint();
             return;
         }
-        workspace.update(delta);
+        workspace.update_with_controller(self.controller.as_mut(), delta);
         context.request_repaint();
     }
 
@@ -526,14 +535,20 @@ impl Engine {
     }
 }
 
-fn process_workspace_input(workspace: &mut Workspace, context: &egui::Context) -> f32 {
+fn process_controller_input(controller: &mut dyn Controller, context: &egui::Context) -> f32 {
+    #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
+    if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0)
+        && let Some(input) = controller.input_mut()
+    {
+        input.set_touchscreen_detected(true);
+    }
     let delta = context.input(|input| input.stable_dt);
     let delta = if delta.is_finite() {
         delta.clamp(0.0, 0.1)
     } else {
         0.0
     };
-    workspace.process_input(context);
+    controller.process_input(context);
     delta
 }
 
@@ -729,6 +744,10 @@ impl trdevtools::DevtoolsHost for Engine {
 
     fn root(&mut self) -> &mut dyn Instance {
         self
+    }
+
+    fn scene_controller(&self) -> Option<&dyn Controller> {
+        Some(self.controller.as_ref())
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, selected: &[InstanceId]) {
@@ -1103,6 +1122,12 @@ impl<'a> Terrarium<'a> {
             #[cfg(feature = "bevy")]
             {
                 engine.bevy_app = bevy_app;
+                if let Some(app) = engine.bevy_app.as_mut() {
+                    std::mem::swap(
+                        &mut engine.controller,
+                        &mut *app.world_mut().non_send_mut::<Box<dyn Controller>>(),
+                    );
+                }
             }
             store_engine(&app_engine_slot, engine);
 
@@ -1111,7 +1136,11 @@ impl<'a> Terrarium<'a> {
             #[cfg(feature = "bevy")]
             with_engine(&app_engine_slot, |engine| {
                 if let Some(app) = engine.bevy_app.as_mut() {
-                    crate::bevy::finalize_app(app, engine_workspace(&mut engine.instance));
+                    crate::bevy::finalize_app(
+                        app,
+                        engine_workspace(&mut engine.instance),
+                        &mut engine.controller,
+                    );
                 }
             });
             Ok(Box::new(AppAdapter {
