@@ -342,13 +342,34 @@ impl Renderer {
         scene: &RenderScene<'_>,
         size: [u32; 2],
     ) -> Result<(), RendererError> {
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("scene output command encoder"),
+            });
+        self.encode(scene, size, &mut encoder)?;
+        self.queue.submit(Some(encoder.finish()));
+        Ok(())
+    }
+
+    /// Prepares a scene and records its render passes into the supplied encoder.
+    ///
+    /// The encoder must belong to this renderer's device and be submitted to its queue
+    /// before preparing another scene.
+    /// Resource uploads use queue writes and precede the recorded render passes.
+    pub fn encode(
+        &mut self,
+        scene: &RenderScene<'_>,
+        size: [u32; 2],
+        encoder: &mut wgpu::CommandEncoder,
+    ) -> Result<(), RendererError> {
         let width = size[0].max(1);
         let height = size[1].max(1);
         if self.width != width || self.height != height {
             self.resize(width, height);
         }
         self.prepare_scene(scene)?;
-        self.submit_scene();
+        self.encode_output(encoder);
         Ok(())
     }
 
@@ -598,37 +619,31 @@ impl Renderer {
         pass.draw(0..3, 0..1);
     }
 
-    pub(super) fn submit_scene(&self) {
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("scene output command encoder"),
-            });
+    fn encode_output(&self, encoder: &mut wgpu::CommandEncoder) {
         // Skip outline passes when no outlines exist: the mask would stay
         // cleared and the composite would be a plain copy. Rendering the
         // scene directly to the output target preserves pixels while saving
         // two full-screen passes.
         let has_outlines = self.outline_batches.iter().any(|b| !b.is_empty());
-        self.encode_shadow_pass(&mut encoder);
+        self.encode_shadow_pass(encoder);
         if has_outlines {
             self.encode_scene_pass(
-                &mut encoder,
+                encoder,
                 &self.scene_view,
                 &self.depth_view,
                 self.clear_color,
             );
-            self.encode_outline_mask_pass(&mut encoder);
-            self.encode_stencil_outline_passes(&mut encoder);
-            self.encode_outline_composite_pass(&mut encoder);
+            self.encode_outline_mask_pass(encoder);
+            self.encode_stencil_outline_passes(encoder);
+            self.encode_outline_composite_pass(encoder);
         } else {
             self.encode_scene_pass(
-                &mut encoder,
+                encoder,
                 &self.output.view,
                 &self.depth_view,
                 self.clear_color,
             );
         }
-        self.queue.submit(Some(encoder.finish()));
     }
 
     pub(super) fn record_frame(&mut self) {

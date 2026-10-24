@@ -367,17 +367,32 @@ mod tests {
                 > before
         );
 
-        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, true);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::ShiftLeft, true);
         advance(&mut workspace, &mut controller, 15);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Sprint);
-        controller.process_key(winit::keyboard::KeyCode::KeyW, false);
-        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, false);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::KeyW, false);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::ShiftLeft, false);
         advance(&mut workspace, &mut controller, 15);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
 
-        controller.process_key(winit::keyboard::KeyCode::Space, true);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::Space, true);
         advance(&mut workspace, &mut controller, 3);
-        controller.process_key(winit::keyboard::KeyCode::Space, false);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::Space, false);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Jump);
         advance(&mut workspace, &mut controller, 50);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
