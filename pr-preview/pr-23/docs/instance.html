@@ -178,7 +178,7 @@
 <p>The <code>instance!</code> macro builds instance APIs from named fields and inherent
 methods. It can extend an existing instance, combine independent capabilities,
 and expose stored or computed properties to the devtools inspector.</p>
-<pre class="playground"><code class="language-rust">use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 instance! {
     /// A primitive with a spring.
@@ -217,7 +217,7 @@ with one composition role:</p>
 <p>An instance has at most one identity provider: either an <code>#[extends]</code> field or
 an <code>#[data]</code> field. A type with only <code>#[compose]</code> fields can define a
 capability without an instance identity.</p>
-<pre class="playground"><code class="language-rust">use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 instance! {
     #[derive(Clone, Debug)]
@@ -286,7 +286,7 @@ transparency: f32,</code></pre>
 type’s inherent <code>impl</code> with <code>#[r#override(Type::method)]</code>. The replacement must
 keep the inherited method’s name and use a borrowed receiver with concrete
 arguments. Its signature must match the inherited method.</p>
-<pre class="playground"><code class="language-rust">use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 instance! {
     #[derive(Clone, Debug)]
@@ -331,7 +331,7 @@ method. Add options to control how it is presented or validated:</p>
 </tbody>
 </table>
 </div>
-<pre class="playground"><code class="language-rust">use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 instance! {
     #[derive(Clone, Debug)]
@@ -370,7 +370,7 @@ separate inspector implementation.</p>
 definitions. When a type is declared in a module, set
 <code>#[instance(path = crate::module)]</code> to that crate-rooted module path. The
 default is <code>crate</code>.</p>
-<pre class="playground"><code class="language-rust">use terrarium::*;
+<pre class="playground"><code class="language-rust no_run">use terrarium::*;
 
 mod models {
     use super::*;
