@@ -350,7 +350,7 @@ fn composed_primitives_participate_in_physics_and_overlap_queries() {
             .with_position(Vec3::new(0.0, 10.0, 0.0)),
     );
     for _ in 0..20 {
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
     }
     let position = workspace.view::<PVInstance>(id).unwrap().position();
     assert!(position.y < 10.0);
@@ -530,7 +530,7 @@ instance! {
 fn custom_sounds_are_updated_by_the_audio_runtime() {
     let mut workspace = Workspace::new();
     let id = workspace.add_child(CustomSound::default().with_volume(0.4));
-    assert!(workspace.update_audio(0.0).is_empty());
+    assert!(workspace.step_audio(0.0).is_empty());
     assert!(workspace.view::<Sound>(id).unwrap().playback().is_some());
     assert_eq!(workspace.view::<Sound>(id).unwrap().volume(), 0.4);
 }

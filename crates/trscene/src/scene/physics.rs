@@ -599,7 +599,7 @@ mod tests {
         let ball_id = ball.set_parent(&mut workspace);
 
         for _ in 0..120 {
-            workspace.update(1.0 / 60.0);
+            workspace.step(1.0 / 60.0);
         }
 
         let ball = workspace
@@ -628,7 +628,7 @@ mod tests {
             .with_position(Vec3::new(5.0, 0.0, 0.0))
             .set_parent(&mut workspace);
 
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
 
         let params = BoxOverlapQuery::new(Mat4::from_scale(Vec3::splat(4.0)));
         let overlaps = workspace.get_part_bounds_in_box(&params);

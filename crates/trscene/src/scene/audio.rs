@@ -90,7 +90,7 @@ impl AudioRuntime {
         }
     }
 
-    pub(crate) fn update_listener(
+    pub(crate) fn step_listener(
         &mut self,
         position: Vec3,
         forward: Vec3,
@@ -157,14 +157,14 @@ impl Workspace {
     /// samples use zero velocity; non-positive or non-finite deltas also produce
     /// zero velocity. Call after moving the camera and scene objects.
     /// [`Workspace::update`] calls this automatically and logs returned errors.
-    pub fn update_audio(&mut self, delta_seconds: f32) -> Vec<AudioError> {
+    pub fn step_audio(&mut self, delta_seconds: f32) -> Vec<AudioError> {
         let mut errors = Vec::new();
         let position = self.camera().position();
         let forward = self.camera().forward();
         let up = self.camera().pose().transform_vector3(Vec3::Y);
         if let Err(error) = self
             .audio
-            .update_listener(position, forward, up, delta_seconds)
+            .step_listener(position, forward, up, delta_seconds)
         {
             errors.push(AudioError::Listener(error));
         }
@@ -255,13 +255,13 @@ mod tests {
     fn camera_motion_and_orientation_drive_the_listener() {
         let mut workspace = Workspace::new();
         workspace.camera_mut().with_position(Vec3::ZERO);
-        assert!(workspace.update_audio(0.5).is_empty());
+        assert!(workspace.step_audio(0.5).is_empty());
         assert_vector(workspace.soundscape().listener().velocity, Vec3::ZERO);
 
         (workspace.camera_mut())
             .with_position(Vec3::new(2.0, 1.0, 0.0))
             .with_orientation(Vec3::new(0.0, 90.0, 0.0));
-        assert!(workspace.update_audio(0.5).is_empty());
+        assert!(workspace.step_audio(0.5).is_empty());
         let listener = workspace.soundscape().listener();
         assert_vector(listener.position, Vec3::new(2.0, 1.0, 0.0));
         assert_vector(listener.velocity, Vec3::new(4.0, 2.0, 0.0));
@@ -289,7 +289,7 @@ mod tests {
                     ..SpatialSound::default()
                 }),
         );
-        assert!(workspace.update_audio(0.25).is_empty());
+        assert!(workspace.step_audio(0.25).is_empty());
         let playback = workspace
             .get::<Sound>(sound_id)
             .unwrap()
@@ -306,7 +306,7 @@ mod tests {
             .get_mut::<BasePart>(parent_id)
             .unwrap()
             .with_position(Vec3::new(4.0, 2.0, 1.0));
-        assert!(workspace.update_audio(0.25).is_empty());
+        assert!(workspace.step_audio(0.25).is_empty());
         let spatial = playback.spatial().unwrap().unwrap();
         assert_vector(spatial.emitter.position, Vec3::new(4.0, 2.0, 0.0));
         assert_vector(spatial.emitter.velocity, Vec3::new(4.0, 0.0, 0.0));
@@ -321,7 +321,7 @@ mod tests {
             occlusion,
             ..settings
         });
-        assert!(workspace.update_audio(0.25).is_empty());
+        assert!(workspace.step_audio(0.25).is_empty());
         let occlusion = playback.spatial().unwrap().unwrap().occlusion;
         assert_abs_diff_eq!(occlusion.gain, 0.3, epsilon = 1e-6);
         assert_abs_diff_eq!(occlusion.low_pass_hz.unwrap(), 900.0, epsilon = 1e-6);
@@ -337,7 +337,7 @@ mod tests {
                 .with_name("music/ambient")
                 .with_spatial_enabled(false),
         );
-        assert!(workspace.update_audio(0.0).is_empty());
+        assert!(workspace.step_audio(0.0).is_empty());
         for id in [global_id, disabled_id] {
             assert!(
                 workspace
@@ -354,7 +354,7 @@ mod tests {
             .get_mut::<Sound>(disabled_id)
             .unwrap()
             .with_spatial_enabled(true);
-        assert!(workspace.update_audio(0.0).is_empty());
+        assert!(workspace.step_audio(0.0).is_empty());
         assert!(
             workspace
                 .get::<Sound>(disabled_id)
@@ -373,14 +373,14 @@ mod tests {
         let part = workspace.add_child_ref(Part::new());
         let parent_id = part.id();
         let sound_id = part.add_child(Sound::new());
-        assert!(workspace.update_audio(0.25).is_empty());
+        assert!(workspace.step_audio(0.25).is_empty());
         for delta in [0.0, -1.0, f32::NAN, f32::INFINITY] {
             workspace.camera_mut().with_position(Vec3::splat(10.0));
             workspace
                 .get_mut::<Part>(parent_id)
                 .unwrap()
                 .with_position(Vec3::splat(20.0));
-            assert!(workspace.update_audio(delta).is_empty());
+            assert!(workspace.step_audio(delta).is_empty());
             assert_vector(workspace.soundscape().listener().velocity, Vec3::ZERO);
             let spatial = workspace
                 .get::<Sound>(sound_id)
@@ -402,14 +402,14 @@ mod tests {
         sound.stop();
         sound.seek(Duration::from_millis(250));
         let id = workspace.add_child(sound);
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         let sound = workspace.get::<Sound>(id).unwrap();
         assert_eq!(sound.time_position().unwrap(), Duration::from_millis(250));
         assert_eq!(sound.playback_state().unwrap(), PlaybackState::Idle);
         assert!(!workspace.soundscape().has_output());
 
         workspace.get_mut::<Sound>(id).unwrap().stop();
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         assert_eq!(
             workspace.get::<Sound>(id).unwrap().time_position().unwrap(),
             Duration::ZERO
@@ -422,11 +422,11 @@ mod tests {
         let mut sound = Sound::new();
         sound.play();
         let id = workspace.add_child(sound);
-        let errors = workspace.update_audio(0.1);
+        let errors = workspace.step_audio(0.1);
         assert!(
             matches!(errors.as_slice(), [AudioError::Sound { instance, source: SoundscapeError::NoAudioSource }] if *instance == id)
         );
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
     }
 
     #[test]
@@ -438,14 +438,14 @@ mod tests {
         sound.play();
         sound.pause();
         let id = workspace.add_child_ref(Part::new()).add_child(sound);
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         let sound = workspace.get::<Sound>(id).unwrap();
         assert_eq!(sound.playback_state().unwrap(), PlaybackState::Paused);
         assert_eq!(sound.time_position().unwrap(), Duration::from_secs(2));
         assert_eq!(sound.duration().unwrap(), Some(Duration::from_secs(4)));
 
         workspace.get_mut::<Sound>(id).unwrap().resume();
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         assert_eq!(
             workspace
                 .get::<Sound>(id)
@@ -458,14 +458,14 @@ mod tests {
         let sound = workspace.get_mut::<Sound>(id).unwrap();
         sound.replay();
         sound.pause();
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         let sound = workspace.get::<Sound>(id).unwrap();
         assert_eq!(sound.playback_state().unwrap(), PlaybackState::Paused);
         // A live native callback may consume a few samples before the pause.
         assert!(sound.time_position().unwrap() < Duration::from_secs(1));
 
         workspace.get_mut::<Sound>(id).unwrap().stop();
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         let sound = workspace.get::<Sound>(id).unwrap();
         assert_eq!(sound.playback_state().unwrap(), PlaybackState::Idle);
         assert_eq!(sound.time_position().unwrap(), Duration::ZERO);
@@ -483,17 +483,17 @@ mod tests {
                 .with_playback_speed(1.25)
                 .with_looping(true),
         );
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         workspace
             .get_mut::<Sound>(id)
             .unwrap()
             .seek(Duration::from_secs(2));
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         // This request belongs only to the original scene, not to its clone.
         workspace.get_mut::<Sound>(id).unwrap().play();
 
         let mut cloned = workspace.clone();
-        assert!(cloned.update_audio(0.1).is_empty());
+        assert!(cloned.step_audio(0.1).is_empty());
         let clone_id = cloned.get_all::<Sound>().next().unwrap().id();
         let clone = cloned.get::<Sound>(clone_id).unwrap();
         assert_eq!(clone.playback_state().unwrap(), PlaybackState::Idle);
@@ -509,7 +509,7 @@ mod tests {
         assert!(cloned.soundscape().is_muted());
 
         cloned.get_mut::<Sound>(clone_id).unwrap().with_volume(0.2);
-        assert!(cloned.update_audio(0.1).is_empty());
+        assert!(cloned.step_audio(0.1).is_empty());
         assert_abs_diff_eq!(
             cloned
                 .get::<Sound>(clone_id)
@@ -536,7 +536,7 @@ mod tests {
         let parent = workspace.add_child_ref(Part::new());
         let parent_id = parent.id();
         let id = parent.add_child(Sound::new());
-        assert!(workspace.update_audio(0.1).is_empty());
+        assert!(workspace.step_audio(0.1).is_empty());
         let playback = workspace
             .get::<Sound>(id)
             .unwrap()
@@ -561,7 +561,7 @@ mod tests {
         );
         let parent_id = parent.id();
         let id = parent.add_child(Sound::new());
-        workspace.update(0.1);
+        workspace.step(0.1);
         let position = workspace.get::<Part>(parent_id).unwrap().position();
         assert!(position.y < 5.0);
         let spatial = workspace

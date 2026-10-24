@@ -102,8 +102,8 @@ instance! {
 
         /// Advances this rig's animation and applies poses from ancestors to descendants.
         ///
-        /// [`crate::Workspace::update_animations`] advances every rig in a workspace.
-        pub fn update_animation(&mut self, delta_seconds: f32) {
+        /// [`Workspace::step_animations`] advances every rig in a workspace.
+        pub fn step_animation(&mut self, delta_seconds: f32) {
             let Some(mut player) = self.animation.take() else {
                 return;
             };

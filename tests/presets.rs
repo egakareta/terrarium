@@ -49,7 +49,7 @@ fn baseplate_supports_dynamic_parts() {
             .with_position(Vec3::new(0.0, 3.0, 0.0)),
     );
     for _ in 0..180 {
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
     }
     let height = workspace.get::<Part>(part).unwrap().position().y;
     assert!(height > 0.4 && height < 0.6, "resting height: {height}");

@@ -201,7 +201,7 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     .with_zfar(150.0);
     workspace.camera_controller_mut().subject_offset = Vec3::Y;
     workspace.camera_controller_mut().subject_distance = 7.6;
-    workspace.update_camera(0.0);
+    workspace.step_camera(0.0);
     rig
 }
 
@@ -267,7 +267,7 @@ mod tests {
 
     fn advance(workspace: &mut Workspace, frames: usize) {
         for _ in 0..frames {
-            workspace.update(1.0 / 60.0);
+            workspace.step(1.0 / 60.0);
         }
     }
 
@@ -280,7 +280,7 @@ mod tests {
             workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
                 delta: (2.0, 0.0),
             });
-            workspace.update(1.0 / 60.0);
+            workspace.step(1.0 / 60.0);
         }
         let falling = workspace.get::<Rig>(rig).unwrap();
         assert!(falling.position().y < SPAWN.y - 0.8);
@@ -386,7 +386,7 @@ mod tests {
         workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
             delta: (80.0, -20.0),
         });
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
 
         let player = workspace.get::<Rig>(rig).unwrap();
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
@@ -411,7 +411,7 @@ mod tests {
                 0.0,
             ),
         });
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
 
         let player = workspace.get::<Rig>(rig).unwrap();
         let displacement = player.position() - initial;
@@ -448,7 +448,7 @@ mod tests {
                 }],
             );
         }
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
         let player = workspace.get::<Rig>(rig).unwrap();
         let orbit = workspace.camera().position() - (player.position() + Vec3::Y);
         let angle = -60.0 * workspace.camera_controller().sensitivity;
@@ -466,7 +466,7 @@ mod tests {
             .get_mut::<Rig>(rig)
             .unwrap()
             .with_orientation(Vec3::new(0.0, 170.0, 0.0));
-        workspace.update(0.0);
+        workspace.step(0.0);
         let initial_facing = workspace.get::<Rig>(rig).unwrap().forward();
         walk_forward(&mut workspace);
         workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
@@ -475,7 +475,7 @@ mod tests {
                 0.0,
             ),
         });
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
         assert!(facing.z > 0.98, "{facing:?}");
         assert!(facing.x > initial_facing.x && facing.x < 0.0, "{facing:?}");

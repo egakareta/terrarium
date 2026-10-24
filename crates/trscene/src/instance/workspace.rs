@@ -303,26 +303,26 @@ impl Workspace {
     ///
     /// A spatial subject is followed at the configured offset and orbit distance.
     /// Without a valid subject, input moves the camera freely.
-    pub fn update_camera(&mut self, delta: f32) {
+    pub fn step_camera(&mut self, delta: f32) {
         let subject = self.camera.subject().and_then(|id| {
             self.view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
                 .map(|pose| (id, pose))
         });
         self.camera_controller
-            .update_camera(&mut self.camera, subject, delta);
+            .step_camera(&mut self.camera, subject, delta);
     }
 
     /// Advances the simulation when enabled.
-    pub fn update(&mut self, delta_seconds: f32) {
-        self.update_tweens(delta_seconds);
-        self.update_animations(delta_seconds);
-        self.update_controllers(delta_seconds);
+    pub fn step(&mut self, delta_seconds: f32) {
+        self.step_tweens(delta_seconds);
+        self.step_animations(delta_seconds);
+        self.step_controllers(delta_seconds);
         #[cfg(feature = "physics")]
-        self.update_physics(delta_seconds);
-        self.update_camera(delta_seconds);
+        self.step_physics(delta_seconds);
+        self.step_camera(delta_seconds);
         #[cfg(feature = "sound")]
-        for error in self.update_audio(delta_seconds) {
+        for error in self.step_audio(delta_seconds) {
             log::error!("{error}");
         }
     }
@@ -340,7 +340,7 @@ impl Workspace {
     }
 
     #[cfg(feature = "physics")]
-    fn update_physics(&mut self, delta_seconds: f32) {
+    fn step_physics(&mut self, delta_seconds: f32) {
         let mut instances = Vec::new();
         for child in self.children() {
             PhysicsInstance::collect(child.as_ref(), &mut instances);
@@ -354,7 +354,7 @@ impl Workspace {
     }
 
     /// Advances all registered scene tweens without updating the camera.
-    pub fn update_tweens(&mut self, delta_seconds: f32) {
+    pub fn step_tweens(&mut self, delta_seconds: f32) {
         let mut tween_manager = std::mem::take(&mut self.tween_manager);
         tween_manager.update(delta_seconds, self);
         self.tween_manager = tween_manager;
@@ -374,10 +374,10 @@ impl Workspace {
     ///
     /// Outer rigs animate before nested rigs, so inner animations use the
     /// updated parent transforms. This is called automatically by [`Self::update`].
-    pub fn update_animations(&mut self, delta_seconds: f32) {
+    pub fn step_animations(&mut self, delta_seconds: f32) {
         fn update(instance: &mut dyn Instance, delta_seconds: f32) {
             if let Some(rig) = instance.view_mut::<Rig>(instance.id()) {
-                rig.update_animation(delta_seconds);
+                rig.step_animation(delta_seconds);
             }
             for child in instance.children_mut() {
                 update(child, delta_seconds);
@@ -440,7 +440,7 @@ impl Workspace {
     /// `0..=0.1` seconds. Controllers added during this call begin on the next
     /// call; removed controllers are skipped. The active controller cannot be
     /// retrieved by handle until its update returns.
-    pub fn update_controllers(&mut self, delta_seconds: f32) {
+    pub fn step_controllers(&mut self, delta_seconds: f32) {
         Controllers::update(self, crate::controller::frame_delta(delta_seconds));
     }
 }
@@ -716,9 +716,9 @@ mod tests {
         workspace.camera_controller_mut().subject_distance = 8.0;
         workspace.camera_controller_mut().subject_offset = Vec3::Y;
 
-        workspace.update_camera(1.0 / 60.0);
+        workspace.step_camera(1.0 / 60.0);
         workspace.camera_controller_mut().mouse_look_delta = (0.0, 10.0);
-        workspace.update_camera(1.0 / 60.0);
+        workspace.step_camera(1.0 / 60.0);
 
         let focus = Vec3::Y;
         let camera_position = workspace.camera().position();
@@ -735,7 +735,7 @@ mod tests {
         workspace.get_mut::<Part>(subject_id).unwrap().pivot_to(
             crate::glam::Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
         );
-        workspace.update_camera(1.0 / 60.0);
+        workspace.step_camera(1.0 / 60.0);
 
         let moved_position = workspace.camera().position();
         assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
@@ -743,7 +743,7 @@ mod tests {
         let mut cloned_workspace = workspace.clone();
         let cloned_subject = cloned_workspace.camera().subject().unwrap();
         assert_ne!(cloned_subject, subject_id);
-        cloned_workspace.update_camera(1.0 / 60.0);
+        cloned_workspace.step_camera(1.0 / 60.0);
         let cloned_camera_position = cloned_workspace.camera().position();
         cloned_workspace
             .get_mut::<Part>(cloned_subject)
@@ -751,14 +751,14 @@ mod tests {
             .pivot_to(crate::glam::Mat4::from_translation(Vec3::new(
                 20.0, 0.0, 0.0,
             )));
-        cloned_workspace.update_camera(1.0 / 60.0);
+        cloned_workspace.step_camera(1.0 / 60.0);
         assert!(
             (cloned_workspace.camera().position().x - cloned_camera_position.x - 10.0).abs() < 1e-5
         );
 
         workspace.camera_mut().set_subject(None);
         workspace.camera_controller_mut().forward = true;
-        workspace.update_camera(0.1);
+        workspace.step_camera(0.1);
 
         assert_eq!(workspace.camera().subject(), None);
         assert!(workspace.camera().position().z < moved_position.z);

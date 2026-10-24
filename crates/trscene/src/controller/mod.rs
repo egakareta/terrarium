@@ -98,7 +98,7 @@ pub trait Controller: Any + Debug + ControllerClone {
     ///
     /// Runs after animation updates and before physics and the default camera.
     /// `delta_seconds` is finite and clamped to `0..=0.1` by the workspace.
-    fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32);
+    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32);
 
     /// Replaces scene instance IDs when the workspace is cloned.
     ///
@@ -236,7 +236,7 @@ impl Controllers {
             else {
                 continue;
             };
-            controller.update(workspace, delta_seconds);
+            controller.step(workspace, delta_seconds);
             if let Some(entry) = workspace.controllers.entries.get_mut(id) {
                 *entry = Some(controller);
             }

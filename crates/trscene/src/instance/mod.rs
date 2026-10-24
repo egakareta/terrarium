@@ -37,7 +37,6 @@ pub use meshpart::*;
 pub use outline::*;
 pub use part::*;
 pub use pv::*;
-pub(crate) use pv::{InstanceTransformUpdate, update_instance_transform};
 pub use rig::*;
 #[cfg(feature = "sound")]
 pub use sound::*;

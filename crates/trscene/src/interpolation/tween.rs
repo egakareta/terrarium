@@ -554,14 +554,14 @@ mod tests {
             .tweens_mut()
             .add_position(id, Tween::new(Vec3::ZERO, Vec3::X, 1.0));
 
-        workspace.update_tweens(0.5);
+        workspace.step_tweens(0.5);
         assert_eq!(
             workspace.get::<Part>(id).unwrap().position(),
             Vec3::new(0.5, 0.0, 0.0)
         );
         assert!(workspace.tweens().is_active(tween_id));
 
-        workspace.update_tweens(0.5);
+        workspace.step_tweens(0.5);
         assert_eq!(workspace.get::<Part>(id).unwrap().position(), Vec3::X);
         assert!(workspace.tweens().is_empty());
     }

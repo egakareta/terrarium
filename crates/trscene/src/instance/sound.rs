@@ -71,7 +71,7 @@ instance! {
     /// nearest part ancestor as a point emitter. Other sounds play globally without
     /// spatial processing. One world unit is one meter for attenuation and Doppler.
     ///
-    /// Properties and playback requests are applied by [`crate::Workspace::update_audio`]
+    /// Properties and playback requests are applied by [`crate::Workspace::step_audio`]
     /// (also called by [`crate::Workspace::update`]). Cloning copies the source and
     /// settings, but not playback or queued requests. Destroying a sound removes its
     /// backend voice immediately.

@@ -355,11 +355,11 @@ impl Engine {
         let delta = process_workspace_input(workspace, context);
         #[cfg(feature = "bevy")]
         if let Some(app) = self.bevy_app.as_mut() {
-            crate::bevy::update_app(app, workspace, context, delta);
+            crate::bevy::step_app(app, workspace, context, delta);
             context.request_repaint();
             return;
         }
-        workspace.update(delta);
+        workspace.step(delta);
         context.request_repaint();
     }
 

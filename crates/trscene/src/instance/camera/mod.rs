@@ -89,7 +89,7 @@ pub type CameraKeyBindings = ControllerKeyBindings;
 /// Device state is stored in [`Self::input`]. Free flight follows the camera's
 /// look direction. With a subject, look and horizontal movement orbit, vertical
 /// movement changes pitch, and forward/backward movement adjusts distance.
-/// [`Self::update_camera_with_actions`] also accepts actions directly.
+/// [`Self::step_camera_with_actions`] also accepts actions directly.
 #[derive(Clone, Debug)]
 pub struct CameraController {
     /// Keyboard, mouse, and touch state used by this controller.
@@ -222,14 +222,14 @@ impl CameraController {
     /// horizontal, and elevation follows world Y. With a subject, look and
     /// left/right orbit, forward/backward zoom, and up/down changes orbit pitch.
     /// Sprint multiplies movement by `2.5`; frame time is capped at 100 ms.
-    pub fn update_camera(
+    pub fn step_camera(
         &mut self,
         camera: &mut Camera,
         subject: Option<(InstanceId, Mat4)>,
         delta_seconds: f32,
     ) {
         let actions = self.input.take_actions();
-        self.update_camera_with_actions(camera, subject, actions, delta_seconds);
+        self.step_camera_with_actions(camera, subject, actions, delta_seconds);
     }
 
     /// Adds a look rotation in radians to the next camera update.
@@ -263,7 +263,7 @@ impl CameraController {
     /// Does not read device state. Look in `actions` is scaled by `sensitivity`;
     /// look queued with [`Self::queue_look`] is already in radians. Queued look
     /// and zoom are consumed by this call.
-    pub fn update_camera_with_actions(
+    pub fn step_camera_with_actions(
         &mut self,
         camera: &mut Camera,
         subject: Option<(InstanceId, Mat4)>,
@@ -376,13 +376,13 @@ impl Controller for CameraController {
         Some(&mut self.input)
     }
 
-    fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
         let subject = workspace.subject().and_then(|id| {
             workspace
                 .view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
-        self.update_camera(
+        self.step_camera(
             Project::<Camera>::project_mut(workspace),
             subject,
             delta_seconds,
@@ -414,7 +414,7 @@ mod tests {
         let original_position = camera.pivot().w_axis.truncate();
         let mut controller = CameraController::new(6.0, 0.1);
         controller.mouse_look_delta = (1.0, 0.0);
-        controller.update_camera(&mut camera, None, 1.0 / 60.0);
+        controller.step_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.pivot().w_axis.truncate(), original_position);
         assert!(camera.forward().x > 0.0);
     }
@@ -461,7 +461,7 @@ mod tests {
         let mut camera = Camera::default();
         let initial_position = camera.pivot().w_axis.truncate();
         controller.forward = true;
-        controller.update_camera(&mut camera, None, 1.0 / 60.0);
+        controller.step_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.pivot().w_axis.truncate(), initial_position);
         assert!(!controller.forward);
     }
@@ -479,7 +479,7 @@ mod tests {
         let mut camera = Camera::default();
         let initial_forward = camera.forward();
         controller.mouse_look_delta = (5.0, 5.0);
-        controller.update_camera(&mut camera, None, 1.0 / 60.0);
+        controller.step_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.forward(), initial_forward);
         assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
     }

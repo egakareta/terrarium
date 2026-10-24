@@ -104,16 +104,16 @@ impl PlayerController {
     /// Horizontal movement is world-aligned, look and jumping are discarded, and
     /// no physics step is performed. Register the controller with a workspace for
     /// camera-relative movement, camera orbit, and physics integration.
-    pub fn update_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
+    pub fn step_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
         let actions = self.input.take_actions();
-        self.update_rig_with_actions(rig, actions, delta_seconds);
+        self.step_rig_with_actions(rig, actions, delta_seconds);
     }
 
     /// Applies scripted actions as world-aligned, non-physics pose updates.
     ///
     /// Look and the up action are ignored; pass movement on `x` and `z`. The rig
     /// turns only while moving. This method neither reads device input nor advances physics.
-    pub fn update_rig_with_actions(
+    pub fn step_rig_with_actions(
         &self,
         rig: &mut Rig,
         actions: ControllerActions,
@@ -129,7 +129,7 @@ impl PlayerController {
     /// for the camera only when it follows this rig. Dynamic rig movement is
     /// queued for the next physics step; anchored rigs move immediately. This
     /// method does not read or consume device input.
-    pub fn update_workspace_with_actions(
+    pub fn step_workspace_with_actions(
         &self,
         workspace: &mut Workspace,
         actions: ControllerActions,
@@ -242,9 +242,9 @@ impl Controller for PlayerController {
         Some(&mut self.input)
     }
 
-    fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
         let (actions, scroll_delta) = self.input.take_actions_and_scroll();
-        self.update_workspace_with_actions(workspace, actions, delta_seconds);
+        self.step_workspace_with_actions(workspace, actions, delta_seconds);
         if scroll_delta != 0.0 {
             let follows_rig = self
                 .rig

@@ -57,7 +57,7 @@ impl EguiContext {
 }
 
 fn advance_workspace(time: Res<Time>, mut workspace: NonSendMut<Workspace>) {
-    workspace.update(time.delta_secs());
+    workspace.step(time.delta_secs());
 }
 
 pub(crate) fn attach_app(
@@ -92,7 +92,7 @@ pub(crate) fn finalize_app(app: &mut BevyApp, workspace: &mut Workspace) -> bool
     with_workspace(app, workspace, finish_plugins)
 }
 
-pub(crate) fn update_app(
+pub(crate) fn step_app(
     app: &mut BevyApp,
     workspace: &mut Workspace,
     context: &egui::Context,

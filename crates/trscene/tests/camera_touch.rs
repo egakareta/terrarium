@@ -73,8 +73,8 @@ fn joystick_matches_keyboard_movement_in_free_and_subject_modes() {
             }
             let mut touch_camera = Camera::default();
             let mut keyboard_camera = touch_camera.clone();
-            touch_controller.update_camera(&mut touch_camera, subject, 0.1);
-            keyboard_controller.update_camera(&mut keyboard_camera, subject, 0.1);
+            touch_controller.step_camera(&mut touch_camera, subject, 0.1);
+            keyboard_controller.step_camera(&mut keyboard_camera, subject, 0.1);
 
             assert!(
                 touch_camera
@@ -96,7 +96,7 @@ fn joystick_has_a_dead_zone_and_proportional_speed() {
         &mut controller,
         vec![touch(0, 1, TouchPhase::Start, pos2(89.0, 511.0))],
     );
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.position().abs_diff_eq(initial, 1e-6));
 
     frame(
@@ -104,7 +104,7 @@ fn joystick_has_a_dead_zone_and_proportional_speed() {
         &mut controller,
         vec![touch(0, 1, TouchPhase::Move, pos2(88.0, 492.0))],
     );
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     let partial_distance = camera.position().distance(initial);
     assert!(partial_distance > 0.0 && partial_distance < 0.6);
 
@@ -114,7 +114,7 @@ fn joystick_has_a_dead_zone_and_proportional_speed() {
         &mut controller,
         vec![touch(0, 1, TouchPhase::Move, pos2(88.0, 100.0))],
     );
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!((camera.position().distance(before) - 0.6).abs() < 1e-5);
 }
 
@@ -145,8 +145,8 @@ fn two_fingers_can_move_and_look_in_either_start_order() {
             expected_controller.process_mouse_motion((20.0, -15.0));
             let mut camera = Camera::default();
             let mut expected = camera.clone();
-            controller.update_camera(&mut camera, subject, 0.1);
-            expected_controller.update_camera(&mut expected, subject, 0.1);
+            controller.step_camera(&mut camera, subject, 0.1);
+            expected_controller.step_camera(&mut expected, subject, 0.1);
             assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));
         }
     }
@@ -188,8 +188,8 @@ fn synthetic_pointer_motion_does_not_rotate_the_joystick_or_double_touch_look() 
         if !on_joystick {
             expected_controller.process_mouse_motion((20.0, -15.0));
         }
-        controller.update_camera(&mut camera, None, 0.1);
-        expected_controller.update_camera(&mut expected, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
+        expected_controller.step_camera(&mut expected, None, 0.1);
         assert!(camera.forward().abs_diff_eq(expected.forward(), 1e-5));
     }
 }
@@ -206,14 +206,14 @@ fn releasing_or_cancelling_one_finger_keeps_the_other_control_working() {
             &mut controller,
             vec![touch(0, 2, TouchPhase::Start, pos2(400.0, 250.0))],
         );
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         let before = camera.position();
         frame(
             &context,
             &mut controller,
             vec![touch(0, 2, phase, pos2(400.0, 250.0))],
         );
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         assert!((camera.position().distance(before) - 0.6).abs() < 1e-5);
 
         frame(
@@ -231,7 +231,7 @@ fn releasing_or_cancelling_one_finger_keeps_the_other_control_working() {
         );
         let before = camera.position();
         let forward = camera.forward();
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         assert!(camera.position().abs_diff_eq(before, 1e-5));
         assert!(!camera.forward().abs_diff_eq(forward, 1e-5));
     }
@@ -253,7 +253,7 @@ fn extra_fingers_and_other_devices_cannot_take_over_a_gesture() {
         ],
     );
     let initial = camera.position();
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!((camera.position().z - initial.z + 0.6).abs() < 1e-5);
     assert!(
         camera
@@ -278,23 +278,23 @@ fn touch_input_is_independent_of_keyboard_and_mouse_and_can_be_disabled() {
             touch(0, 2, TouchPhase::Move, pos2(420.0, 250.0)),
         ],
     );
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.position().distance(Camera::default().position()) > 0.5);
     assert!(camera.forward().x > 0.0);
 
     controller.set_touch_enabled(false);
     let before = camera.pose();
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(before, 1e-5));
     start_joystick(&context, &mut controller);
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(before, 1e-5));
     assert!(!controller.is_enabled());
 
     controller.set_enabled(true);
     start_joystick(&context, &mut controller);
     controller.set_enabled(false);
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(before, 1e-5));
 }
 
@@ -315,7 +315,7 @@ fn touch_on_egui_widget_does_not_start_camera_gesture() {
         });
         output.textures_delta.clear();
     }
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(initial, 1e-5));
 }
 
@@ -343,7 +343,7 @@ fn focus_loss_and_resize_cancel_touch_gestures() {
         let mut output = context.run_ui(input, |ui| controller.input.process_input(ui.ctx()));
         output.textures_delta.clear();
         let initial = camera.pose();
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         assert!(camera.pose().abs_diff_eq(initial, 1e-5));
         frame(
             &context,
@@ -353,7 +353,7 @@ fn focus_loss_and_resize_cancel_touch_gestures() {
                 touch(0, 2, TouchPhase::Move, pos2(450.0, 250.0)),
             ],
         );
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         assert!(camera.pose().abs_diff_eq(initial, 1e-5));
     }
 }
@@ -377,11 +377,11 @@ fn touch_drag_uses_physical_pixels_at_high_dpi() {
     let mut expected = camera.clone();
     let mut expected_controller = CameraController::default();
     expected_controller.process_mouse_motion((20.0, -10.0));
-    controller.update_camera(&mut camera, None, 0.1);
-    expected_controller.update_camera(&mut expected, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
+    expected_controller.step_camera(&mut expected, None, 0.1);
     assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));
     let before = camera.pose();
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(before, 1e-5));
 }
 
@@ -413,7 +413,7 @@ fn keyboard_and_joystick_share_speed_limits_and_sprint() {
         }
         frame(&context, &mut controller, events);
         let initial = camera.position();
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         let expected_distance = if sprint { 1.5 } else { 0.6 };
         assert!((camera.position().distance(initial) - expected_distance).abs() < 1e-5);
 
@@ -423,7 +423,7 @@ fn keyboard_and_joystick_share_speed_limits_and_sprint() {
             vec![touch(0, 1, TouchPhase::Move, pos2(88.0, 572.0))],
         );
         let before = camera.position();
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         assert!(camera.position().abs_diff_eq(before, 1e-5));
     }
 }
@@ -454,7 +454,7 @@ fn a_second_finger_on_an_egui_area_does_not_rotate_the_camera() {
         });
         output.textures_delta.clear();
     }
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(
         camera
             .forward()
@@ -494,7 +494,7 @@ fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
             output.textures_delta.clear();
         }
         assert!(context.egui_wants_pointer_input());
-        controller.update_camera(&mut camera, None, 0.1);
+        controller.step_camera(&mut camera, None, 0.1);
         assert!(camera.pose().abs_diff_eq(initial, 1e-5));
 
         for events in [
@@ -519,8 +519,8 @@ fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
         expected_controller.forward = true;
         expected_controller.process_mouse_motion((20.0, -15.0));
         let mut expected = camera.clone();
-        controller.update_camera(&mut camera, subject, 0.1);
-        expected_controller.update_camera(&mut expected, subject, 0.1);
+        controller.step_camera(&mut camera, subject, 0.1);
+        expected_controller.step_camera(&mut expected, subject, 0.1);
         assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));
     }
 }
@@ -547,7 +547,7 @@ fn a_second_finger_on_a_background_widget_does_not_rotate_the_camera() {
         });
         output.textures_delta.clear();
     }
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     assert!(
         camera
             .forward()
@@ -582,7 +582,7 @@ fn mouse_drag_and_keyboard_movement_work_after_touch_ends() {
             },
         ],
     );
-    controller.update_camera(&mut camera, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
     let mut expected = camera.clone();
     frame(
         &context,
@@ -601,7 +601,7 @@ fn mouse_drag_and_keyboard_movement_work_after_touch_ends() {
     let mut expected_controller = CameraController::new(6.0, 0.0025);
     expected_controller.forward = true;
     expected_controller.process_mouse_motion((20.0, -15.0));
-    controller.update_camera(&mut camera, None, 0.1);
-    expected_controller.update_camera(&mut expected, None, 0.1);
+    controller.step_camera(&mut camera, None, 0.1);
+    expected_controller.step_camera(&mut expected, None, 0.1);
     assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));
 }

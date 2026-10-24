@@ -203,7 +203,7 @@ fn nested_rig_animations_compose_and_render_with_the_parent_pose() {
     outer.play_animation(AnimationPlayer::new(clip)).unwrap();
     let mut workspace = Workspace::new();
     workspace.add_child(outer.with_pivot(translation(10.0)));
-    workspace.update_animations(0.5);
+    workspace.step_animations(0.5);
     assert_eq!(workspace.get::<Rig>(nested_id).unwrap().position().x, 12.0);
     assert_eq!(workspace.get::<Part>(arm).unwrap().position().x, 14.0);
     let scene = workspace.render_scene();
@@ -245,7 +245,7 @@ fn animation_applies_parent_tracks_before_children_and_carries_untracked_descend
         rig_id,
         Tween::new(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), 1.0),
     );
-    workspace.update(0.5);
+    workspace.step(0.5);
 
     assert_eq!(
         workspace.get::<Part>(arm_id).unwrap().position(),
@@ -271,7 +271,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
             .with_looping(true),
     )
     .unwrap();
-    rig.update_animation(0.75);
+    rig.step_animation(0.75);
     assert_eq!(rig.animation().unwrap().time(), 0.5);
     assert_eq!(
         rig.view::<dyn Instance>(arm_id)
@@ -282,10 +282,10 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
         Vec3::new(2.0, 0.0, 0.0)
     );
     rig.animation_mut().unwrap().pause();
-    rig.update_animation(10.0);
+    rig.step_animation(10.0);
     assert_eq!(rig.animation().unwrap().time(), 0.5);
     rig.animation_mut().unwrap().seek(0.75).unwrap();
-    rig.update_animation(0.0);
+    rig.step_animation(0.0);
     assert_eq!(
         rig.view::<dyn Instance>(arm_id)
             .unwrap()
@@ -295,11 +295,11 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
         Vec3::new(2.5, 0.0, 0.0)
     );
     rig.animation_mut().unwrap().resume();
-    rig.update_animation(0.125);
+    rig.step_animation(0.125);
     assert_eq!(rig.animation().unwrap().time(), 0.0);
     rig.play_animation(AnimationPlayer::new(moving_arm()))
         .unwrap();
-    rig.update_animation(5.0);
+    rig.step_animation(5.0);
     assert!(rig.animation().unwrap().is_finished());
     assert_eq!(
         rig.view::<dyn Instance>(arm_id)
@@ -310,7 +310,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
         Vec3::new(3.0, 0.0, 0.0)
     );
     rig.animation_mut().unwrap().restart();
-    rig.update_animation(0.25);
+    rig.step_animation(0.25);
     assert_eq!(rig.animation().unwrap().time(), 0.25);
     assert!(!rig.animation().unwrap().is_finished());
     assert!(rig.stop_animation().is_some());
@@ -320,7 +320,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
         .downcast_ref::<Part>()
         .unwrap()
         .pivot();
-    rig.update_animation(1.0);
+    rig.step_animation(1.0);
     assert_eq!(
         rig.view::<dyn Instance>(arm_id)
             .unwrap()
@@ -346,7 +346,7 @@ fn cloned_rigs_reuse_animation_paths_and_removed_targets_are_safe() {
             .clone()
             .with_pivot(translation(10.0)),
     );
-    workspace.update_animations(0.5);
+    workspace.step_animations(0.5);
     assert_eq!(
         workspace.get::<Part>(original_arm).unwrap().position().x,
         2.0
@@ -363,7 +363,7 @@ fn cloned_rigs_reuse_animation_paths_and_removed_targets_are_safe() {
         12.0
     );
     workspace.get_mut::<Part>(original_arm).unwrap().destroy();
-    workspace.update_animations(0.5);
+    workspace.step_animations(0.5);
     assert!(workspace.get::<Part>(original_arm).is_none());
     assert_eq!(
         workspace
@@ -390,7 +390,7 @@ fn playback_skips_a_singular_target_and_resumes_when_its_pivot_is_restored() {
         .get_mut::<Part>(arm)
         .unwrap()
         .with_size(Vec3::ZERO);
-    workspace.update_animations(0.5);
+    workspace.step_animations(0.5);
     assert_eq!(
         workspace
             .get::<Part>(arm)
@@ -404,7 +404,7 @@ fn playback_skips_a_singular_target_and_resumes_when_its_pivot_is_restored() {
         .get_mut::<Part>(arm)
         .unwrap()
         .with_pivot(Mat4::IDENTITY);
-    workspace.update_animations(0.25);
+    workspace.step_animations(0.25);
     assert_eq!(workspace.get::<Part>(arm).unwrap().position().x, 2.5);
 }
 
@@ -449,7 +449,7 @@ fn invalid_clips_and_unresolved_targets_are_rejected_without_changing_the_pose()
     let arm_id = rig.add_child(Part::new().with_name("Arm"));
     rig.play_animation(AnimationPlayer::new(moving_arm()))
         .unwrap();
-    rig.update_animation(0.5);
+    rig.step_animation(0.5);
     let bad_clip = AnimationClip::new([AnimationTrack::new(
         ["Missing"],
         [Keyframe::new(0.0, Mat4::IDENTITY)],
@@ -528,7 +528,7 @@ fn dynamic_rig_parts_share_motion_and_keep_their_offsets_under_impulses() {
     .unwrap();
     let mut workspace = Workspace::new();
     let rig_id = workspace.add_child(rig.with_position(Vec3::new(0.0, 5.0, 0.0)));
-    workspace.update(0.0);
+    workspace.step(0.0);
     workspace
         .physics_mut()
         .body_mut(right)
@@ -540,7 +540,7 @@ fn dynamic_rig_parts_share_motion_and_keep_their_offsets_under_impulses() {
         .unwrap()
         .apply_torque_impulse(Vector::new(0.0, 0.0, 1.0), true);
     for _ in 0..30 {
-        workspace.update(1.0 / 60.0);
+        workspace.step(1.0 / 60.0);
     }
     let rig = workspace.get::<Rig>(rig_id).unwrap();
     assert!(rig.position().y < 5.0);
@@ -578,7 +578,7 @@ fn animated_colliders_follow_local_poses_and_report_child_part_ids() {
         .unwrap();
     let mut workspace = Workspace::new();
     let rig_id = workspace.add_child(rig);
-    workspace.update(1.0);
+    workspace.step(1.0);
     assert_eq!(
         workspace.get_part_bounds_in_box(&BoxOverlapQuery::new(translation(3.0))),
         vec![arm_id]
@@ -593,13 +593,13 @@ fn animated_colliders_follow_local_poses_and_report_child_part_ids() {
         .get_mut::<Part>(arm_id)
         .unwrap()
         .with_can_collide(false);
-    workspace.update(1.0 / 60.0);
+    workspace.step(1.0 / 60.0);
     assert!(
         workspace
             .get_part_bounds_in_box(&BoxOverlapQuery::new(translation(3.0)))
             .is_empty()
     );
     workspace.get_mut::<Rig>(rig_id).unwrap().destroy();
-    workspace.update(1.0 / 60.0);
+    workspace.step(1.0 / 60.0);
     assert!(workspace.physics().body_handle(arm_id).is_none());
 }
