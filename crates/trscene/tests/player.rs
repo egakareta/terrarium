@@ -6,7 +6,7 @@ use trscene::{glam::*, *};
 fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
     let mut workspace = Workspace::new();
     let camera = workspace.camera().pivot();
-    let mut player = PlayerController::spawn(&mut workspace).unwrap();
+    let mut player = PlayerController::spawn(&mut workspace);
     let id = player.rig.unwrap();
     let rig = workspace.get_mut::<Rig>(id).unwrap();
     assert!(!rig.anchored());
@@ -135,7 +135,7 @@ fn imported_skins_follow_joint_poses_without_changing_the_source_or_clones() {
 #[test]
 fn every_default_animation_produces_finite_skinned_geometry() {
     let mut workspace = Workspace::new();
-    let player = PlayerController::spawn(&mut workspace).unwrap();
+    let player = PlayerController::spawn(&mut workspace);
     let rig = workspace.get_mut::<Rig>(player.rig.unwrap()).unwrap();
     let mesh = rig.find_first_child::<MeshPart>("Mannequin").unwrap().0;
     let clips: Vec<_> = rig.animation_clips().values().cloned().collect();
