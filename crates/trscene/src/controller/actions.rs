@@ -1,43 +1,68 @@
 use crate::glam::*;
 
-/// Movement, look, and sprint values independent of any input device.
+/// Movement, look, and movement scales independent of any input device.
 ///
 /// These values separate input collection from movement and look behavior. They
 /// can come from [`super::ControllerInput`] or be set directly by a script.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ControllerActions {
     /// Right, up, and forward axes. Horizontal values use the supplied heading;
     /// up is world-aligned. Each axis is clamped to `-1..=1` when applied.
     pub movement: Vec3,
+    /// Per-axis scale applied to `movement`; `Vec3::ONE` preserves
+    /// normal movement speed.
+    pub movement_scale: Vec3,
     /// Horizontal and vertical look displacement in physical pixels.
     pub look: Vec2,
-    /// Applies the built-in `2.5` movement-speed multiplier when true.
-    pub sprint: bool,
+}
+
+impl Default for ControllerActions {
+    fn default() -> Self {
+        Self {
+            movement: Vec3::ZERO,
+            movement_scale: Vec3::ONE,
+            look: Vec2::ZERO,
+        }
+    }
 }
 
 impl ControllerActions {
-    /// Returns `2.5` when sprinting and `1.0` otherwise.
-    pub fn speed_multiplier(self) -> f32 {
-        if self.sprint { 2.5 } else { 1.0 }
-    }
-
-    /// Converts movement axes into a frame displacement.
+    /// Converts movement axes and per-axis sprint magnitudes into a frame displacement.
     ///
     /// Forward follows local `-Z`, strafe follows the horizontal right axis, and
     /// elevation follows world `+Y`. Invalid input produces no displacement;
     /// finite frame durations are clamped to `0..=0.1` seconds.
     pub fn translation(self, rotation: Quat, speed: f32, delta_seconds: f32) -> Vec3 {
-        if !self.movement.is_finite() || !rotation.is_finite() || !speed.is_finite() {
+        if !self.movement.is_finite()
+            || !self.movement_scale.is_finite()
+            || !rotation.is_finite()
+            || !speed.is_finite()
+        {
             return Vec3::ZERO;
         }
         let axes = self.movement.clamp(Vec3::NEG_ONE, Vec3::ONE);
+        let movement_magnitude = axes.length();
+        let axes = axes.normalize_or_zero() * self.movement_scale;
+        if !axes.is_finite() {
+            return Vec3::ZERO;
+        }
         let right = (rotation * Vec3::X * Vec3::new(1.0, 0.0, 1.0)).normalize_or_zero();
         let direction = rotation * Vec3::NEG_Z * axes.z + right * axes.x + Vec3::Y * axes.y;
         direction.normalize_or_zero()
-            * axes.length().min(1.0)
+            * axes.length()
+            * movement_magnitude.min(1.0)
             * speed
-            * self.speed_multiplier()
             * frame_delta(delta_seconds)
+    }
+
+    pub(crate) fn scaled_movement(self) -> Vec3 {
+        if self.movement.is_finite() && self.movement_scale.is_finite() {
+            let movement = self.movement.clamp(Vec3::NEG_ONE, Vec3::ONE) * self.movement_scale;
+            if movement.is_finite() {
+                return movement;
+            }
+        }
+        Vec3::ZERO
     }
 
     /// Applies pixel-scaled look to a pose and returns an upright orientation.

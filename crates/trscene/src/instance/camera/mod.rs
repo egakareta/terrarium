@@ -273,7 +273,6 @@ impl CameraController {
             camera.with_pose(Mat4::from_rotation_translation(rotation, position));
             return;
         };
-        let axes = actions.movement;
         let offset = if camera.subject_offset.is_finite() {
             camera.subject_offset
         } else {
@@ -294,10 +293,10 @@ impl CameraController {
         self.orbit_yaw -= look.x;
         let (min_pitch, max_pitch) = self.subject_pitch_limits();
         self.orbit_pitch = (self.orbit_pitch + look.y).clamp(min_pitch, max_pitch);
-        let speed_multiplier = actions.speed_multiplier();
-        let movement = self.speed * speed_multiplier * delta_seconds;
+        let axes = actions.scaled_movement();
+        let movement = self.speed * delta_seconds;
         camera.subject_distance -= queued_subject_zoom + axes.z * movement;
-        let orbit_step = self.orbit_speed * speed_multiplier * delta_seconds;
+        let orbit_step = self.orbit_speed * delta_seconds;
         self.orbit_yaw -= axes.x * orbit_step;
         self.orbit_pitch += axes.y * orbit_step;
         self.orbit_pitch = self.orbit_pitch.clamp(min_pitch, max_pitch);

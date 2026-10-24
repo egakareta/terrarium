@@ -132,7 +132,11 @@ impl ControllerInput {
             ),
             look: Vec2::new(self.mouse_look_delta.0, self.mouse_look_delta.1)
                 + Vec2::new(self.touch.look_delta.x, self.touch.look_delta.y),
-            sprint: self.sprint,
+            movement_scale: if self.sprint {
+                Vec3::splat(2.5)
+            } else {
+                Vec3::ONE
+            },
         };
         self.mouse_look_delta = (0.0, 0.0);
         self.touch.look_delta = egui::Vec2::ZERO;

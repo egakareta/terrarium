@@ -126,7 +126,7 @@ fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
     let actions = ControllerActions {
         movement: Vec3::new(0.3, 0.0, 0.4),
         look: Vec2::ZERO,
-        sprint: true,
+        movement_scale: Vec3::splat(2.5),
     };
     let mut rig = Rig::new();
     let player = PlayerController::new(rig.id()).with_enabled(false);
@@ -137,6 +137,32 @@ fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
     assert!(rig.position().abs_diff_eq(camera.position(), 1e-5));
     assert!((rig.position().length() - 0.75).abs() < 1e-5);
     assert!(rig.forward().abs_diff_eq(Vec3::new(0.6, 0.0, -0.8), 1e-5));
+}
+
+#[test]
+fn action_sprint_magnitude_scales_movement_axes_independently() {
+    let movement_scale = Vec3::new(2.0, 1.0, 0.5);
+    let right = ControllerActions {
+        movement: Vec3::X,
+        movement_scale,
+        ..Default::default()
+    };
+    let forward = ControllerActions {
+        movement: Vec3::Z,
+        movement_scale,
+        ..Default::default()
+    };
+
+    assert!(
+        right
+            .translation(Quat::IDENTITY, 10.0, 0.1)
+            .abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1e-5)
+    );
+    assert!(
+        forward
+            .translation(Quat::IDENTITY, 10.0, 0.1)
+            .abs_diff_eq(Vec3::new(0.0, 0.0, -0.5), 1e-5)
+    );
 }
 
 #[test]
@@ -218,7 +244,7 @@ fn player_state_bindings_crossfade_and_keep_playing_without_restarting() {
     controller.step_workspace_with_actions(
         &mut workspace,
         ControllerActions {
-            sprint: true,
+            movement_scale: Vec3::splat(2.5),
             ..walking
         },
         0.0,

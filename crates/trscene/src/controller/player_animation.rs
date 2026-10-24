@@ -10,7 +10,7 @@ pub enum PlayerAnimationState {
     Idle,
     /// Horizontal movement at normal speed.
     Walk,
-    /// Horizontal movement with the sprint multiplier.
+    /// Horizontal movement with sprint magnitudes applied.
     Sprint,
     /// An airborne dynamic rig with upward velocity.
     Jump,

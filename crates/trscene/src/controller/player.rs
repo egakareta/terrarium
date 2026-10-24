@@ -182,13 +182,18 @@ impl PlayerController {
         let (movement, rotation) = self.motion(actions, movement_rotation, pose, delta_seconds);
         let mut horizontal = actions;
         horizontal.movement.y = 0.0;
+        let movement_magnitude = horizontal
+            .movement
+            .clamp(Vec3::NEG_ONE, Vec3::ONE)
+            .length_squared();
+        let sprint_magnitude = horizontal.scaled_movement().length_squared();
         self.locomotion = if horizontal
             .translation(movement_rotation, self.speed, 1.0)
             .length_squared()
             <= 1e-8
         {
             PlayerAnimationState::Idle
-        } else if actions.sprint {
+        } else if sprint_magnitude > movement_magnitude {
             PlayerAnimationState::Sprint
         } else {
             PlayerAnimationState::Walk

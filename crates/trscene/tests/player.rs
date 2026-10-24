@@ -44,7 +44,7 @@ fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
     player.step_workspace_with_actions(
         &mut workspace,
         ControllerActions {
-            sprint: true,
+            movement_scale: Vec3::splat(2.5),
             ..walking
         },
         0.1,
