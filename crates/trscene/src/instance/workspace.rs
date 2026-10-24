@@ -425,12 +425,12 @@ impl Workspace {
     ///
     /// The result ignores egui keyboard capture, allowing integrations to move
     /// focus to the scene before processing the same key event.
-    pub fn has_eframe_movement_input(&self, input: &crate::egui::InputState) -> bool {
-        self.camera_controller.has_eframe_movement_input(input)
+    pub fn has_movement_input(&self, input: &crate::egui::InputState) -> bool {
+        self.camera_controller.has_movement_input(input)
             || self.controllers.iter().any(|(_, controller)| {
                 controller
                     .input()
-                    .is_some_and(|controls| controls.has_eframe_movement_input(input))
+                    .is_some_and(|controls| controls.has_movement_input(input))
             })
     }
 

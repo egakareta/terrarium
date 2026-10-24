@@ -272,7 +272,7 @@ impl ControllerInput {
     ///
     /// The result is independent of egui keyboard capture so an integration can
     /// route focus to the scene. Sprint alone does not count as movement.
-    pub fn has_eframe_movement_input(&self, input: &egui::InputState) -> bool {
+    pub fn has_movement_input(&self, input: &egui::InputState) -> bool {
         self.keyboard_enabled
             && input.focused
             && [
