@@ -25,6 +25,11 @@ pub trait DevtoolsHost {
     /// Returns the title used for the scene tab.
     fn scene_title(&self) -> &str;
 
+    /// Returns the average rendered frames per second, when a renderer is available.
+    fn fps(&self) -> Option<f32> {
+        None
+    }
+
     /// Returns mutable access to the workspace being inspected.
     fn workspace(&mut self) -> &mut Workspace;
 
@@ -233,6 +238,7 @@ impl Devtools {
         let mut selection_changed = false;
         let mut panel_layers = Vec::new();
         let mut context_delete_selection = None;
+        let fps = host.fps();
         let mut viewer = DevtoolsTabViewer {
             host,
             scene_title: scene_title.clone(),
@@ -277,6 +283,10 @@ impl Devtools {
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(concat!("terrarium@", env!("CARGO_PKG_VERSION")));
+                            ui.separator();
+                            if let Some(fps) = fps {
+                                ui.label(format!("{fps:.0} FPS"));
+                            }
                         });
                     });
                 });

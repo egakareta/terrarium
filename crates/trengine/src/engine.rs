@@ -826,6 +826,10 @@ impl trdevtools::DevtoolsHost for Engine {
         &self.title
     }
 
+    fn fps(&self) -> Option<f32> {
+        Some(self.renderer().fps())
+    }
+
     fn workspace(&mut self) -> &mut Workspace {
         self.workspace_mut()
     }
@@ -941,6 +945,10 @@ struct AppAdapterDevtoolsHost<'a, A> {
 impl<A: App> trdevtools::DevtoolsHost for AppAdapterDevtoolsHost<'_, A> {
     fn scene_title(&self) -> &str {
         &self.engine.title
+    }
+
+    fn fps(&self) -> Option<f32> {
+        Some(self.engine.renderer().fps())
     }
 
     fn workspace(&mut self) -> &mut Workspace {
