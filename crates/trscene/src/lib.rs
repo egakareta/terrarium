@@ -10,9 +10,10 @@ pub use euphorium;
 pub use rapier3d;
 #[doc(hidden)]
 pub use serde_json;
-pub use trrendert::{glam, *};
 #[doc(hidden)]
-pub use trscene_derive::*;
+pub use trmacros::__instance_expand;
+pub use trmacros::instance;
+pub use trrendert::{glam, *};
 pub use winit;
 
 pub mod controller;

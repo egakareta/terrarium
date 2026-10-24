@@ -13,38 +13,34 @@ members = [
   ".",
   "crates/egui-text-outline/",
   "crates/trclipboard/",
-  "crates/trdevtools-derive/",
   "crates/trdevtools/",
   "crates/trdylib/",
   "crates/tregui/",
   "crates/trengine/",
-  "crates/trengine-derive/",
   "crates/trfont/",
   "crates/trinternal/",
+  "crates/trmacros/",
   "crates/trpersistence/",
   "crates/trrender/",
   "crates/trrendert/",
   "crates/trscene/",
-  "crates/trscene-derive/",
   "crates/trtask/",
 ]
 default-members = [
   ".",
   "crates/egui-text-outline/",
   "crates/trclipboard/",
-  "crates/trdevtools-derive/",
   "crates/trdevtools/",
   "crates/trdylib/",
   "crates/tregui/",
   "crates/trengine/",
-  "crates/trengine-derive/",
   "crates/trfont/",
   "crates/trinternal/",
+  "crates/trmacros/",
   "crates/trpersistence/",
   "crates/trrender/",
   "crates/trrendert/",
   "crates/trscene/",
-  "crates/trscene-derive/",
   "crates/trtask/",
 ]
 
@@ -60,18 +56,16 @@ license = "MIT"
 egui-text-outline = { path = "crates/egui-text-outline/", version = "0.1" }
 trclipboard = { path = "crates/trclipboard/", version = "0.1" }
 trdevtools = { path = "crates/trdevtools/", version = "0.1", default-features = false }
-trdevtools-derive = { path = "crates/trdevtools-derive/", version = "0.1" }
 trdylib = { path = "crates/trdylib/", version = "0.1" }
 tregui = { path = "crates/tregui/", version = "0.1", default-features = false }
 trengine = { path = "crates/trengine/", version = "0.1", default-features = false }
-trengine-derive = { path = "crates/trengine-derive/", version = "0.1" }
 trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
 trinternal = { path = "crates/trinternal/", version = "0.1" }
+trmacros = { path = "crates/trmacros/", version = "0.1", default-features = false }
 trpersistence = { path = "crates/trpersistence/", version = "0.1" }
 trrender = { path = "crates/trrender/", version = "0.1" }
 trrendert = { path = "crates/trrendert/", version = "0.1" }
 trscene = { path = "crates/trscene/", version = "0.1" }
-trscene-derive = { path = "crates/trscene-derive/", version = "0.1" }
 trtask = { path = "crates/trtask/", version = "0.1" }
 
 [[example]]

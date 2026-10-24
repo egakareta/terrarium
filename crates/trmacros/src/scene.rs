@@ -1,6 +1,3 @@
-#![deny(missing_docs)]
-//! Field-driven instance composition and API generation.
-
 use heck::ToSnakeCase;
 use proc_macro::TokenStream;
 use proc_macro_crate::{FoundCrate, crate_name};
@@ -14,12 +11,7 @@ use syn::{
     visit_mut::{self, VisitMut},
 };
 
-/// Defines a composed instance and generates its APIs.
-///
-/// See the [instance composition guide](https://egakareta.github.io/terrarium/docs/instance.html)
-/// for the field roles, property options, generated methods, overrides, and examples.
-#[proc_macro]
-pub fn instance(input: TokenStream) -> TokenStream {
+pub(crate) fn instance(input: TokenStream) -> TokenStream {
     let input = Tokens::from(input);
     finish((|| {
         let definition = syn::parse2::<Definition>(input.clone())?;
@@ -34,10 +26,7 @@ pub fn instance(input: TokenStream) -> TokenStream {
     })())
 }
 
-/// Continues expansion after a composed type supplies its public schema.
-#[doc(hidden)]
-#[proc_macro]
-pub fn __instance_expand(input: TokenStream) -> TokenStream {
+pub(crate) fn __instance_expand(input: TokenStream) -> TokenStream {
     let state = parse_macro_input!(input as State);
     finish(collect(state))
 }

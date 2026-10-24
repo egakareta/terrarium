@@ -3,7 +3,7 @@ use std::{
     fmt::{self, Debug, Write},
 };
 
-pub use trdevtools_derive::*;
+pub use trmacros::Inspect;
 
 use crate::{glam::*, *};
 
