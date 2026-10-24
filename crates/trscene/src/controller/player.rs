@@ -28,6 +28,8 @@ pub struct PlayerController {
     pub camera_controller: CameraController,
     /// Movement speed in world units per second.
     pub speed: f32,
+    /// Movement scale applied while sprint is held. Defaults to `2.25`.
+    pub sprint_scale: f32,
     /// Upward jump velocity in world units per second.
     pub jump_speed: f32,
     /// Camera orbit sensitivity in radians per physical pixel.
@@ -48,7 +50,8 @@ impl PlayerController {
     /// Creates a controller for a custom rig with WASD/Space/Shift and drag-look bindings.
     ///
     /// Space uses the up action to jump a grounded dynamic rig. The down action is
-    /// unbound. Mouse and touch look orbit the active camera when it follows the rig.
+    /// unbound. Shift scales movement by `2.25` by default. Mouse and touch look orbit
+    /// the active camera when it follows the rig.
     pub fn new(rig: InstanceId) -> Self {
         let mut input = ControllerInput::default();
         input.key_bindings.down.clear();
@@ -57,6 +60,7 @@ impl PlayerController {
             input,
             camera_controller: CameraController::default(),
             speed: 6.0,
+            sprint_scale: 2.25,
             jump_speed: 7.0,
             sensitivity: 0.0025,
             turn_factor: 10.0,
@@ -106,6 +110,12 @@ impl PlayerController {
         self
     }
 
+    /// Sets the movement scale applied while sprint is held.
+    pub fn with_sprint_scale(mut self, scale: f32) -> Self {
+        self.sprint_scale = scale;
+        self
+    }
+
     /// Sets the upward jump velocity in world units per second. Non-positive or
     /// non-finite values disable jumping.
     pub fn with_jump_speed(mut self, speed: f32) -> Self {
@@ -131,7 +141,7 @@ impl PlayerController {
     /// no physics step is performed. Use this controller as the engine's custom
     /// controller for camera-relative movement, camera orbit, and physics integration.
     pub fn step_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
-        let actions = self.input.take_actions();
+        let actions = self.input.take_actions_and_scroll(self.sprint_scale).0;
         self.step_rig_with_actions(rig, actions, delta_seconds);
     }
 
@@ -333,7 +343,7 @@ impl Controller for PlayerController {
     }
 
     fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let (actions, scroll_delta) = self.input.take_actions_and_scroll();
+        let (actions, scroll_delta) = self.input.take_actions_and_scroll(self.sprint_scale);
         self.step_workspace_with_actions(workspace, actions, delta_seconds);
         if scroll_delta != 0.0 {
             let follows_rig = self

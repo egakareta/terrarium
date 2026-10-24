@@ -85,7 +85,7 @@ fn player_movement_carries_scaled_rig_descendants_and_normalizes_diagonals() {
 
     assert!(
         rig.position()
-            .abs_diff_eq(initial + Vec3::new(1.0, 0.0, -1.0).normalize() * 1.5, 1e-5)
+            .abs_diff_eq(initial + Vec3::new(1.0, 0.0, -1.0).normalize() * 1.35, 1e-5)
     );
     assert!(
         rig.pivot()
@@ -137,6 +137,48 @@ fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
     assert!(rig.position().abs_diff_eq(camera.position(), 1e-5));
     assert!((rig.position().length() - 0.75).abs() < 1e-5);
     assert!(rig.forward().abs_diff_eq(Vec3::new(0.6, 0.0, -0.8), 1e-5));
+}
+
+#[test]
+fn input_sprint_uses_distinct_player_and_camera_scales() {
+    let mut rig = Rig::new();
+    let mut player = PlayerController::new(rig.id());
+    player.forward = true;
+    player.sprint = true;
+    player.step_rig(&mut rig, 0.1);
+    assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -1.35), 1e-5));
+
+    let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
+    let mut camera_controller = CameraController::default();
+    camera_controller.forward = true;
+    camera_controller.sprint = true;
+    camera_controller.step_camera(&mut camera, None, 0.1);
+    assert!(
+        camera
+            .position()
+            .abs_diff_eq(Vec3::new(0.0, 0.0, -1.5), 1e-5)
+    );
+}
+
+#[test]
+fn player_and_camera_sprint_scales_are_configurable() {
+    let mut rig = Rig::new();
+    let mut player = PlayerController::new(rig.id()).with_sprint_scale(3.0);
+    player.forward = true;
+    player.sprint = true;
+    player.step_rig(&mut rig, 0.1);
+    assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -1.8), 1e-5));
+
+    let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
+    let mut camera_controller = CameraController::default().with_sprint_scale(4.0);
+    camera_controller.forward = true;
+    camera_controller.sprint = true;
+    camera_controller.step_camera(&mut camera, None, 0.1);
+    assert!(
+        camera
+            .position()
+            .abs_diff_eq(Vec3::new(0.0, 0.0, -2.4), 1e-5)
+    );
 }
 
 #[test]

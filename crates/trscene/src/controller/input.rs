@@ -108,10 +108,13 @@ impl Default for ControllerInput {
 impl ControllerInput {
     /// Reads movement and consumes accumulated look and wheel input from enabled devices.
     pub fn take_actions(&mut self) -> ControllerActions {
-        self.take_actions_and_scroll().0
+        self.take_actions_and_scroll(2.5).0
     }
 
-    pub(crate) fn take_actions_and_scroll(&mut self) -> (ControllerActions, f32) {
+    pub(crate) fn take_actions_and_scroll(
+        &mut self,
+        sprint_scale: f32,
+    ) -> (ControllerActions, f32) {
         if !self.mouse_enabled {
             self.mouse_look_delta = (0.0, 0.0);
             self.mouse_scroll_delta = 0.0;
@@ -133,7 +136,7 @@ impl ControllerInput {
             look: Vec2::new(self.mouse_look_delta.0, self.mouse_look_delta.1)
                 + Vec2::new(self.touch.look_delta.x, self.touch.look_delta.y),
             movement_scale: if self.sprint {
-                Vec3::splat(2.5)
+                Vec3::splat(sprint_scale)
             } else {
                 Vec3::ONE
             },

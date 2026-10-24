@@ -105,6 +105,8 @@ pub struct CameraController {
     pub input: ControllerInput,
     /// Movement and zoom speed in world units per second.
     pub speed: f32,
+    /// Movement scale applied while sprint is held. Defaults to `2.5`.
+    pub sprint_scale: f32,
     /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
     pub sensitivity: f32,
     /// Minimum camera distance from the subject's focus point.
@@ -149,6 +151,7 @@ impl CameraController {
         Self {
             input,
             speed,
+            sprint_scale: 2.5,
             sensitivity,
             min_subject_distance: 0.5,
             max_subject_distance: 100.0,
@@ -183,6 +186,12 @@ impl CameraController {
         self
     }
 
+    /// Sets the movement scale applied while sprint is held.
+    pub fn with_sprint_scale(mut self, scale: f32) -> Self {
+        self.sprint_scale = scale;
+        self
+    }
+
     /// Enables or disables keyboard, mouse, and touch input together.
     pub fn with_enabled(mut self, enabled: bool) -> Self {
         self.input.set_enabled(enabled);
@@ -212,14 +221,14 @@ impl CameraController {
     /// In free flight, forward follows the camera's look direction, strafing stays
     /// horizontal, and elevation follows world Y. With a subject, look and
     /// left/right orbit, forward/backward zoom, and up/down changes orbit pitch.
-    /// Sprint multiplies movement by `2.5`; frame time is capped at 100 ms.
+    /// Sprint uses [`Self::sprint_scale`]; frame time is capped at 100 ms.
     pub fn step_camera(
         &mut self,
         camera: &mut Camera,
         subject: Option<(InstanceId, Mat4)>,
         delta_seconds: f32,
     ) {
-        let actions = self.input.take_actions();
+        let actions = self.input.take_actions_and_scroll(self.sprint_scale).0;
         self.step_camera_with_actions(camera, subject, actions, delta_seconds);
     }
 
