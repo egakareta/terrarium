@@ -92,6 +92,10 @@ required-features = ["default-player-rig", "physics"]
 name = "sound"
 required-features = ["sound"]
 
+[[bench]]
+name = "wgpu_benchmark"
+harness = false
+
 [[test]]
 name = "bevy"
 required-features = ["bevy"]
@@ -120,6 +124,10 @@ bevy_ecs = "0.20"
 image = { version = "0.25", default-features = false, features = ["png"] }
 paste = "1"
 pollster = "1"
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+anyhow = "1"
+wgpu-benchmark = { git = "https://github.com/gfx-rs/wgpu", rev = "60036cdc0ad979c96ec8277df41ec35b098502f6" }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 trdylib = { workspace = true, optional = true }
