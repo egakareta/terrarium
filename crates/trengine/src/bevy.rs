@@ -62,7 +62,7 @@ fn advance_workspace(
     mut workspace: NonSendMut<Workspace>,
     mut controller: NonSendMut<Box<dyn Controller>>,
 ) {
-    workspace.update_with_controller(&mut **controller, time.delta_secs());
+    crate::engine::update_scene(&mut workspace, &mut **controller, time.delta_secs());
 }
 
 pub(crate) fn attach_app(

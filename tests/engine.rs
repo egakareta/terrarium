@@ -150,6 +150,36 @@ fn selected_owned_controllers_drive_the_scene_and_can_be_replaced() -> Result<()
         engine = engine.with_controller(PlayerController::new(rig));
         frame(&mut engine, true);
         assert!(engine.workspace().get::<Rig>(rig).unwrap().position().z < position.z);
+
+        #[cfg(feature = "physics")]
+        {
+            let player = engine
+                .controller_mut()
+                .downcast_mut::<PlayerController>()
+                .unwrap();
+            player.camera.subject_offset = glam::Vec3::Y;
+            player.camera.subject_distance = 8.0;
+            let subject = engine.workspace_mut().get_mut::<Rig>(rig).unwrap();
+            subject.with_anchored(false);
+            subject.with_position(glam::Vec3::Y * 4.0);
+            subject.add_child_local(Part::new().with_position(glam::Vec3::Y * 0.5));
+            engine.workspace_mut().current_camera.set_subject(Some(rig));
+
+            frame(&mut engine, true);
+
+            let position = engine.workspace().get::<Rig>(rig).unwrap().position();
+            assert!(position.z < 0.0);
+            assert!(position.y < 4.0);
+            let camera = &engine.workspace().current_camera;
+            let to_subject = position + glam::Vec3::Y - camera.position();
+            assert!((to_subject.length() - 8.0).abs() < 1e-5);
+            assert!(camera.forward().dot(to_subject.normalize()) > 0.9999);
+            #[cfg(feature = "sound")]
+            assert!(
+                glam::Vec3::from_array(engine.workspace().soundscape().listener().position)
+                    .abs_diff_eq(camera.position(), 1e-5)
+            );
+        }
     }
     Ok(())
 }

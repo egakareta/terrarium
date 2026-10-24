@@ -55,8 +55,9 @@ impl ControlledWorkspace {
     }
 
     fn update(&mut self, delta: f32) {
-        self.workspace
-            .update_with_controller(self.controller.as_mut(), delta);
+        self.controller.update(&mut self.workspace, delta);
+        self.workspace.update(delta);
+        self.controller.post_update(&mut self.workspace, delta);
     }
     fn update_controllers(&mut self, delta: f32) {
         self.controller.update(&mut self.workspace, delta);

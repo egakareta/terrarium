@@ -374,7 +374,7 @@ impl Engine {
             context.request_repaint();
             return;
         }
-        workspace.update_with_controller(self.controller.as_mut(), delta);
+        update_scene(workspace, self.controller.as_mut(), delta);
         context.request_repaint();
     }
 
@@ -532,6 +532,28 @@ impl Engine {
 
             Ok(())
         }
+    }
+}
+
+pub(crate) fn update_scene(
+    workspace: &mut Workspace,
+    controller: &mut dyn Controller,
+    delta_seconds: f32,
+) {
+    workspace.update_tweens(delta_seconds);
+    workspace.update_animations(delta_seconds);
+    let delta = if delta_seconds.is_finite() {
+        delta_seconds.clamp(0.0, 0.1)
+    } else {
+        0.0
+    };
+    controller.update(workspace, delta);
+    #[cfg(feature = "physics")]
+    workspace.update_physics(delta_seconds);
+    controller.post_update(workspace, delta);
+    #[cfg(feature = "sound")]
+    for error in workspace.update_audio(delta_seconds) {
+        log::error!("{error}");
     }
 }
 

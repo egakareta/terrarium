@@ -291,30 +291,12 @@ impl Workspace {
         self.descendants()
     }
 
-    /// Advances animation, physics, and audio without applying a controller.
+    /// Advances animation, physics, and audio.
     pub fn update(&mut self, delta_seconds: f32) {
-        self.advance(delta_seconds, None);
-    }
-
-    /// Advances the scene with an externally owned controller.
-    ///
-    /// Controller movement runs before physics; camera behavior runs afterward.
-    pub fn update_with_controller(&mut self, controller: &mut dyn Controller, delta_seconds: f32) {
-        self.advance(delta_seconds, Some(controller));
-    }
-
-    fn advance(&mut self, delta_seconds: f32, mut controller: Option<&mut dyn Controller>) {
         self.update_tweens(delta_seconds);
         self.update_animations(delta_seconds);
-        let delta = crate::controller::frame_delta(delta_seconds);
-        if let Some(controller) = controller.as_deref_mut() {
-            controller.update(self, delta);
-        }
         #[cfg(feature = "physics")]
         self.update_physics(delta_seconds);
-        if let Some(controller) = controller {
-            controller.post_update(self, delta);
-        }
         #[cfg(feature = "sound")]
         for error in self.update_audio(delta_seconds) {
             log::error!("{error}");
@@ -333,8 +315,9 @@ impl Workspace {
         &mut self.physics
     }
 
+    /// Synchronizes scene colliders and advances physics, applying the resulting poses.
     #[cfg(feature = "physics")]
-    fn update_physics(&mut self, delta_seconds: f32) {
+    pub fn update_physics(&mut self, delta_seconds: f32) {
         let mut instances = Vec::new();
         for child in self.children() {
             PhysicsInstance::collect(child.as_ref(), &mut instances);
@@ -636,9 +619,9 @@ mod tests {
         controller.subject_distance = 8.0;
         controller.subject_offset = Vec3::Y;
 
-        workspace.update_with_controller(&mut controller, 1.0 / 60.0);
+        controller.post_update(&mut workspace, 1.0 / 60.0);
         controller.mouse_look_delta = (0.0, 10.0);
-        workspace.update_with_controller(&mut controller, 1.0 / 60.0);
+        controller.post_update(&mut workspace, 1.0 / 60.0);
 
         let focus = Vec3::Y;
         let camera_position = workspace.current_camera.position();
@@ -655,7 +638,7 @@ mod tests {
         workspace.get_mut::<Part>(subject_id).unwrap().pivot_to(
             crate::glam::Mat4::from_translation(Vec3::new(10.0, 0.0, 0.0)),
         );
-        workspace.update_with_controller(&mut controller, 1.0 / 60.0);
+        controller.post_update(&mut workspace, 1.0 / 60.0);
 
         let moved_position = workspace.current_camera.position();
         assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
@@ -663,7 +646,7 @@ mod tests {
         let mut cloned_workspace = workspace.clone();
         let cloned_subject = cloned_workspace.current_camera.subject().unwrap();
         assert_ne!(cloned_subject, subject_id);
-        cloned_workspace.update_with_controller(&mut controller, 1.0 / 60.0);
+        controller.post_update(&mut cloned_workspace, 1.0 / 60.0);
         let cloned_camera_position = cloned_workspace.current_camera.position();
         cloned_workspace
             .get_mut::<Part>(cloned_subject)
@@ -671,7 +654,7 @@ mod tests {
             .pivot_to(crate::glam::Mat4::from_translation(Vec3::new(
                 20.0, 0.0, 0.0,
             )));
-        cloned_workspace.update_with_controller(&mut controller, 1.0 / 60.0);
+        controller.post_update(&mut cloned_workspace, 1.0 / 60.0);
         assert!(
             (cloned_workspace.current_camera.position().x - cloned_camera_position.x - 10.0).abs()
                 < 1e-5
@@ -679,7 +662,7 @@ mod tests {
 
         workspace.current_camera.set_subject(None);
         controller.forward = true;
-        workspace.update_with_controller(&mut controller, 0.1);
+        controller.post_update(&mut workspace, 0.1);
 
         assert_eq!(workspace.current_camera.subject(), None);
         assert!(workspace.current_camera.position().z < moved_position.z);

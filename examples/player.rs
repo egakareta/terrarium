@@ -249,8 +249,10 @@ mod tests {
             }
         }
         fn update(&mut self, delta: f32) {
-            self.workspace
-                .update_with_controller(self.controller.as_mut().unwrap(), delta);
+            let controller = self.controller.as_mut().unwrap();
+            controller.update(&mut self.workspace, delta);
+            self.workspace.update(delta);
+            controller.post_update(&mut self.workspace, delta);
         }
         fn process_input(&mut self, context: &egui::Context) {
             self.controller.as_mut().unwrap().process_input(context);

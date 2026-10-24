@@ -37,7 +37,7 @@
 //! let mut workspace = Workspace::new();
 //! let rig = workspace.add_child(Rig::new());
 //! let mut controller = Autopilot { instance: InstanceData::new("Autopilot"), rig: Some(rig) };
-//! workspace.update_with_controller(&mut controller, 0.1);
+//! controller.update(&mut workspace, 0.1);
 //! assert!(workspace.get::<Rig>(rig).unwrap().position().z < 0.0);
 //! ```
 
@@ -87,9 +87,6 @@ pub trait Controller: Instance {
     }
 
     /// Updates input state from a winit window event and reports whether it handled it.
-    ///
-    /// Returning `true` does not prevent the workspace from forwarding the event
-    /// to other controllers.
     fn process_window_event(&mut self, event: &WindowEvent) -> bool {
         self.input_mut()
             .is_some_and(|input| input.process_window_event(event))
@@ -105,7 +102,7 @@ pub trait Controller: Instance {
     /// Applies this controller's behavior for one frame.
     ///
     /// Runs after animation updates and before physics.
-    /// `delta_seconds` is finite and clamped to `0..=0.1` by the workspace.
+    /// `delta_seconds` is finite and clamped to `0..=0.1` by the host.
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32);
 
     /// Applies camera or other behavior after physics has updated scene poses.
