@@ -1,5 +1,5 @@
 use trscene::{
-    Camera, CameraController, Instance, PVInstanceExt, Part,
+    Camera, CameraController, Controller, ControllerInputExt, Instance, PVInstanceExt, Part,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
@@ -26,7 +26,7 @@ fn raw_input(events: Vec<Event>) -> RawInput {
 
 fn frame(context: &Context, controller: &mut CameraController, events: Vec<Event>) {
     let mut output = context.run_ui(raw_input(events), |ui| {
-        controller.input.process_input(ui.ctx());
+        controller.process_input(ui.ctx());
     });
     output.textures_delta.clear();
 }
@@ -63,10 +63,10 @@ fn joystick_matches_keyboard_movement_in_free_and_subject_modes() {
                 ],
             );
             let mut keyboard_controller = CameraController::new(6.0, 0.0025);
-            keyboard_controller.forward = direction.y < 0.0;
-            keyboard_controller.backward = direction.y > 0.0;
-            keyboard_controller.left = direction.x < 0.0;
-            keyboard_controller.right = direction.x > 0.0;
+            keyboard_controller.set_forward(direction.y < 0.0);
+            keyboard_controller.set_backward(direction.y > 0.0);
+            keyboard_controller.set_left(direction.x < 0.0);
+            keyboard_controller.set_right(direction.x > 0.0);
             if subject.is_some() && direction.x != 0.0 && direction.y != 0.0 {
                 keyboard_controller.speed *= std::f32::consts::FRAC_1_SQRT_2;
                 keyboard_controller.orbit_speed *= std::f32::consts::FRAC_1_SQRT_2;
@@ -141,8 +141,8 @@ fn two_fingers_can_move_and_look_in_either_start_order() {
                 ],
             );
             let mut expected_controller = CameraController::new(6.0, 0.0025);
-            expected_controller.forward = true;
-            expected_controller.process_mouse_motion((20.0, -15.0));
+            expected_controller.set_forward(true);
+            expected_controller.set_mouse_look_delta((20.0, -15.0));
             let mut camera = Camera::default();
             let mut expected = camera.clone();
             controller.step_camera(&mut camera, subject, 0.1);
@@ -186,7 +186,7 @@ fn synthetic_pointer_motion_does_not_rotate_the_joystick_or_double_touch_look() 
         let mut expected = camera.clone();
         let mut expected_controller = CameraController::default();
         if !on_joystick {
-            expected_controller.process_mouse_motion((20.0, -15.0));
+            expected_controller.set_mouse_look_delta((20.0, -15.0));
         }
         controller.step_camera(&mut camera, None, 0.1);
         expected_controller.step_camera(&mut expected, None, 0.1);
@@ -265,9 +265,9 @@ fn extra_fingers_and_other_devices_cannot_take_over_a_gesture() {
 #[test]
 fn touch_input_is_independent_of_keyboard_and_mouse_and_can_be_disabled() {
     let context = Context::default();
-    let mut controller = CameraController::default()
-        .with_keyboard_enabled(false)
-        .with_mouse_enabled(false);
+    let mut controller = CameraController::default();
+    controller.set_keyboard_enabled(false);
+    controller.set_mouse_enabled(false);
     let mut camera = Camera::default();
     start_joystick(&context, &mut controller);
     frame(
@@ -289,11 +289,17 @@ fn touch_input_is_independent_of_keyboard_and_mouse_and_can_be_disabled() {
     start_joystick(&context, &mut controller);
     controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(before, 1e-5));
-    assert!(!controller.is_enabled());
+    assert!(!controller.keyboard_enabled());
+    assert!(!controller.mouse_enabled());
+    assert!(!controller.touch_enabled());
 
-    controller.set_enabled(true);
+    controller.set_keyboard_enabled(true);
+    controller.set_mouse_enabled(true);
+    controller.set_touch_enabled(true);
     start_joystick(&context, &mut controller);
-    controller.set_enabled(false);
+    controller.set_keyboard_enabled(false);
+    controller.set_mouse_enabled(false);
+    controller.set_touch_enabled(false);
     controller.step_camera(&mut camera, None, 0.1);
     assert!(camera.pose().abs_diff_eq(before, 1e-5));
 }
@@ -311,7 +317,7 @@ fn touch_on_egui_widget_does_not_start_camera_gesture() {
     ] {
         let mut output = context.run_ui(raw_input(events), |ui| {
             ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
-            controller.input.process_input(ui.ctx());
+            controller.process_input(ui.ctx());
         });
         output.textures_delta.clear();
     }
@@ -340,7 +346,7 @@ fn focus_loss_and_resize_cancel_touch_gestures() {
         } else {
             input.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, vec2(600.0, 800.0)));
         }
-        let mut output = context.run_ui(input, |ui| controller.input.process_input(ui.ctx()));
+        let mut output = context.run_ui(input, |ui| controller.process_input(ui.ctx()));
         output.textures_delta.clear();
         let initial = camera.pose();
         controller.step_camera(&mut camera, None, 0.1);
@@ -371,12 +377,12 @@ fn touch_drag_uses_physical_pixels_at_high_dpi() {
         .get_mut(&egui::ViewportId::ROOT)
         .unwrap()
         .native_pixels_per_point = Some(2.0);
-    let mut output = context.run_ui(input, |ui| controller.input.process_input(ui.ctx()));
+    let mut output = context.run_ui(input, |ui| controller.process_input(ui.ctx()));
     output.textures_delta.clear();
     let mut camera = Camera::default();
     let mut expected = camera.clone();
     let mut expected_controller = CameraController::default();
-    expected_controller.process_mouse_motion((20.0, -10.0));
+    expected_controller.set_mouse_look_delta((20.0, -10.0));
     controller.step_camera(&mut camera, None, 0.1);
     expected_controller.step_camera(&mut expected, None, 0.1);
     assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));
@@ -450,7 +456,7 @@ fn a_second_finger_on_an_egui_area_does_not_rotate_the_camera() {
                 .show(ui.ctx(), |ui| {
                     ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
                 });
-            controller.input.process_input(ui.ctx());
+            controller.process_input(ui.ctx());
         });
         output.textures_delta.clear();
     }
@@ -489,7 +495,7 @@ fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
         ] {
             let mut output = context.run_ui(raw_input(events), |ui| {
                 ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
-                controller.input.process_input(ui.ctx());
+                controller.process_input(ui.ctx());
             });
             output.textures_delta.clear();
         }
@@ -511,13 +517,13 @@ fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
                 let (_, response) = ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
                 assert!(response.dragged());
                 assert!(ui.ctx().egui_wants_pointer_input());
-                controller.input.process_input(ui.ctx());
+                controller.process_input(ui.ctx());
             });
             output.textures_delta.clear();
         }
         let mut expected_controller = CameraController::new(6.0, 0.0025);
-        expected_controller.forward = true;
-        expected_controller.process_mouse_motion((20.0, -15.0));
+        expected_controller.set_forward(true);
+        expected_controller.set_mouse_look_delta((20.0, -15.0));
         let mut expected = camera.clone();
         controller.step_camera(&mut camera, subject, 0.1);
         expected_controller.step_camera(&mut expected, subject, 0.1);
@@ -543,7 +549,7 @@ fn a_second_finger_on_a_background_widget_does_not_rotate_the_camera() {
     ] {
         let mut output = context.run_ui(raw_input(events), |ui| {
             ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
-            controller.input.process_input(ui.ctx());
+            controller.process_input(ui.ctx());
         });
         output.textures_delta.clear();
     }
@@ -599,8 +605,8 @@ fn mouse_drag_and_keyboard_movement_work_after_touch_ends() {
         ],
     );
     let mut expected_controller = CameraController::new(6.0, 0.0025);
-    expected_controller.forward = true;
-    expected_controller.process_mouse_motion((20.0, -15.0));
+    expected_controller.set_forward(true);
+    expected_controller.set_mouse_look_delta((20.0, -15.0));
     controller.step_camera(&mut camera, None, 0.1);
     expected_controller.step_camera(&mut expected, None, 0.1);
     assert!(camera.pose().abs_diff_eq(expected.pose(), 1e-5));

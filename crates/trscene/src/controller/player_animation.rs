@@ -22,8 +22,10 @@ pub enum PlayerAnimationState {
 ///
 /// Unbound states leave the current animation playing. Airborne states require
 /// physics; idle, walk, and sprint also work with anchored rigs.
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 #[derive(Clone, Debug)]
 pub struct PlayerAnimations {
+    #[cfg_attr(feature = "devtools", inspect(skip))]
     states: BTreeMap<PlayerAnimationState, AnimationPlayer>,
     /// Crossfade duration in seconds. Invalid values switch immediately.
     pub transition_duration: f32,

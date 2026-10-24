@@ -6,11 +6,21 @@
 //! defaults to [`CameraController`].
 //!
 //! ```
-//! use trscene::{Controller, ControllerActions, PVInstanceExt, Instance, InstanceId, Rig, Workspace};
+//! use trscene::{
+//!     Controller, ControllerActions, Instance, InstanceData, InstanceId, PVInstanceExt, Rig,
+//!     Workspace,
+//! };
 //! use trscene::glam::{Quat, Vec3};
 //!
-//! #[derive(Debug)]
-//! struct Autopilot { rig: Option<InstanceId> }
+//! trscene::instance! {
+//!     #[instance(default = false)]
+//!     #[derive(Clone, Debug)]
+//!     struct Autopilot {
+//!         #[data]
+//!         identity: trscene::InstanceData,
+//!         rig: Option<InstanceId>,
+//!     }
+//! }
 //!
 //! impl Controller for Autopilot {
 //!     fn step(&mut self, workspace: &mut Workspace, delta: f32) {
@@ -25,12 +35,15 @@
 //!
 //! let mut workspace = Workspace::new();
 //! let rig = workspace.add_child(Rig::new());
-//! let mut controller: Box<dyn Controller> = Box::new(Autopilot { rig: Some(rig) });
+//! let mut controller: Box<dyn Controller> = Box::new(Autopilot {
+//!     identity: InstanceData::new("Autopilot"),
+//!     rig: Some(rig),
+//! });
 //! controller.step(&mut workspace, 0.1);
 //! assert!(workspace.get::<Rig>(rig).unwrap().position().z < 0.0);
 //! ```
 
-use std::{any::Any, fmt::Debug};
+use std::any::Any;
 
 use crate::{
     winit::event::{DeviceEvent, WindowEvent},
@@ -51,11 +64,14 @@ pub use player_animation::*;
 
 /// A per-frame behavior owned by an engine.
 ///
+/// Controllers are instances with stable identities, but the engine stores its
+/// controller separately from its instance children.
+///
 /// The default event handlers use [`Self::input_mut`]; override them when input
 /// should be translated differently or shared with other state. The engine
 /// forwards input to this controller, steps it before physics, then calls
 /// [`Self::post_physics`] after physics has synchronized scene transforms.
-pub trait Controller: Any + Debug {
+pub trait Controller: Instance {
     /// Returns input state for inspection, or `None` for controllers without it.
     ///
     /// Override this together with [`Self::input_mut`] to use the default event

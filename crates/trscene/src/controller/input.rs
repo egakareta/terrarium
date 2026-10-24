@@ -40,45 +40,111 @@ impl Default for ControllerKeyBindings {
     }
 }
 
-/// Device state translated into [`ControllerActions`].
-///
-/// Devices can be enabled separately. Feed events through the matching `process_*`
-/// method, then call [`Self::take_actions`] once per update: movement remains held
-/// until release, while mouse and touch look deltas are consumed by that call.
-/// Touch uses a left-side movement joystick and assigns each other finger to look
-/// when it touches down. UI capture suppresses input; losing focus clears active state.
-#[derive(Clone, Debug)]
-pub struct ControllerInput {
-    /// Physical keys assigned to each movement action.
-    pub key_bindings: ControllerKeyBindings,
-    /// Whether a forward key is held.
-    pub forward: bool,
-    /// Whether a backward key is held.
-    pub backward: bool,
-    /// Whether a left key is held.
-    pub left: bool,
-    /// Whether a right key is held.
-    pub right: bool,
-    /// Whether an upward key is held.
-    pub up: bool,
-    /// Whether a downward key is held.
-    pub down: bool,
-    /// Whether a sprint key is held.
-    pub sprint: bool,
-    /// Accumulated mouse-look delta `(x, y)`, consumed by [`Self::take_actions`].
-    pub mouse_look_delta: (f32, f32),
-    mouse_scroll_delta: f32,
-    /// Button that enables cursor-drag look for normalized egui input.
-    pub mouse_drag_button: MouseButton,
-    /// Whether mouse-look and wheel-zoom input is processed.
-    pub mouse_enabled: bool,
-    /// Whether keyboard movement input is processed.
-    pub keyboard_enabled: bool,
-    /// Whether touchscreen joystick and drag-to-look input are processed.
-    pub touch_enabled: bool,
-    mouse_dragging: bool,
-    last_cursor_position: Option<(f64, f64)>,
-    touch: super::touch::TouchControls,
+instance! {
+    #[instance(default = false)]
+    /// Device state translated into [`ControllerActions`].
+    ///
+    /// Devices can be enabled separately. Feed events through the matching `process_*`
+    /// method, then call [`Self::take_actions`] once per update: movement remains held
+    /// until release, while mouse and touch look deltas are consumed by that call.
+    /// Touch uses a left-side movement joystick and assigns each other finger to look
+    /// when it touches down. UI capture suppresses input; losing focus clears active state.
+    #[derive(Clone, Debug)]
+    pub struct ControllerInput {
+        #[property(borrow)]
+        /// Physical keys assigned to each movement action.
+        key_bindings: ControllerKeyBindings,
+        #[property]
+        /// Whether a forward key is held.
+        forward: bool,
+        #[property]
+        /// Whether a backward key is held.
+        backward: bool,
+        #[property]
+        /// Whether a left key is held.
+        left: bool,
+        #[property]
+        /// Whether a right key is held.
+        right: bool,
+        #[property]
+        /// Whether an upward key is held.
+        up: bool,
+        #[property]
+        /// Whether a downward key is held.
+        down: bool,
+        #[property]
+        /// Whether a sprint key is held.
+        sprint: bool,
+        #[property]
+        /// Accumulated mouse-look delta `(x, y)`, consumed by [`Self::take_actions`].
+        mouse_look_delta: (f32, f32),
+        mouse_scroll_delta: f32,
+        /// Button that enables cursor-drag look for normalized egui input.
+        #[property]
+        mouse_drag_button: MouseButton,
+        /// Whether mouse-look and wheel-zoom input is processed.
+        mouse_enabled: bool,
+        /// Whether keyboard movement input is processed.
+        keyboard_enabled: bool,
+        /// Whether touchscreen joystick and drag-to-look input are processed.
+        touch_enabled: bool,
+        mouse_dragging: bool,
+        last_cursor_position: Option<(f64, f64)>,
+        touch: super::touch::TouchControls,
+    }
+
+    impl ControllerInput {
+        #[property]
+        /// Whether mouse-look and wheel-zoom input is processed.
+        pub fn mouse_enabled(&self) -> bool {
+            self.mouse_enabled
+        }
+
+        /// Enables mouse input, or clears accumulated look, wheel, and drag state when disabling it.
+        pub fn set_mouse_enabled(&mut self, enabled: bool) {
+            self.mouse_enabled = enabled;
+            if !enabled {
+                self.mouse_look_delta = (0.0, 0.0);
+                self.mouse_scroll_delta = 0.0;
+                self.mouse_dragging = false;
+                self.last_cursor_position = None;
+            }
+        }
+
+        #[property]
+        /// Whether keyboard movement input is processed.
+        pub fn keyboard_enabled(&self) -> bool {
+            self.keyboard_enabled
+        }
+
+        /// Enables keyboard input, or clears held keys when disabling it.
+        pub fn set_keyboard_enabled(&mut self, enabled: bool) {
+            self.keyboard_enabled = enabled;
+            if !enabled {
+                self.forward = false;
+                self.backward = false;
+                self.left = false;
+                self.right = false;
+                self.up = false;
+                self.down = false;
+                self.sprint = false;
+            }
+        }
+
+        #[property]
+        /// Whether touchscreen joystick and drag-to-look input is processed.
+        pub fn touch_enabled(&self) -> bool {
+            self.touch_enabled
+        }
+
+        /// Enables touch input, or clears active gestures and hides the joystick when disabled.
+        pub fn set_touch_enabled(&mut self, enabled: bool) {
+            self.touch_enabled = enabled;
+            if !enabled {
+                self.touch.clear();
+            }
+        }
+    }
 }
 
 impl Default for ControllerInput {
@@ -153,32 +219,6 @@ impl ControllerInput {
         self.set_keyboard_enabled(enabled);
         self.set_mouse_enabled(enabled);
         self.set_touch_enabled(enabled);
-    }
-
-    /// Enables keyboard input, or clears held keys when disabling it.
-    pub fn set_keyboard_enabled(&mut self, enabled: bool) {
-        self.keyboard_enabled = enabled;
-        if !enabled {
-            self.clear_keyboard_input();
-        }
-    }
-
-    /// Enables mouse input, or clears accumulated look, wheel, and drag state when disabling it.
-    pub fn set_mouse_enabled(&mut self, enabled: bool) {
-        self.mouse_enabled = enabled;
-        if !enabled {
-            self.mouse_look_delta = (0.0, 0.0);
-            self.mouse_scroll_delta = 0.0;
-            self.stop_mouse_drag();
-        }
-    }
-
-    /// Enables touch input, or clears active gestures and hides the joystick when disabled.
-    pub fn set_touch_enabled(&mut self, enabled: bool) {
-        self.touch_enabled = enabled;
-        if !enabled {
-            self.touch.clear();
-        }
     }
 
     /// Sets whether a touchscreen is present before touch events are observed.

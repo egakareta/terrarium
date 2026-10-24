@@ -1,49 +1,75 @@
-use std::ops::{Deref, DerefMut};
-
 use crate::{glam::*, *};
 
 #[cfg(feature = "meshpart")]
 mod default_rig;
 
-/// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
-///
-/// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
-/// mid-turn when movement stops. Mouse and touch look orbit the active camera
-/// when it follows this rig; the mouse wheel changes its orbit distance. Orbit
-/// input never turns an idle rig.
-///
-/// With the `physics` feature, unanchored rigs move through their physics bodies,
-/// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
-/// Anchored rigs, and builds without physics, move their poses directly. Descendants
-/// and scale are preserved in both cases.
-/// Movement uses the active camera's horizontal heading. Player look input orbits
-/// the camera when its subject is this rig.
-#[derive(Clone, Debug)]
-pub struct PlayerController {
-    /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
-    pub rig: Option<InstanceId>,
-    /// Device state and bindings used to generate controller actions.
-    pub input: ControllerInput,
-    /// Camera behavior used when the workspace camera follows this rig.
-    pub camera_controller: CameraController,
-    /// Movement speed in world units per second.
-    pub speed: f32,
-    /// Movement scale applied while sprint is held. Defaults to `2.25`.
-    pub sprint_scale: f32,
-    /// Upward jump velocity in world units per second.
-    pub jump_speed: f32,
-    /// Camera orbit sensitivity in radians per physical pixel.
-    pub sensitivity: f32,
-    /// Controls how quickly the rig turns toward its movement direction.
+instance! {
+    #[instance(default = false)]
+    /// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
     ///
-    /// Each moving frame uses `(turn_factor * delta_seconds).clamp(0.0, 1.0)`
-    /// along the shortest yaw arc. Zero disables turning; idle frames retain yaw.
-    pub turn_factor: f32,
-    /// Animation players selected automatically from movement and physics state.
-    pub animations: PlayerAnimations,
-    locomotion: PlayerAnimationState,
-    animation_state: PlayerAnimationState,
-    animated_state: Option<(InstanceId, PlayerAnimationState)>,
+    /// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
+    /// mid-turn when movement stops. Mouse and touch look orbit the active camera
+    /// when it follows this rig; the mouse wheel changes its orbit distance. Orbit
+    /// input never turns an idle rig.
+    ///
+    /// With the `physics` feature, unanchored rigs move through their physics bodies,
+    /// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
+    /// Anchored rigs, and builds without physics, move their poses directly. Descendants
+    /// and scale are preserved in both cases.
+    /// Movement uses the active camera's horizontal heading. Player look input orbits
+    /// the camera when its subject is this rig.
+    #[derive(Clone, Debug)]
+    pub struct PlayerController {
+        #[data]
+        data: InstanceData,
+        #[property]
+        /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
+        pub rig: Option<InstanceId>,
+        /// Device state and bindings used to generate controller actions.
+        #[compose]
+        input: ControllerInput,
+        #[property(borrow)]
+        /// Camera behavior used when the workspace camera follows this rig.
+        pub camera_controller: CameraController,
+        #[property]
+        /// Movement speed in world units per second.
+        pub speed: f32,
+        #[property]
+        /// Movement scale applied while sprint is held. Defaults to `2.25`.
+        pub sprint_scale: f32,
+        #[property]
+        /// Upward jump velocity in world units per second. Non-positive or non-finite
+        /// values disable jumping.
+        pub jump_speed: f32,
+        #[property]
+        /// Camera orbit sensitivity in radians per physical pixel.
+        pub sensitivity: f32,
+        #[property]
+        /// Controls how quickly the rig turns toward its movement direction.
+        ///
+        /// Each moving frame uses `(turn_factor * delta_seconds).clamp(0.0, 1.0)`
+        /// along the shortest yaw arc. Zero disables turning; idle frames retain yaw.
+        pub turn_factor: f32,
+        /// Animation players selected automatically from movement and physics state.
+        pub animations: PlayerAnimations,
+        locomotion: PlayerAnimationState,
+        animation_state: PlayerAnimationState,
+        animated_state: Option<(InstanceId, PlayerAnimationState)>,
+    }
+
+    impl PlayerController {
+        #[property]
+        /// Animation players selected automatically from movement and physics state.
+        pub fn animations(&self) -> &PlayerAnimations {
+            &self.animations
+        }
+
+        /// Replaces animation bindings and resets the selected animation state.
+        pub fn set_animations(&mut self, animations: PlayerAnimations) {
+            self.animations = animations;
+            self.animated_state = None;
+        }
+    }
 }
 
 impl PlayerController {
@@ -54,8 +80,11 @@ impl PlayerController {
     /// the active camera when it follows the rig.
     pub fn new(rig: InstanceId) -> Self {
         let mut input = ControllerInput::default();
-        input.key_bindings.down.clear();
+        let mut key_bindings = input.key_bindings().clone();
+        key_bindings.down.clear();
+        input.set_key_bindings(key_bindings);
         Self {
+            data: InstanceData::new("PlayerController"),
             rig: Some(rig),
             input,
             camera_controller: CameraController::default(),
@@ -69,65 +98,6 @@ impl PlayerController {
             animation_state: PlayerAnimationState::Idle,
             animated_state: None,
         }
-    }
-
-    /// Replaces the input state, device settings, and key bindings.
-    pub fn with_input(mut self, input: ControllerInput) -> Self {
-        self.input = input;
-        self
-    }
-
-    /// Enables or disables keyboard, mouse, and touch input together.
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_enabled(enabled);
-        self
-    }
-
-    /// Enables or disables keyboard actions.
-    pub fn with_keyboard_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_keyboard_enabled(enabled);
-        self
-    }
-
-    /// Enables or disables mouse look and wheel zoom input.
-    pub fn with_mouse_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_mouse_enabled(enabled);
-        self
-    }
-
-    /// Enables or disables touch movement and look input.
-    pub fn with_touch_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_touch_enabled(enabled);
-        self
-    }
-
-    /// Sets the yaw turn rate used to face the movement direction.
-    ///
-    /// The per-frame interpolation fraction is `clamp(factor * delta, 0, 1)`.
-    /// Non-positive or non-finite values leave the current heading unchanged.
-    pub fn with_turn_factor(mut self, factor: f32) -> Self {
-        self.turn_factor = factor;
-        self
-    }
-
-    /// Sets the movement scale applied while sprint is held.
-    pub fn with_sprint_scale(mut self, scale: f32) -> Self {
-        self.sprint_scale = scale;
-        self
-    }
-
-    /// Sets the upward jump velocity in world units per second. Non-positive or
-    /// non-finite values disable jumping.
-    pub fn with_jump_speed(mut self, speed: f32) -> Self {
-        self.jump_speed = speed;
-        self
-    }
-
-    /// Wires animation players to locomotion states.
-    pub fn with_animations(mut self, animations: PlayerAnimations) -> Self {
-        self.animations = animations;
-        self.animated_state = None;
-        self
     }
 
     /// Returns the most recently selected locomotion animation state.
@@ -316,20 +286,6 @@ impl PlayerController {
             let position = rig.position() + movement;
             rig.with_position(position);
         }
-    }
-}
-
-impl Deref for PlayerController {
-    type Target = ControllerInput;
-
-    fn deref(&self) -> &Self::Target {
-        &self.input
-    }
-}
-
-impl DerefMut for PlayerController {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.input
     }
 }
 

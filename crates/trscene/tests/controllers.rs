@@ -67,6 +67,126 @@ fn key(key: egui::Key, pressed: bool) -> Event {
 }
 
 #[test]
+fn controller_input_properties_have_generated_accessors_and_builders() {
+    let key_bindings = ControllerKeyBindings {
+        forward: vec![KeyCode::KeyJ],
+        ..Default::default()
+    };
+    let mut input = ControllerInput::default()
+        .with_key_bindings(key_bindings)
+        .with_forward(true)
+        .with_mouse_look_delta((2.0, -1.0));
+
+    assert_eq!(input.key_bindings().forward, [KeyCode::KeyJ]);
+    assert!(input.forward());
+    assert_eq!(input.mouse_look_delta(), (2.0, -1.0));
+
+    input.set_keyboard_enabled(false);
+    assert!(!input.keyboard_enabled());
+    assert!(!input.forward());
+}
+
+#[cfg(feature = "devtools")]
+#[test]
+fn inspected_controller_input_uses_device_setters() {
+    let mut input = ControllerInput::default().with_forward(true);
+    let properties = trscene::devtools::Inspect::properties(&input);
+    assert!(properties.iter().any(|property| property.path == "forward"));
+    assert!(
+        properties
+            .iter()
+            .any(|property| property.path == "keyboard_enabled")
+    );
+
+    trscene::devtools::Inspect::set_property(
+        &mut input,
+        "keyboard_enabled",
+        trscene::devtools::PropertyValue::Bool(false),
+    )
+    .unwrap();
+    assert!(!input.forward());
+}
+
+#[test]
+fn built_in_controllers_have_isolated_instance_identities() {
+    let camera_controller = CameraController::default();
+    assert_eq!(camera_controller.class_name(), "CameraController");
+    assert_eq!(camera_controller.parent(), None);
+    assert!(camera_controller.children().is_empty());
+    assert_ne!(camera_controller.clone().id(), camera_controller.id());
+
+    let mut workspace = Workspace::new();
+    let rig = workspace.add_child(Rig::new());
+    let player_controller = PlayerController::new(rig);
+    assert_eq!(player_controller.class_name(), "PlayerController");
+    assert_eq!(player_controller.parent(), None);
+    assert!(player_controller.children().is_empty());
+    assert_ne!(player_controller.clone().id(), player_controller.id());
+}
+
+#[cfg(feature = "devtools")]
+#[test]
+fn controller_configuration_is_exposed_as_instance_properties() {
+    let mut camera_controller = CameraController::default();
+    let camera_properties = Instance::properties(&camera_controller)
+        .into_iter()
+        .map(|property| property.path)
+        .collect::<Vec<_>>();
+    for property in [
+        "speed",
+        "sprint_scale",
+        "sensitivity",
+        "min_subject_distance",
+        "max_subject_distance",
+        "orbit_speed",
+        "min_subject_pitch",
+        "max_subject_pitch",
+    ] {
+        assert!(camera_properties.iter().any(|path| path == property));
+    }
+    Instance::set_property(
+        &mut camera_controller,
+        "orbit_speed",
+        trscene::devtools::PropertyValue::Number(2.0),
+    )
+    .unwrap();
+    assert_eq!(camera_controller.orbit_speed(), 2.0);
+
+    let mut workspace = Workspace::new();
+    let rig = workspace.add_child(Rig::new());
+    let mut player_controller = PlayerController::new(rig);
+    let player_properties = Instance::properties(&player_controller)
+        .into_iter()
+        .map(|property| property.path)
+        .collect::<Vec<_>>();
+    for property in [
+        "speed",
+        "sprint_scale",
+        "jump_speed",
+        "sensitivity",
+        "turn_factor",
+        "camera_controller.orbit_speed",
+        "animations.transition_duration",
+    ] {
+        assert!(player_properties.iter().any(|path| path == property));
+    }
+    Instance::set_property(
+        &mut player_controller,
+        "animations.transition_duration",
+        trscene::devtools::PropertyValue::Number(0.4),
+    )
+    .unwrap();
+    assert_eq!(player_controller.animations().transition_duration, 0.4);
+    Instance::set_property(
+        &mut player_controller,
+        "camera_controller.orbit_speed",
+        trscene::devtools::PropertyValue::Number(3.0),
+    )
+    .unwrap();
+    assert_eq!(player_controller.camera_controller.orbit_speed(), 3.0);
+}
+
+#[test]
 fn player_movement_carries_scaled_rig_descendants_and_normalizes_diagonals() {
     let mut rig = Rig::new().with_pivot(Mat4::from_scale_rotation_translation(
         Vec3::new(2.0, 3.0, 4.0),
@@ -76,10 +196,10 @@ fn player_movement_carries_scaled_rig_descendants_and_normalizes_diagonals() {
     let child = rig.add_child_local(Part::new().with_position(Vec3::Y));
     let relative = rig.pivot().inverse() * rig.children()[0].spatial().unwrap().world_pivot();
     let mut player = PlayerController::new(rig.id());
-    player.process_key(KeyCode::KeyW, true);
-    player.process_key(KeyCode::KeyD, true);
-    player.process_key(KeyCode::Space, true);
-    player.process_key(KeyCode::ShiftLeft, true);
+    player.set_forward(true);
+    player.set_right(true);
+    player.set_up(true);
+    player.set_sprint(true);
     let initial = rig.position();
     player.step_rig(&mut rig, 0.1);
 
@@ -107,16 +227,16 @@ fn player_movement_carries_scaled_rig_descendants_and_normalizes_diagonals() {
 fn player_ignores_idle_look_and_linearly_faces_world_aligned_travel() {
     let mut rig = Rig::new();
     let mut player = PlayerController::new(rig.id());
-    player.process_mouse_motion((1.0, 5.0));
+    player.set_mouse_look_delta((1.0, 5.0));
     player.step_rig(&mut rig, 0.1);
     assert_eq!(rig.position(), Vec3::ZERO);
     assert!(rig.forward().abs_diff_eq(Vec3::NEG_Z, 1e-5));
-    player.process_key(KeyCode::KeyD, true);
+    player.set_right(true);
     player.step_rig(&mut rig, 1.0 / 60.0);
     assert!(rig.position().abs_diff_eq(Vec3::X * 0.1, 1e-5));
     let facing = rig.forward();
     assert!(facing.x > 0.0 && facing.x < 0.9);
-    player.process_key(KeyCode::KeyD, false);
+    player.set_right(false);
     player.step_rig(&mut rig, 0.1);
     assert!(rig.forward().abs_diff_eq(facing, 1e-5));
 }
@@ -129,9 +249,15 @@ fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
         movement_scale: Vec3::splat(2.5),
     };
     let mut rig = Rig::new();
-    let player = PlayerController::new(rig.id()).with_enabled(false);
+    let mut player = PlayerController::new(rig.id());
+    player.set_keyboard_enabled(false);
+    player.set_mouse_enabled(false);
+    player.set_touch_enabled(false);
     let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
-    let mut camera_controller = CameraController::default().with_enabled(false);
+    let mut camera_controller = CameraController::default();
+    camera_controller.set_keyboard_enabled(false);
+    camera_controller.set_mouse_enabled(false);
+    camera_controller.set_touch_enabled(false);
     player.step_rig_with_actions(&mut rig, actions, 0.1);
     camera_controller.step_camera_with_actions(&mut camera, None, actions, 0.1);
     assert!(rig.position().abs_diff_eq(camera.position(), 1e-5));
@@ -143,15 +269,15 @@ fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
 fn input_sprint_uses_distinct_player_and_camera_scales() {
     let mut rig = Rig::new();
     let mut player = PlayerController::new(rig.id());
-    player.forward = true;
-    player.sprint = true;
+    player.set_forward(true);
+    player.set_sprint(true);
     player.step_rig(&mut rig, 0.1);
     assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -1.35), 1e-5));
 
     let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
     let mut camera_controller = CameraController::default();
-    camera_controller.forward = true;
-    camera_controller.sprint = true;
+    camera_controller.set_forward(true);
+    camera_controller.set_sprint(true);
     camera_controller.step_camera(&mut camera, None, 0.1);
     assert!(
         camera
@@ -164,15 +290,15 @@ fn input_sprint_uses_distinct_player_and_camera_scales() {
 fn player_and_camera_sprint_scales_are_configurable() {
     let mut rig = Rig::new();
     let mut player = PlayerController::new(rig.id()).with_sprint_scale(3.0);
-    player.forward = true;
-    player.sprint = true;
+    player.set_forward(true);
+    player.set_sprint(true);
     player.step_rig(&mut rig, 0.1);
     assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -1.8), 1e-5));
 
     let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
     let mut camera_controller = CameraController::default().with_sprint_scale(4.0);
-    camera_controller.forward = true;
-    camera_controller.sprint = true;
+    camera_controller.set_forward(true);
+    camera_controller.set_sprint(true);
     camera_controller.step_camera(&mut camera, None, 0.1);
     assert!(
         camera
@@ -210,7 +336,10 @@ fn action_sprint_magnitude_scales_movement_axes_independently() {
 #[test]
 fn queued_look_rotates_a_disabled_camera_once() {
     let mut camera = Camera::default();
-    let mut controller = CameraController::default().with_enabled(false);
+    let mut controller = CameraController::default();
+    controller.set_keyboard_enabled(false);
+    controller.set_mouse_enabled(false);
+    controller.set_touch_enabled(false);
     let initial = camera.pose();
     controller.queue_look(Vec2::new(0.2, -0.1));
     controller.step_camera(&mut camera, None, 1.0 / 60.0);
@@ -313,7 +442,7 @@ fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
     let grounded_position = workspace.get::<Rig>(rig).unwrap().position();
 
     let mut player = PlayerController::new(rig);
-    assert!(player.process_key(KeyCode::Space, true));
+    player.set_up(true);
     step(&mut workspace, &mut player, 1.0 / 60.0);
 
     let airborne_position = workspace.get::<Rig>(rig).unwrap().position();
@@ -364,7 +493,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     let falling = workspace.add_child(dynamic_player_rig(Vec3::new(10.0, 4.0, 0.0)));
     workspace.camera_mut().set_subject(Some(rig));
     let mut player = PlayerController::new(rig);
-    player.process_key(KeyCode::KeyW, true);
+    player.set_forward(true);
     step(&mut workspace, &mut player, 1.0 / 60.0);
     let first_position = workspace.get::<Rig>(rig).unwrap().position();
     assert!(first_position.z < -0.09, "{first_position:?}");
@@ -385,7 +514,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     );
     let position = player_rig.position();
     let facing = player_rig.forward();
-    player.process_key(KeyCode::KeyW, false);
+    player.set_forward(false);
     step(&mut workspace, &mut player, 1.0 / 60.0);
     let player = workspace.get::<Rig>(rig).unwrap();
     assert!((player.position() - position).with_y(0.0).length() < 1e-4);
@@ -399,7 +528,7 @@ fn dynamic_player_movement_applies_immediately_after_repositioning() {
     let mut workspace = Workspace::new();
     let rig = workspace.add_child(dynamic_player_rig(Vec3::Y * 4.0));
     let mut player = PlayerController::new(rig);
-    player.process_key(KeyCode::KeyW, true);
+    player.set_forward(true);
     for _ in 0..30 {
         step(&mut workspace, &mut player, 1.0 / 60.0);
     }
@@ -423,10 +552,10 @@ fn every_device_subset_can_drive_a_player_independently() {
         let mut workspace = Workspace::new();
         let rig = workspace.add_child(Rig::new());
         workspace.camera_mut().set_subject(Some(rig));
-        let mut controller = PlayerController::new(rig)
-            .with_keyboard_enabled(keyboard)
-            .with_mouse_enabled(mouse)
-            .with_touch_enabled(touchscreen);
+        let mut controller = PlayerController::new(rig);
+        controller.set_keyboard_enabled(keyboard);
+        controller.set_mouse_enabled(mouse);
+        controller.set_touch_enabled(touchscreen);
         workspace.camera_mut().set_subject_offset(Vec3::Y);
         step(&mut workspace, &mut controller, 0.0);
         let context = Context::default();
@@ -502,7 +631,9 @@ fn every_device_subset_can_drive_a_player_independently() {
                 < 1e-5
         );
 
-        controller.set_enabled(false);
+        controller.set_keyboard_enabled(false);
+        controller.set_mouse_enabled(false);
+        controller.set_touch_enabled(false);
         let pose = workspace.get::<Rig>(rig).unwrap().pose();
         step(&mut workspace, &mut controller, 0.1);
         assert!(
@@ -542,7 +673,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
         },
         |ui| {
             ui.text_edit_singleline(&mut text);
-            player.process_mouse_motion((20.0, 0.0));
+            player.set_mouse_look_delta((20.0, 0.0));
             player.process_input(ui.ctx());
         },
     );
@@ -588,7 +719,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
         },
         |ui| {
             let _ = ui.button("capture");
-            player.process_mouse_motion((20.0, 0.0));
+            player.set_mouse_look_delta((20.0, 0.0));
             player.process_input(ui.ctx());
         },
     );
@@ -609,7 +740,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             .abs_diff_eq(forward, 1e-5)
     );
 
-    player.process_mouse_motion((20.0, 0.0));
+    player.set_mouse_look_delta((20.0, 0.0));
     player.process_window_event(&WindowEvent::Focused(false));
     let pose = workspace.get::<Rig>(rig).unwrap().pose();
     let camera_pose = workspace.camera().pose();
@@ -624,11 +755,16 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     assert!(workspace.camera().pose().abs_diff_eq(camera_pose, 1e-5));
 }
 
-#[derive(Debug)]
-struct CustomController {
-    rig: InstanceId,
-    input: Option<ControllerInput>,
-    actions: ControllerActions,
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct CustomController {
+        #[data]
+        identity: InstanceData,
+        rig: InstanceId,
+        input: Option<ControllerInput>,
+        actions: ControllerActions,
+    }
 }
 
 impl Controller for CustomController {
@@ -657,8 +793,11 @@ fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
     let mut input = ControllerInput::default()
         .with_mouse_enabled(false)
         .with_touch_enabled(false);
-    input.key_bindings.forward = vec![KeyCode::KeyJ];
+    let mut key_bindings = input.key_bindings().clone();
+    key_bindings.forward = vec![KeyCode::KeyJ];
+    input.set_key_bindings(key_bindings);
     let mut controller = CustomController {
+        identity: InstanceData::new("CustomController"),
         rig: controlled,
         input: Some(input),
         actions: ControllerActions::default(),
@@ -682,6 +821,7 @@ fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
     let mut autonomous_workspace = Workspace::new();
     let autonomous = autonomous_workspace.add_child(Rig::new());
     let mut autonomous_controller = CustomController {
+        identity: InstanceData::new("CustomController"),
         rig: autonomous,
         input: None,
         actions: ControllerActions {
@@ -699,10 +839,15 @@ fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
     );
 }
 
-#[derive(Debug)]
-struct PlaceRig {
-    rig: InstanceId,
-    position: Vec3,
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct PlaceRig {
+        #[data]
+        identity: InstanceData,
+        rig: InstanceId,
+        position: Vec3,
+    }
 }
 
 impl Controller for PlaceRig {
@@ -719,6 +864,7 @@ fn a_single_controller_can_be_reconfigured_between_steps() {
     let mut workspace = Workspace::new();
     let rig = workspace.add_child(Rig::new());
     let mut controller = PlaceRig {
+        identity: InstanceData::new("PlaceRig"),
         rig,
         position: Vec3::X,
     };
@@ -777,7 +923,7 @@ fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected()
 fn invalid_frame_durations_do_not_move_players_and_long_frames_are_capped() {
     let mut rig = Rig::new();
     let mut player = PlayerController::new(rig.id());
-    player.process_key(KeyCode::KeyW, true);
+    player.set_forward(true);
     for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -1.0, 0.0] {
         player.step_rig(&mut rig, delta);
         assert_eq!(rig.position(), Vec3::ZERO);

@@ -15,13 +15,20 @@ use terrarium::{
 #[derive(Resource)]
 struct Subject(InstanceId);
 
-#[derive(Debug)]
-struct PlacePartController(InstanceId);
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct PlacePartController {
+        #[data]
+        identity: InstanceData,
+        part: InstanceId,
+    }
+}
 
 impl Controller for PlacePartController {
     fn step(&mut self, workspace: &mut Workspace, _: f32) {
         workspace
-            .get_mut::<Part>(self.0)
+            .get_mut::<Part>(self.part)
             .unwrap()
             .with_position(Vec3::X);
     }
@@ -215,7 +222,10 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
                     .bevy_app_mut()
                     .unwrap()
                     .insert_resource(Subject(subject));
-                engine.set_controller(Box::new(PlacePartController(subject)));
+                engine.set_controller(Box::new(PlacePartController {
+                    identity: InstanceData::new("PlacePartController"),
+                    part: subject,
+                }));
                 Ok::<_, AppCreationError>(SceneCallbacks { subject })
             })?
             .unwrap();

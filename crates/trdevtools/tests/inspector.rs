@@ -241,15 +241,16 @@ fn controller_focus_uses_custom_movement_bindings() {
         let rig = if player_controlled {
             let rig = host.workspace.add_child(Rig::new());
             let mut player = PlayerController::new(rig);
-            player.key_bindings.forward = vec![KeyCode::ArrowUp];
+            let mut key_bindings = player.key_bindings().clone();
+            key_bindings.forward = vec![KeyCode::ArrowUp];
+            player.set_key_bindings(key_bindings);
             host.controller = Box::new(player);
             Some(rig)
         } else {
-            host.controller
-                .downcast_mut::<CameraController>()
-                .unwrap()
-                .key_bindings
-                .forward = vec![KeyCode::ArrowUp];
+            let controller = host.controller.downcast_mut::<CameraController>().unwrap();
+            let mut key_bindings = controller.key_bindings().clone();
+            key_bindings.forward = vec![KeyCode::ArrowUp];
+            controller.set_key_bindings(key_bindings);
             None
         };
         let position = |host: &TestDevtoolsHost| {

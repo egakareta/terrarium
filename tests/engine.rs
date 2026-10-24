@@ -2,13 +2,20 @@
 
 use terrarium::*;
 
-#[derive(Debug)]
-struct PlacePart(InstanceId);
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct PlacePart {
+        #[data]
+        identity: InstanceData,
+        part: InstanceId,
+    }
+}
 
 impl Controller for PlacePart {
     fn step(&mut self, workspace: &mut Workspace, _: f32) {
         workspace
-            .get_mut::<Part>(self.0)
+            .get_mut::<Part>(self.part)
             .unwrap()
             .with_position(glam::Vec3::X);
     }
@@ -22,6 +29,11 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
         .with_env_logger(false)
         .with_headless_frames(Some(Some(0)))
         .run(|engine| {
+            let controller = engine.controller();
+            let controller_id = controller.id();
+            assert_eq!(controller.class_name(), "CameraController");
+            assert_eq!(controller.parent(), None);
+            assert!(engine.view::<dyn Instance>(controller_id).is_none());
             assert!(
                 engine
                     .controller()
@@ -35,7 +47,10 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
                 parent.add_child(Part::new().with_name("child"));
                 parent.id()
             };
-            engine.set_controller(Box::new(PlacePart(parent_id)));
+            engine.set_controller(Box::new(PlacePart {
+                identity: InstanceData::new("PlacePart"),
+                part: parent_id,
+            }));
             Ok::<(), AppCreationError>(())
         })?
         .unwrap();
@@ -44,6 +59,14 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
     assert_eq!(engine.clear_color(), clear_color);
 
     let root: &dyn Instance = &engine;
+    let controller = engine.controller();
+    let controller_id = controller.id();
+    assert_eq!(controller.class_name(), "PlacePart");
+    assert_eq!(controller.parent(), None);
+    assert!(controller.children().is_empty());
+    assert!(root.view::<dyn Instance>(controller_id).is_none());
+    let cloned_controller = controller.clone_box();
+    assert_ne!(cloned_controller.id(), controller_id);
     assert!(root.is_a::<Engine>());
     assert_eq!(root.class_name(), "Engine");
     assert_eq!(root.parent(), None);
@@ -59,6 +82,11 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
     assert_eq!(
         root.descendants().map(Instance::name).collect::<Vec<_>>(),
         ["Workspace", "parent", "child"]
+    );
+    assert!(
+        !root
+            .descendants()
+            .any(|instance| instance.id() == controller_id)
     );
     assert!(engine.try_clone_box().is_none());
 

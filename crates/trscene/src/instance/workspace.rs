@@ -621,7 +621,7 @@ mod tests {
         workspace.camera_mut().set_subject_offset(Vec3::Y);
 
         controller.post_physics(&mut workspace, 1.0 / 60.0);
-        controller.mouse_look_delta = (0.0, 10.0);
+        controller.set_mouse_look_delta((0.0, 10.0));
         controller.post_physics(&mut workspace, 1.0 / 60.0);
 
         let focus = Vec3::Y;
@@ -661,7 +661,7 @@ mod tests {
         );
 
         workspace.camera_mut().set_subject(None);
-        controller.forward = true;
+        controller.set_forward(true);
         controller.post_physics(&mut workspace, 0.1);
 
         assert_eq!(workspace.camera().subject(), None);

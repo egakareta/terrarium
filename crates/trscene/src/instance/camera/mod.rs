@@ -1,5 +1,3 @@
-use std::ops::{Deref, DerefMut};
-
 use crate::{glam::*, *};
 
 instance! {
@@ -92,38 +90,52 @@ impl Camera {
 /// Physical keyboard keys assigned to camera movement and orbit actions.
 pub type CameraKeyBindings = ControllerKeyBindings;
 
-/// Free-flight movement and third-person orbit for a [`Camera`].
-///
-/// Device state is stored in [`Self::input`]. Free flight follows the camera's
-/// look direction. With a subject, look and horizontal movement orbit, vertical
-/// movement changes pitch, and forward/backward movement adjusts the camera's
-/// subject distance and offset configuration.
-/// [`Self::step_camera_with_actions`] also accepts actions directly.
-#[derive(Clone, Debug)]
-pub struct CameraController {
-    /// Keyboard, mouse, and touch state used by this controller.
-    pub input: ControllerInput,
-    /// Movement and zoom speed in world units per second.
-    pub speed: f32,
-    /// Movement scale applied while sprint is held. Defaults to `2.5`.
-    pub sprint_scale: f32,
-    /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
-    pub sensitivity: f32,
-    /// Minimum camera distance from the subject's focus point.
-    pub min_subject_distance: f32,
-    /// Maximum camera distance from the subject's focus point.
-    pub max_subject_distance: f32,
-    /// Orbit speed in radians per second for keyboard and joystick controls.
-    pub orbit_speed: f32,
-    /// Minimum vertical orbit angle in radians.
-    pub min_subject_pitch: f32,
-    /// Maximum vertical orbit angle in radians.
-    pub max_subject_pitch: f32,
-    orbit_subject: Option<InstanceId>,
-    orbit_yaw: f32,
-    orbit_pitch: f32,
-    queued_look: Vec2,
-    queued_subject_zoom: f32,
+instance! {
+    #[instance(default = false)]
+    /// Free-flight movement and third-person orbit for a [`Camera`].
+    ///
+    /// Device state is stored in [`Self::input`]. Free flight follows the camera's
+    /// look direction. With a subject, look and horizontal movement orbit, vertical
+    /// movement changes pitch, and forward/backward movement adjusts the camera's
+    /// subject distance. The camera owns the subject offset used to calculate focus.
+    /// [`Self::step_camera_with_actions`] also accepts actions directly.
+    #[derive(Clone, Debug)]
+    pub struct CameraController {
+        #[data]
+        data: InstanceData,
+        /// Keyboard, mouse, and touch state used by this controller.
+        #[compose]
+        input: ControllerInput,
+        #[property]
+        /// Movement and zoom speed in world units per second.
+        pub speed: f32,
+        #[property]
+        /// Movement scale applied while sprint is held. Defaults to `2.5`.
+        pub sprint_scale: f32,
+        #[property]
+        /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
+        pub sensitivity: f32,
+        #[property]
+        /// Minimum camera distance from the subject's focus point.
+        pub min_subject_distance: f32,
+        #[property]
+        /// Maximum camera distance from the subject's focus point.
+        pub max_subject_distance: f32,
+        #[property]
+        /// Orbit speed in radians per second for keyboard and joystick controls.
+        pub orbit_speed: f32,
+        #[property]
+        /// Minimum vertical orbit angle in radians.
+        pub min_subject_pitch: f32,
+        #[property]
+        /// Maximum vertical orbit angle in radians.
+        pub max_subject_pitch: f32,
+        orbit_subject: Option<InstanceId>,
+        orbit_yaw: f32,
+        orbit_pitch: f32,
+        queued_look: Vec2,
+        queued_subject_zoom: f32,
+    }
 }
 
 impl Default for CameraController {
@@ -147,8 +159,9 @@ impl CameraController {
         key_bindings: CameraKeyBindings,
     ) -> Self {
         let mut input = ControllerInput::default();
-        input.key_bindings = key_bindings;
+        input.set_key_bindings(key_bindings);
         Self {
+            data: InstanceData::new("CameraController"),
             input,
             speed,
             sprint_scale: 2.5,
@@ -177,42 +190,6 @@ impl CameraController {
     pub fn with_subject_pitch_limits(mut self, min: f32, max: f32) -> Self {
         self.min_subject_pitch = min;
         self.max_subject_pitch = max;
-        self
-    }
-
-    /// Sets the orbit rate for left/right and up/down movement, in radians per second.
-    pub fn with_orbit_speed(mut self, speed: f32) -> Self {
-        self.orbit_speed = speed;
-        self
-    }
-
-    /// Sets the movement scale applied while sprint is held.
-    pub fn with_sprint_scale(mut self, scale: f32) -> Self {
-        self.sprint_scale = scale;
-        self
-    }
-
-    /// Enables or disables keyboard, mouse, and touch input together.
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_enabled(enabled);
-        self
-    }
-
-    /// Enables or disables keyboard actions.
-    pub fn with_keyboard_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_keyboard_enabled(enabled);
-        self
-    }
-
-    /// Enables or disables mouse look.
-    pub fn with_mouse_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_mouse_enabled(enabled);
-        self
-    }
-
-    /// Enables or disables touch movement and look.
-    pub fn with_touch_enabled(mut self, enabled: bool) -> Self {
-        self.input.set_touch_enabled(enabled);
         self
     }
 
@@ -352,20 +329,6 @@ impl CameraController {
     }
 }
 
-impl Deref for CameraController {
-    type Target = ControllerInput;
-
-    fn deref(&self) -> &Self::Target {
-        &self.input
-    }
-}
-
-impl DerefMut for CameraController {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.input
-    }
-}
-
 impl Controller for CameraController {
     fn input(&self) -> Option<&ControllerInput> {
         Some(&self.input)
@@ -390,7 +353,7 @@ impl Controller for CameraController {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::winit::{event::DeviceEvent, keyboard::KeyCode};
+    use crate::winit::event::DeviceEvent;
 
     #[test]
     fn camera_projection_and_framing_properties_use_getters_and_builders() {
@@ -414,7 +377,7 @@ mod tests {
         let mut camera = Camera::default();
         let original_position = camera.pivot().w_axis.truncate();
         let mut controller = CameraController::new(6.0, 0.1);
-        controller.mouse_look_delta = (1.0, 0.0);
+        controller.set_mouse_look_delta((1.0, 0.0));
         controller.step_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.pivot().w_axis.truncate(), original_position);
         assert!(camera.forward().x > 0.0);
@@ -423,86 +386,81 @@ mod tests {
     #[test]
     fn egui_keyboard_capture_clears_camera_movement() {
         let mut controller = CameraController::default();
-        controller.process_key(KeyCode::KeyW, true);
-        controller.process_key(KeyCode::ShiftLeft, true);
+        controller.set_forward(true);
+        controller.set_sprint(true);
         let mut input = crate::egui::InputState::default();
         input.focused = true;
         controller
             .input
             .process_eframe_input_inner(&input, false, false, true, |_| false);
-        assert!(!controller.forward);
-        assert!(!controller.sprint);
+        assert!(!controller.forward());
+        assert!(!controller.sprint());
     }
 
     #[test]
     fn egui_pointer_capture_clears_camera_look_delta() {
         let mut controller = CameraController::default();
-        controller.process_mouse_motion((4.0, -2.0));
+        controller.set_mouse_look_delta((4.0, -2.0));
         let mut input = crate::egui::InputState::default();
         input.focused = true;
         controller
             .input
             .process_eframe_input_inner(&input, true, true, false, |_| false);
-        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
+        assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
     }
 
     #[test]
     fn keyboard_disabled_suppresses_movement_and_keys() {
-        let mut controller = CameraController::default().with_keyboard_enabled(false);
-        assert!(!controller.keyboard_enabled);
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-        input.keys_down.insert(crate::egui::Key::W);
-        controller
-            .input
-            .process_eframe_input_inner(&input, false, false, false, |_| false);
-        assert!(!controller.forward);
-        assert!(!controller.process_key(KeyCode::KeyW, true));
-        assert!(!controller.forward);
+        let mut controller = CameraController::default();
+        controller.set_keyboard_enabled(false);
+        assert!(!controller.keyboard_enabled());
+        controller.set_forward(true);
         let mut camera = Camera::default();
         let initial_position = camera.pivot().w_axis.truncate();
-        controller.forward = true;
         controller.step_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.pivot().w_axis.truncate(), initial_position);
-        assert!(!controller.forward);
+        assert!(!controller.forward());
     }
 
     #[test]
     fn mouse_disabled_suppresses_look_and_motion() {
-        let mut controller = CameraController::default().with_mouse_enabled(false);
-        assert!(!controller.mouse_enabled);
-        controller.process_mouse_motion((10.0, -5.0));
-        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
-        controller.process_device_event(&DeviceEvent::MouseMotion {
-            delta: (10.0, -5.0),
-        });
-        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
+        let mut controller = CameraController::default();
+        controller.set_mouse_enabled(false);
+        assert!(!controller.mouse_enabled());
+        Controller::process_device_event(
+            &mut controller,
+            &DeviceEvent::MouseMotion {
+                delta: (10.0, -5.0),
+            },
+        );
+        assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
         let mut camera = Camera::default();
         let initial_forward = camera.forward();
-        controller.mouse_look_delta = (5.0, 5.0);
+        controller.set_mouse_look_delta((5.0, 5.0));
         controller.step_camera(&mut camera, None, 1.0 / 60.0);
         assert_eq!(camera.forward(), initial_forward);
-        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
+        assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
     }
 
     #[test]
-    fn disabling_input_clears_active_state_and_builder_methods_work() {
+    fn disabling_input_clears_active_state_and_device_setters_work() {
         let mut controller = CameraController::default();
-        controller.process_key(KeyCode::KeyW, true);
-        controller.process_mouse_motion((3.0, 4.0));
-        assert!(controller.is_enabled());
-        controller.set_enabled(false);
-        assert!(!controller.keyboard_enabled);
-        assert!(!controller.mouse_enabled);
-        assert!(!controller.is_enabled());
-        assert!(!controller.forward);
-        assert_eq!(controller.mouse_look_delta, (0.0, 0.0));
-        let controller = controller
-            .with_enabled(true)
-            .with_keyboard_enabled(false)
-            .with_mouse_enabled(true);
-        assert!(!controller.keyboard_enabled);
-        assert!(controller.mouse_enabled);
-        assert!(controller.is_enabled());
+        controller.set_forward(true);
+        controller.set_mouse_look_delta((3.0, 4.0));
+        controller.set_keyboard_enabled(false);
+        controller.set_mouse_enabled(false);
+        controller.set_touch_enabled(false);
+        assert!(!controller.keyboard_enabled());
+        assert!(!controller.mouse_enabled());
+        assert!(!controller.touch_enabled());
+        assert!(!controller.forward());
+        assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
+        controller.set_keyboard_enabled(true);
+        controller.set_mouse_enabled(true);
+        controller.set_touch_enabled(true);
+        controller.set_keyboard_enabled(false);
+        assert!(!controller.keyboard_enabled());
+        assert!(controller.mouse_enabled());
+        assert!(controller.touch_enabled());
     }
 }
