@@ -58,6 +58,7 @@ x11 = ["eframe/x11", "winit/x11"]
 # <forward trscene exclude="default-materials,default-skybox,devtools">
 asio = ["trscene/asio"]
 cli = ["trscene/cli"]
+default-player-rig = ["trscene/default-player-rig"]
 flac = ["trscene/flac"]
 jack = ["trscene/jack"]
 meshpart = ["trscene/meshpart"]

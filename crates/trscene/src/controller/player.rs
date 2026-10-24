@@ -1,6 +1,6 @@
 use crate::{glam::*, *};
 
-#[cfg(feature = "meshpart")]
+#[cfg(feature = "default-player-rig")]
 mod default_rig;
 
 instance! {

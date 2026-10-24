@@ -3,6 +3,7 @@
 use trscene::{glam::*, *};
 
 #[test]
+#[cfg(feature = "default-player-rig")]
 fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
     let mut workspace = Workspace::new();
     let camera = workspace.camera().pivot();
@@ -134,6 +135,7 @@ fn imported_skins_follow_joint_poses_without_changing_the_source_or_clones() {
 }
 
 #[test]
+#[cfg(feature = "default-player-rig")]
 fn every_default_animation_produces_finite_skinned_geometry() {
     let mut workspace = Workspace::new();
     let player = PlayerController::spawn(&mut workspace);

@@ -86,7 +86,7 @@ required-features = ["physics"]
 
 [[example]]
 name = "player"
-required-features = ["meshpart", "physics"]
+required-features = ["default-player-rig", "physics"]
 
 [[example]]
 name = "sound"
@@ -137,6 +137,7 @@ default = [
   "clipboard",
   "default-fonts",
   "default-materials",
+  "default-player-rig",
   "default-skybox",
   "dx12",
   "flac",
@@ -164,6 +165,7 @@ clipboard = ["trinternal?/clipboard"]
 compat = ["trinternal?/compat"]
 default-fonts = ["trinternal?/default-fonts"]
 default-materials = ["trinternal?/default-materials"]
+default-player-rig = ["trinternal?/default-player-rig"]
 default-skybox = ["trinternal?/default-skybox"]
 devtools = ["trinternal?/devtools"]
 dx12 = ["trinternal?/dx12"]

@@ -25,6 +25,7 @@ winit = { version = "0.30", default-features = false, features = ["rwh_06", "way
 approx = "0.5"
 
 [features]
+default-player-rig = ["meshpart"]
 meshpart = ["dep:gltf"]
 physics = ["dep:rapier3d"]
 sound = ["dep:euphorium"]
