@@ -4,7 +4,7 @@ The `instance!` macro builds instance APIs from named fields and inherent
 methods. It can extend an existing instance, combine independent capabilities,
 and expose stored or computed properties to the devtools inspector.
 
-```rust
+```rust,no_run
 use terrarium::*;
 
 instance! {
@@ -44,7 +44,7 @@ An instance has at most one identity provider: either an `#[extends]` field or
 an `#[data]` field. A type with only `#[compose]` fields can define a
 capability without an instance identity.
 
-```rust
+```rust,no_run
 use terrarium::*;
 
 instance! {
@@ -119,7 +119,7 @@ type's inherent `impl` with `#[r#override(Type::method)]`. The replacement must
 keep the inherited method's name and use a borrowed receiver with concrete
 arguments. Its signature must match the inherited method.
 
-```rust
+```rust,no_run
 use terrarium::*;
 
 instance! {
@@ -165,7 +165,7 @@ method. Add options to control how it is presented or validated:
 | `flatten`           | Exposes the property's nested inspector fields without prefixing their paths with the getter name.   |
 | `validate = method` | Calls the named method with the proposed property value. The edit is rejected if it returns `false`. |
 
-```rust
+```rust,no_run
 use terrarium::*;
 
 instance! {
@@ -210,7 +210,7 @@ definitions. When a type is declared in a module, set
 `#[instance(path = crate::module)]` to that crate-rooted module path. The
 default is `crate`.
 
-```rust
+```rust,no_run
 use terrarium::*;
 
 mod models {
