@@ -4478,7 +4478,6 @@ dependencies = [
  "js-sys",
  "paste",
  "pollster 1.0.1",
- "trdevtools",
  "trdylib",
  "trinternal",
  "wasm-bindgen-futures",
@@ -4634,17 +4633,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "trdevtools-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "trdevtools",
-]
-
-[[package]]
 name = "trdylib"
 version = "0.1.0"
 dependencies = [
@@ -4691,6 +4679,7 @@ dependencies = [
  "trdevtools",
  "tregui",
  "trfont",
+ "trmacros",
  "trrender",
  "trscene",
  "wasm-bindgen",
@@ -4714,6 +4703,20 @@ dependencies = [
  "trclipboard",
  "trengine",
  "trpersistence",
+]
+
+[[package]]
+name = "trmacros"
+version = "0.1.0"
+dependencies = [
+ "heck",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+ "trdevtools",
+ "trengine",
+ "trscene",
 ]
 
 [[package]]
@@ -4751,7 +4754,7 @@ dependencies = [
  "image",
  "serde_json",
  "thiserror 2.0.21",
- "trdevtools-derive",
+ "trmacros",
 ]
 
 [[package]]
@@ -4768,6 +4771,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "thiserror 2.0.21",
+ "trmacros",
  "trrendert",
  "winit",
 ]

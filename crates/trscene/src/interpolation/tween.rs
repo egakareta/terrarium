@@ -1,10 +1,4 @@
-#[cfg(feature = "meshpart")]
-use crate::MeshPart;
-use crate::{
-    BasePart, Color3, HasBasePart, InstanceId, Part, Workspace,
-    glam::{Vec2, Vec3, Vec4},
-    instance::{InstanceTransformUpdate, update_instance_transform},
-};
+use crate::{glam::*, instance::*, *};
 
 /// Interpolates a value between two keyframes.
 pub trait Tweenable: Clone {
@@ -390,13 +384,13 @@ impl TweenTrack {
         match self {
             Self::Position { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(instance) = workspace.instance_mut(*target) {
+                if let Some(instance) = workspace.view_mut::<dyn Instance>(*target) {
                     update_instance_transform(instance, InstanceTransformUpdate::Position(value));
                 }
             }
             Self::Orientation { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(instance) = workspace.instance_mut(*target) {
+                if let Some(instance) = workspace.view_mut::<dyn Instance>(*target) {
                     update_instance_transform(
                         instance,
                         InstanceTransformUpdate::Orientation(value),
@@ -405,14 +399,14 @@ impl TweenTrack {
             }
             Self::Size { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
-                if let Some(instance) = workspace.instance_mut(*target) {
+                if let Some(instance) = workspace.view_mut::<dyn Instance>(*target) {
                     update_instance_transform(instance, InstanceTransformUpdate::Size(value));
                 }
             }
             Self::Color { target, tween, .. } => {
                 let value = tween.update(delta_seconds);
                 with_base_part(workspace, *target, |part| {
-                    part.with_color(value);
+                    part.set_color(value);
                 });
             }
         }
@@ -431,17 +425,10 @@ impl TweenTrack {
 fn with_base_part(
     workspace: &mut Workspace,
     target: InstanceId,
-    apply: impl FnOnce(&mut BasePart),
+    apply: impl FnOnce(&mut dyn BasePartExt),
 ) {
-    if let Some(part) = workspace.get_mut::<Part>(target) {
-        apply(part.base_part_mut());
-    } else if let Some(part) = workspace.get_mut::<BasePart>(target) {
-        apply(part);
-    } else {
-        #[cfg(feature = "meshpart")]
-        if let Some(part) = workspace.get_mut::<MeshPart>(target) {
-            apply(part.base_part_mut());
-        }
+    if let Some(part) = workspace.view_mut::<BasePart>(target) {
+        apply(&mut *part);
     }
 }
 
@@ -529,7 +516,6 @@ impl TweenManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HasPVInstance, Instance, Part};
 
     #[test]
     fn tween_interpolates_and_finishes() {

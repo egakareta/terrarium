@@ -6,10 +6,7 @@ use std::sync::{Mutex, OnceLock};
 
 use slotmap::Key;
 
-use crate::{
-    egui_wgpu,
-    trscene::{Color3, InstanceId, OutlineMode, RenderOutline, Workspace},
-};
+use crate::{trscene::*, *};
 
 #[cfg(feature = "meshpart")]
 mod viewport;
@@ -75,7 +72,7 @@ impl RenderAdapter {
         let targets: Vec<_> = selected
             .iter()
             .copied()
-            .filter(|&id| workspace.instance(id).is_some())
+            .filter(|&id| workspace.view::<dyn Instance>(id).is_some())
             .map(|id| id.data().as_ffi())
             .collect();
         let mut scene = scene;

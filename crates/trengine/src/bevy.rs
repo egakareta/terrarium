@@ -12,7 +12,7 @@ use bevy_ecs::prelude::*;
 pub use bevy_time as time;
 use bevy_time::{Time, TimePlugin, TimeUpdateStrategy};
 
-use crate::{AppCreationError, egui, trscene::Workspace};
+use crate::{trscene::*, *};
 
 /// Integrates an imperative [`Workspace`] into a Bevy app.
 ///
@@ -139,6 +139,9 @@ fn with_workspace<T>(
     update: impl FnOnce(&mut BevyApp) -> T,
 ) -> T {
     std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
+    app.world_mut()
+        .non_send_mut::<Workspace>()
+        .refresh_registration();
     let scope = WorkspaceScope { app, workspace };
     update(&mut *scope.app)
 }
@@ -156,5 +159,6 @@ impl Drop for WorkspaceScope<'_> {
             self.workspace,
             &mut self.app.world_mut().non_send_mut::<Workspace>(),
         );
+        self.workspace.refresh_registration();
     }
 }

@@ -2,17 +2,7 @@ use std::rc::Rc;
 
 #[cfg(feature = "sound")]
 use crate::scene::audio::AudioRuntime;
-#[cfg(feature = "default-materials")]
-use crate::{BuiltinMaterial, Material};
-use crate::{
-    Camera, CameraController, Color3, HasBasePart, HasPVInstance, Instance, InstanceData,
-    InstanceId, InstanceLookup, Lighting, Part, RenderTexture, Rig, Texture, TextureError,
-    TextureHandle, TweenManager, glam::*,
-};
-#[cfg(feature = "meshpart")]
-use crate::{GltfError, MeshHandle, MeshPart, MeshSource};
-#[cfg(feature = "physics")]
-use crate::{PhysicsInstance, PhysicsWorld, apply_transform};
+use crate::{glam::*, *};
 
 /// Parameters for querying colliders intersecting a world-space box.
 #[cfg(feature = "physics")]
@@ -60,41 +50,55 @@ pub enum WorkspacePreset {
     Baseplate,
 }
 
-/// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
-#[derive(Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Workspace {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    instance: Box<InstanceData>,
-    /// The camera used when this workspace is rendered.
-    pub current_camera: Camera,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    tween_manager: TweenManager,
-    #[cfg(feature = "physics")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    physics: PhysicsWorld,
-    #[cfg(feature = "sound")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub(crate) audio: AudioRuntime,
-    #[cfg(feature = "meshpart")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    meshes: Vec<MeshHandle>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    textures: Vec<Texture>,
-    #[cfg(feature = "default-materials")]
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    builtin_materials: Vec<Option<Material>>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    texture_revisions: Vec<u64>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    texture_revision: u64,
-    /// Scene-wide lighting configuration.
-    pub lighting: Lighting,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub(crate) lookup: Rc<InstanceLookup>,
+instance! {
+    #[instance(default = false, inspect = false)]
+    /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
+    #[derive(Debug)]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+    pub struct Workspace {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        instance: Box<InstanceData>,
+        /// The camera used when this workspace is rendered.
+        pub current_camera: Camera,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        tween_manager: TweenManager,
+        #[cfg(feature = "physics")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        physics: PhysicsWorld,
+        #[cfg(feature = "sound")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub(crate) audio: AudioRuntime,
+        #[cfg(feature = "meshpart")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        meshes: Vec<MeshHandle>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        textures: Vec<Texture>,
+        #[cfg(feature = "default-materials")]
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        builtin_materials: Vec<Option<Material>>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        texture_revisions: Vec<u64>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        texture_revision: u64,
+        /// Scene-wide lighting configuration.
+        pub lighting: Lighting,
+    }
 }
 
 impl Workspace {
+    /// Updates the indexed address after transferring this workspace between runtime owners.
+    #[doc(hidden)]
+    pub fn refresh_registration(&mut self) {
+        if self.parent().is_some() {
+            self.lookup().register(self);
+        }
+    }
+
+    pub(crate) fn lookup(&self) -> Rc<InstanceLookup> {
+        self.instance.lookup().expect("workspace tree index")
+    }
+
     pub(crate) fn render_textures(&self) -> impl Iterator<Item = RenderTexture<'_>> {
         self.textures
             .iter()
@@ -108,10 +112,7 @@ impl Workspace {
 
     /// Creates a workspace without geometry and with a default camera controller child.
     pub fn new() -> Self {
-        let mut instance = Box::new(InstanceData::new("Workspace"));
-        let lookup = Rc::new(InstanceLookup::default());
-        lookup.set_root(&mut instance);
-        instance.set_lookup(Some(&lookup));
+        let mut instance = InstanceData::new_root("Workspace");
         instance.add_child(Box::new(CameraController::default()));
         Self {
             instance,
@@ -129,7 +130,6 @@ impl Workspace {
             texture_revisions: Vec::new(),
             texture_revision: 0,
             lighting: Lighting::default(),
-            lookup,
         }
     }
 
@@ -245,18 +245,30 @@ impl Workspace {
 
     /// Returns a descendant by ID, downcast to its concrete instance type.
     pub fn get<T: Instance>(&self, id: InstanceId) -> Option<&T> {
-        self.instance(id)?.downcast_ref::<T>()
+        if id == self.id() {
+            return None;
+        }
+        self.view::<dyn Instance>(id)?.downcast_ref::<T>()
     }
 
     /// Returns a mutable descendant by ID, downcast to its concrete instance type.
     pub fn get_mut<T: Instance>(&mut self, id: InstanceId) -> Option<&mut T> {
-        self.instance_mut(id)?.downcast_mut::<T>()
+        if id == self.id() {
+            return None;
+        }
+        self.view_mut::<dyn Instance>(id)?.downcast_mut::<T>()
     }
 
     /// Returns descendants of the requested concrete instance type in insertion order.
     pub fn get_all<T: Instance>(&self) -> impl Iterator<Item = &T> {
         self.descendants()
             .filter_map(|instance| instance.downcast_ref::<T>())
+    }
+
+    /// Returns all descendants providing an API, including composed subclasses.
+    pub fn views<T: crate::InstanceType + ?Sized>(&self) -> impl Iterator<Item = &T::Api> {
+        self.descendants()
+            .filter_map(|instance| instance.view::<T>(instance.id()))
     }
 
     /// Returns parts whose colliders intersect the box in `overlap_params`.
@@ -280,34 +292,15 @@ impl Workspace {
         self.descendants()
     }
 
-    /// Returns a child by its stable identifier.
-    pub fn instance(&self, id: InstanceId) -> Option<&dyn Instance> {
-        if id == self.id() {
-            return None;
-        }
-        let instance = self.lookup.get(id)?;
-        // The index only stores pointers to boxed children owned by this workspace.
-        Some(unsafe { instance.as_ref() })
-    }
-
-    /// Returns a mutable child by its stable identifier.
-    pub fn instance_mut(&mut self, id: InstanceId) -> Option<&mut dyn Instance> {
-        if id == self.id() {
-            return None;
-        }
-        let mut instance = self.lookup.get(id)?;
-        // Boxed children have stable addresses while they are owned by the workspace.
-        Some(unsafe { instance.as_mut() })
-    }
-
     /// Updates the active camera from direct camera controller children in child order.
     ///
     /// A spatial subject is followed at the configured offset and orbit distance.
     /// Without a valid subject, input moves the camera freely.
     pub fn update_camera(&mut self, delta: f32) {
         let subject = self.current_camera.subject().and_then(|id| {
-            self.instance(id)
-                .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
+            self.view::<dyn Instance>(id)
+                .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
+                .map(|pose| (id, pose))
         });
         for child in self.instance.children_mut() {
             if let Some(controller) = child.downcast_mut::<CameraController>() {
@@ -350,7 +343,7 @@ impl Workspace {
         }
         let transforms = self.physics.step(&instances, delta_seconds);
         for (id, transform) in transforms {
-            if let Some(instance) = self.instance_mut(id) {
+            if let Some(instance) = self.view_mut::<dyn Instance>(id) {
                 apply_transform(instance, transform);
             }
         }
@@ -379,7 +372,7 @@ impl Workspace {
     /// updated parent transforms. This is called automatically by [`Self::update`].
     pub fn update_animations(&mut self, delta_seconds: f32) {
         fn update(instance: &mut dyn Instance, delta_seconds: f32) {
-            if let Some(rig) = instance.downcast_mut::<Rig>() {
+            if let Some(rig) = instance.view_mut::<Rig>(instance.id()) {
                 rig.update_animation(delta_seconds);
             }
             for child in instance.children_mut() {
@@ -407,10 +400,10 @@ impl Workspace {
     ///
     /// Call once per frame before [`Self::update`]. Each controller receives the
     /// same input and applies its own enabled-device and UI-capture settings.
-    pub fn process_eframe_input(&mut self, context: &crate::egui::Context) {
+    pub fn process_input(&mut self, context: &crate::egui::Context) {
         for child in self.children_mut() {
             if let Some(controller) = child.controller_mut() {
-                controller.process_eframe_input(context);
+                controller.process_input(context);
             }
         }
     }
@@ -484,10 +477,11 @@ impl Workspace {
 
 impl Clone for Workspace {
     fn clone(&self) -> Self {
-        let lookup = Rc::new(InstanceLookup::default());
-        let mut instance = Box::new((*self.instance).clone());
-        lookup.set_root(&mut instance);
-        instance.set_lookup(Some(&lookup));
+        let mut instance = InstanceData::new_root(self.name());
+        instance.attributes = self.instance.attributes.clone();
+        for child in self.children() {
+            instance.add_child(child.clone());
+        }
         let mut current_camera = self.current_camera.clone();
         if let Some(subject) = current_camera.subject() {
             current_camera.set_subject(cloned_instance_id(
@@ -512,11 +506,7 @@ impl Clone for Workspace {
             texture_revisions: self.texture_revisions.clone(),
             texture_revision: self.texture_revision,
             lighting: self.lighting.clone(),
-            lookup: lookup.clone(),
         };
-        for child in workspace.instance.children_mut() {
-            child.set_instance_lookup(Some(lookup.clone()));
-        }
         let mut ids = std::collections::HashMap::new();
         fn collect_ids(
             original: &dyn Instance,
@@ -564,21 +554,9 @@ impl Default for Workspace {
     }
 }
 
-crate::impl_instance!(
-    Workspace,
-    class_name = "Workspace",
-    data = instance,
-    inspect = Workspace,
-);
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "default-materials")]
-    use crate::TextureProjection;
-    use crate::{BasePart, Camera, HasPart, Part, PartShape, TextureColorSpace, glam::Vec3};
-    #[cfg(feature = "meshpart")]
-    use crate::{Mesh, MeshPart};
 
     #[cfg(feature = "meshpart")]
     #[test]
@@ -628,7 +606,7 @@ mod tests {
 
         assert_eq!(returned_id, part_id);
         assert_eq!(workspace.children().len(), 2);
-        let child = workspace.instance(part_id).unwrap();
+        let child = workspace.view::<dyn Instance>(part_id).unwrap();
         assert_eq!(child.class_name(), "Part");
         assert_eq!(child.parent(), Some(workspace_id));
         assert_eq!(
@@ -644,8 +622,18 @@ mod tests {
             workspace.get::<BasePart>(basepart_id).unwrap().name(),
             "renamed"
         );
-        assert!(workspace.instance(basepart_id).unwrap().is::<BasePart>());
-        assert!(workspace.instance(camera_id).unwrap().is::<Camera>());
+        assert!(
+            workspace
+                .view::<dyn Instance>(basepart_id)
+                .unwrap()
+                .is::<BasePart>()
+        );
+        assert!(
+            workspace
+                .view::<dyn Instance>(camera_id)
+                .unwrap()
+                .is::<Camera>()
+        );
         assert!(workspace.get::<Part>(camera_id).is_none());
         assert_eq!(workspace.get_all::<Camera>().count(), 1);
         assert_eq!(workspace.get_all::<Part>().count(), 1);
@@ -674,7 +662,7 @@ mod tests {
         let part_id = Part::new().with_name("part").set_parent(&mut workspace);
 
         assert!(workspace.remove_child(part_id));
-        assert!(workspace.instance(part_id).is_none());
+        assert!(workspace.view::<dyn Instance>(part_id).is_none());
         assert!(workspace.get_all::<Part>().next().is_none());
         assert!(!workspace.remove_child(part_id));
     }
@@ -687,10 +675,10 @@ mod tests {
         let last_id = Part::new().with_name("last").set_parent(&mut workspace);
 
         assert!(workspace.remove_child(removed_id));
-        assert!(workspace.instance(first_id).is_some());
-        assert!(workspace.instance(last_id).is_some());
+        assert!(workspace.view::<dyn Instance>(first_id).is_some());
+        assert!(workspace.view::<dyn Instance>(last_id).is_some());
         assert!(workspace.remove_child(last_id));
-        assert!(workspace.instance(first_id).is_some());
+        assert!(workspace.view::<dyn Instance>(first_id).is_some());
     }
 
     #[test]
@@ -702,9 +690,14 @@ mod tests {
             .unwrap()
             .add_child(Part::new().with_name("child"));
 
-        assert!(workspace.instance_mut(parent_id).unwrap().destroy());
-        assert!(workspace.instance(parent_id).is_none());
-        assert!(workspace.instance(child_id).is_none());
+        assert!(
+            workspace
+                .view_mut::<dyn Instance>(parent_id)
+                .unwrap()
+                .destroy()
+        );
+        assert!(workspace.view::<dyn Instance>(parent_id).is_none());
+        assert!(workspace.view::<dyn Instance>(child_id).is_none());
         assert!(workspace.get_all::<Part>().next().is_none());
     }
 
@@ -717,9 +710,14 @@ mod tests {
             .unwrap()
             .add_child(Part::new().with_name("child"));
 
-        assert!(workspace.instance_mut(child_id).unwrap().destroy());
-        assert!(workspace.instance(parent_id).is_some());
-        assert!(workspace.instance(child_id).is_none());
+        assert!(
+            workspace
+                .view_mut::<dyn Instance>(child_id)
+                .unwrap()
+                .destroy()
+        );
+        assert!(workspace.view::<dyn Instance>(parent_id).is_some());
+        assert!(workspace.view::<dyn Instance>(child_id).is_none());
         assert!(
             workspace
                 .get::<Part>(parent_id)
@@ -743,7 +741,7 @@ mod tests {
         assert_eq!(workspace.get::<Part>(child_id).unwrap().name(), "child");
 
         let other_workspace = Workspace::new();
-        assert!(other_workspace.instance(child_id).is_none());
+        assert!(other_workspace.view::<dyn Instance>(child_id).is_none());
     }
 
     #[test]

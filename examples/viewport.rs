@@ -1,10 +1,6 @@
 //! Render an arbitrary mesh into a GPU texture and display it in egui.
 
-use terrarium::{
-    App, AppCreationError, Color3, Engine, GltfError, HasBasePart, HasPVInstance, Instance, Mesh,
-    MeshPart, Part, RendererError, Terrarium, Viewport, ViewportTexture, eframe, egui, glam::Vec3,
-    push_triangle,
-};
+use terrarium::{glam::*, *};
 
 struct ViewportApp {
     texture1: ViewportTexture,
@@ -82,6 +78,7 @@ fn create_viewport2() -> Result<Viewport, GltfError> {
     Ok(viewport)
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<ViewportApp, AppCreationError> {
     Ok(ViewportApp {
         texture1: engine.render_viewport(&create_viewport1()?)?,

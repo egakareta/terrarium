@@ -1,10 +1,9 @@
-use trdevtools::{Devtools, DevtoolsHost, Inspect, PropertyError, PropertyValue};
+use trdevtools::*;
 use trscene::{
-    BasePart, Color3, HasBasePart, HasLight, HasMaterials, HasPVInstance, HasPart, Instance,
-    InstanceId, Part, PartShape, PlayerController, PointLight, Rig, Workspace,
     egui::{self, Event, Key, Modifiers},
     glam::Vec3,
     winit::keyboard::KeyCode,
+    *,
 };
 
 #[derive(Clone, Debug, Inspect)]
@@ -73,7 +72,7 @@ fn frame(
         },
         |ui| {
             devtools.focus_scene_on_camera_input(ui.ctx(), &host.workspace);
-            host.workspace.process_eframe_input(ui.ctx());
+            host.workspace.process_input(ui.ctx());
             host.workspace.update(0.1);
             devtools.show_docked(ui, host);
         },
@@ -334,7 +333,7 @@ fn camera_movement_keys_do_not_interrupt_text_editing() {
                     .camera_controller_mut()
                     .unwrap()
                     .input
-                    .process_eframe_input(ui.ctx());
+                    .process_input(ui.ctx());
                 host.workspace.update(0.1);
                 let response = ui.text_edit_singleline(&mut text);
                 if request_focus {
@@ -375,7 +374,7 @@ fn full_dock_deletes_the_selected_instance_on_delete_key() {
     );
     output.textures_delta.clear();
 
-    assert!(host.workspace.instance(part).is_none());
+    assert!(host.workspace.view::<dyn Instance>(part).is_none());
 }
 
 #[test]
@@ -504,7 +503,7 @@ fn edits_common_properties_and_rejects_invalid_values_without_mutation() {
         Err(PropertyError::InvalidValue)
     );
     assert_eq!(workspace.get::<Part>(part).unwrap().color(), edited_color);
-    assert!(workspace.instance(part).is_some());
+    assert!(workspace.view::<dyn Instance>(part).is_some());
 }
 
 #[test]
@@ -637,9 +636,9 @@ fn deleting_nested_selection_preserves_root_and_unselected_siblings() {
         vec![key(Key::Delete, false)],
     );
 
-    assert!(host.workspace.instance(parent).is_none());
-    assert!(host.workspace.instance(child).is_none());
-    assert!(host.workspace.instance(sibling).is_some());
+    assert!(host.workspace.view::<dyn Instance>(parent).is_none());
+    assert!(host.workspace.view::<dyn Instance>(child).is_none());
+    assert!(host.workspace.view::<dyn Instance>(sibling).is_some());
     assert_eq!(host.workspace.id(), root);
     assert_eq!(devtools.selected(), &[root]);
 }

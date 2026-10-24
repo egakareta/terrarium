@@ -7,13 +7,18 @@
 //! physics; other controllers update before it, in child order.
 //!
 //! ```
-//! use trscene::{Controller, ControllerActions, HasPVInstance, Instance, InstanceData, InstanceId, Rig, Workspace};
+//! use trscene::{Controller, ControllerActions, PVInstanceExt, Instance, InstanceData, InstanceId, Rig, Workspace, instance};
 //! use trscene::glam::{Quat, Vec3};
 //!
-//! #[derive(Clone, Debug)]
-//! struct Autopilot { instance: InstanceData, rig: Option<InstanceId> }
-//!
-//! trscene::impl_instance!(Autopilot, class_name = "Autopilot", data = instance);
+//! instance! {
+//!     #[instance(default = false)]
+//!     #[derive(Clone, Debug)]
+//!     struct Autopilot {
+//!         #[data]
+//!         instance: InstanceData,
+//!         rig: Option<InstanceId>,
+//!     }
+//! }
 //!
 //! impl Controller for Autopilot {
 //!     fn update(&mut self, workspace: &mut Workspace, delta: f32) {
@@ -37,8 +42,8 @@
 //! ```
 
 use crate::{
-    Instance, InstanceId, Workspace, egui,
     winit::event::{DeviceEvent, WindowEvent},
+    *,
 };
 
 mod actions;
@@ -53,9 +58,11 @@ pub use player::*;
 
 /// Per-frame behavior of an instance parented directly to a [`Workspace`].
 ///
-/// Use [`crate::impl_instance!`] to expose this capability on a custom instance.
+/// Use [`crate::instance!`] to expose this capability on a custom instance.
+///
 /// The default event handlers use [`Self::input_mut`]; override
 /// them when input should be translated differently or shared with other state.
+///
 /// The workspace sends each event to every direct controller child, then calls
 /// [`Self::update`] in child order. Camera controllers update after physics;
 /// other controllers update before physics.
@@ -74,9 +81,9 @@ pub trait Controller: Instance {
     }
 
     /// Processes one frame of egui input and paints touch controls, if enabled.
-    fn process_eframe_input(&mut self, context: &egui::Context) {
+    fn process_input(&mut self, context: &egui::Context) {
         if let Some(input) = self.input_mut() {
-            input.process_eframe_input(context);
+            input.process_input(context);
         }
     }
 

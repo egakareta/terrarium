@@ -1,4 +1,4 @@
-use terrarium::{AppCreationError, HasPVInstance as _, Instance, MeshPart, Terrarium, glam::Vec3};
+use terrarium::{glam::*, *};
 
 fn main() {
     Terrarium::new()
@@ -7,7 +7,7 @@ fn main() {
                 "../crates/trscene/fixtures/DamagedHelmet.glb"
             ))?;
 
-            engine.add_child(
+            engine.workspace_mut().add_child(
                 MeshPart::new(helmet_mesh)
                     .with_name("DamagedHelmet")
                     .with_position(Vec3::new(0.0, 0.75, 0.0)),

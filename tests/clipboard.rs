@@ -1,6 +1,6 @@
 #![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
 
-use terrarium::Clipboard;
+use terrarium::*;
 
 struct PreservedClipboard {
     clipboard: Clipboard,

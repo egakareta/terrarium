@@ -1,5 +1,4 @@
-use super::*;
-use crate::{MeshMaterialSlots, RenderCamera, glam::Quat};
+use crate::{glam::*, *};
 
 fn camera(position: Vec3, target: Vec3, aspect: f32) -> RenderCamera {
     let direction = (target - position).normalize_or_zero();
@@ -137,7 +136,7 @@ fn material_set_keys_distinguish_per_face_factors() {
 
 #[test]
 fn compact_normal_scales_match_inverse_transpose_for_trs() {
-    let rotation = Quat::from_euler(crate::glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
+    let rotation = Quat::from_euler(glam::EulerRot::XYZ, 0.4, -0.7, 0.2);
     let pivot = Mat4::from_rotation_translation(rotation, Vec3::new(1.0, -2.0, 3.0));
     let size = Vec3::new(0.82, 1.1, 0.6);
     let model = pivot * Mat4::from_scale(size);

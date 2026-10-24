@@ -1,14 +1,13 @@
 use trscene::{
-    Camera, CameraController, Controller, ControllerActions, ControllerInput, HasPVInstance,
-    Instance, InstanceData, InstanceId, Part, PlayerController, Rig, Workspace,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
-    glam::{Mat4, Quat, Vec2, Vec3},
+    glam::*,
     winit::{
         event::{DeviceEvent, WindowEvent},
         keyboard::KeyCode,
     },
+    *,
 };
 
 fn frame(context: &Context, workspace: &mut Workspace, events: Vec<Event>) {
@@ -17,7 +16,7 @@ fn frame(context: &Context, workspace: &mut Workspace, events: Vec<Event>) {
         events,
         ..Default::default()
     };
-    let mut output = context.run_ui(input, |ui| workspace.process_eframe_input(ui.ctx()));
+    let mut output = context.run_ui(input, |ui| workspace.process_input(ui.ctx()));
     output.textures_delta.clear();
 }
 
@@ -389,7 +388,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             ui.text_edit_singleline(&mut text);
             let player = workspace.get_mut::<PlayerController>(id).unwrap();
             player.process_mouse_motion((20.0, 0.0));
-            player.process_eframe_input(ui.ctx());
+            player.process_input(ui.ctx());
         },
     );
     output.textures_delta.clear();
@@ -436,7 +435,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             let _ = ui.button("capture");
             let player = workspace.get_mut::<PlayerController>(id).unwrap();
             player.process_mouse_motion((20.0, 0.0));
-            player.process_eframe_input(ui.ctx());
+            player.process_input(ui.ctx());
         },
     );
     output.textures_delta.clear();
@@ -477,19 +476,17 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     );
 }
 
-#[derive(Clone, Debug)]
-struct CustomController {
-    instance: InstanceData,
-    rig: InstanceId,
-    input: Option<ControllerInput>,
-    actions: ControllerActions,
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct CustomController {
+        #[data]
+        instance: InstanceData,
+        rig: InstanceId,
+        input: Option<ControllerInput>,
+        actions: ControllerActions,
+    }
 }
-
-trscene::impl_instance!(
-    CustomController,
-    class_name = "CustomController",
-    data = instance
-);
 
 impl Controller for CustomController {
     fn input(&self) -> Option<&ControllerInput> {
@@ -566,14 +563,16 @@ fn downstream_controllers_can_compose_reusable_input_or_run_without_devices() {
     );
 }
 
-#[derive(Clone, Debug)]
-struct PlaceRig {
-    instance: InstanceData,
-    rig: InstanceId,
-    position: Vec3,
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct PlaceRig {
+        #[data]
+        instance: InstanceData,
+        rig: InstanceId,
+        position: Vec3,
+    }
 }
-
-trscene::impl_instance!(PlaceRig, class_name = "PlaceRig", data = instance);
 
 impl Controller for PlaceRig {
     fn update(&mut self, workspace: &mut Workspace, _: f32) {
@@ -714,18 +713,16 @@ fn invalid_frame_durations_do_not_move_players_and_long_frames_are_capped() {
     assert!(rig.position().abs_diff_eq(Vec3::NEG_Z * 0.6, 1e-5));
 }
 
-#[derive(Clone, Debug)]
-struct ReplaceController {
-    instance: InstanceData,
-    rig: InstanceId,
-    remove: Option<InstanceId>,
+instance! {
+    #[instance(default = false)]
+    #[derive(Clone, Debug)]
+    struct ReplaceController {
+        #[data]
+        instance: InstanceData,
+        rig: InstanceId,
+        remove: Option<InstanceId>,
+    }
 }
-
-trscene::impl_instance!(
-    ReplaceController,
-    class_name = "ReplaceController",
-    data = instance
-);
 
 impl Controller for ReplaceController {
     fn update(&mut self, workspace: &mut Workspace, _: f32) {
@@ -758,7 +755,7 @@ fn controllers_can_remove_children_and_defer_new_behaviors_until_the_next_update
     workspace.get_mut::<ReplaceController>(id).unwrap().remove = Some(removed);
     workspace.update_controllers(0.1);
     assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::ZERO);
-    assert!(workspace.instance(id).is_none());
+    assert!(workspace.view::<dyn Instance>(id).is_none());
     workspace.update_controllers(0.1);
     assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::Y);
 }

@@ -1,7 +1,4 @@
-use crate::egui::{
-    Color32, Context, Event, InputState, LayerId, Order, Pos2, Rect, Stroke, TouchDeviceId,
-    TouchId, TouchPhase, Vec2, pos2, vec2,
-};
+use crate::egui::*;
 
 #[derive(Clone, Debug)]
 struct Finger {

@@ -1,5 +1,5 @@
 use trscene::{
-    Camera, CameraController, HasPVInstance, Instance,
+    Camera, CameraController, Instance, PVInstanceExt,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
@@ -26,7 +26,7 @@ fn raw_input(events: Vec<Event>) -> RawInput {
 
 fn frame(context: &Context, controller: &mut CameraController, events: Vec<Event>) {
     let mut output = context.run_ui(raw_input(events), |ui| {
-        controller.input.process_eframe_input(ui.ctx());
+        controller.input.process_input(ui.ctx());
     });
     output.textures_delta.clear();
 }
@@ -311,7 +311,7 @@ fn touch_on_egui_widget_does_not_start_camera_gesture() {
     ] {
         let mut output = context.run_ui(raw_input(events), |ui| {
             ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
-            controller.input.process_eframe_input(ui.ctx());
+            controller.input.process_input(ui.ctx());
         });
         output.textures_delta.clear();
     }
@@ -340,8 +340,7 @@ fn focus_loss_and_resize_cancel_touch_gestures() {
         } else {
             input.screen_rect = Some(Rect::from_min_size(Pos2::ZERO, vec2(600.0, 800.0)));
         }
-        let mut output =
-            context.run_ui(input, |ui| controller.input.process_eframe_input(ui.ctx()));
+        let mut output = context.run_ui(input, |ui| controller.input.process_input(ui.ctx()));
         output.textures_delta.clear();
         let initial = camera.pose();
         controller.update_camera(&mut camera, None, 0.1);
@@ -372,7 +371,7 @@ fn touch_drag_uses_physical_pixels_at_high_dpi() {
         .get_mut(&egui::ViewportId::ROOT)
         .unwrap()
         .native_pixels_per_point = Some(2.0);
-    let mut output = context.run_ui(input, |ui| controller.input.process_eframe_input(ui.ctx()));
+    let mut output = context.run_ui(input, |ui| controller.input.process_input(ui.ctx()));
     output.textures_delta.clear();
     let mut camera = Camera::default();
     let mut expected = camera.clone();
@@ -451,7 +450,7 @@ fn a_second_finger_on_an_egui_area_does_not_rotate_the_camera() {
                 .show(ui.ctx(), |ui| {
                     ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
                 });
-            controller.input.process_eframe_input(ui.ctx());
+            controller.input.process_input(ui.ctx());
         });
         output.textures_delta.clear();
     }
@@ -490,7 +489,7 @@ fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
         ] {
             let mut output = context.run_ui(raw_input(events), |ui| {
                 ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
-                controller.input.process_eframe_input(ui.ctx());
+                controller.input.process_input(ui.ctx());
             });
             output.textures_delta.clear();
         }
@@ -512,7 +511,7 @@ fn holding_an_egui_widget_allows_other_fingers_to_move_and_look() {
                 let (_, response) = ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
                 assert!(response.dragged());
                 assert!(ui.ctx().egui_wants_pointer_input());
-                controller.input.process_eframe_input(ui.ctx());
+                controller.input.process_input(ui.ctx());
             });
             output.textures_delta.clear();
         }
@@ -544,7 +543,7 @@ fn a_second_finger_on_a_background_widget_does_not_rotate_the_camera() {
     ] {
         let mut output = context.run_ui(raw_input(events), |ui| {
             ui.allocate_exact_size(vec2(200.0, 150.0), egui::Sense::drag());
-            controller.input.process_eframe_input(ui.ctx());
+            controller.input.process_input(ui.ctx());
         });
         output.textures_delta.clear();
     }

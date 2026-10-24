@@ -7,6 +7,7 @@ pub use trdevtools;
 #[cfg(feature = "phosphor")]
 pub use tregui::egui_phosphor;
 pub use trfont;
+pub use trmacros::with_workspace;
 pub use trrender;
 pub use trscene;
 pub use winit;

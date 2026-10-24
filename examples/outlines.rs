@@ -1,7 +1,4 @@
-use terrarium::{
-    App, AppCreationError, Color3, Engine, Instance, InstanceId, MeshPart, Outline, OutlineMode,
-    Terrarium, eframe, egui, glam::Vec3,
-};
+use terrarium::{glam::*, *};
 
 struct OutlinesApp {
     mesh_part: InstanceId,
@@ -68,7 +65,7 @@ impl App for OutlinesApp {
         if focus_on_duck != self.focus_on_duck {
             self.focus_on_duck = focus_on_duck;
             engine
-                .workspace
+                .workspace_mut()
                 .current_camera
                 .set_subject(focus_on_duck.then_some(self.mesh_part));
         }
@@ -92,14 +89,17 @@ fn main() {
             } else {
                 Vec3::ZERO
             };
-            let mesh_part = engine.add_child(MeshPart::new(mesh));
+            let mesh_part = engine.workspace_mut().add_child(MeshPart::new(mesh));
             engine
-                .workspace
+                .workspace_mut()
                 .camera_controller_mut()
                 .unwrap()
                 .subject_offset = focus_offset;
 
-            engine.workspace.current_camera.set_subject(Some(mesh_part));
+            engine
+                .workspace_mut()
+                .current_camera
+                .set_subject(Some(mesh_part));
 
             let mut app = OutlinesApp {
                 mesh_part,

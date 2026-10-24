@@ -1,8 +1,4 @@
-use terrarium::{
-    AnimationClip, AnimationPlayer, AnimationTrack, App, AppCreationError, Color3, Easing, Engine,
-    HasBasePart, HasPVInstance, Instance, InstanceId, Keyframe, Part, Rig, Terrarium, eframe, egui,
-    glam::{Mat4, Quat, Vec3},
-};
+use terrarium::{glam::*, *};
 
 struct RigApp {
     rig: InstanceId,
@@ -54,6 +50,7 @@ fn arm_pose(side: f32, angle: f32) -> Mat4 {
     )
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<RigApp, AppCreationError> {
     let mut rig = Rig::new().with_name("Character");
     rig.add_child_local(
@@ -88,7 +85,7 @@ fn initialize(engine: &mut Engine) -> Result<RigApp, AppCreationError> {
         ));
     }
     rig.play_animation(AnimationPlayer::new(AnimationClip::new(tracks)).with_looping(true))?;
-    let rig = engine.add_child(rig);
+    let rig = workspace.add_child(rig);
     engine.current_camera = terrarium::Camera::new(Vec3::new(5.0, 3.0, 7.0), Vec3::Y, 16.0 / 9.0);
     Ok(RigApp { rig })
 }

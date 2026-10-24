@@ -1,10 +1,10 @@
 use crate::{
-    ControllerActions, egui,
-    glam::{Vec2, Vec3},
+    glam::*,
     winit::{
         event::{DeviceEvent, ElementState, MouseButton, MouseScrollDelta, WindowEvent},
         keyboard::{KeyCode, PhysicalKey},
     },
+    *,
 };
 
 /// Physical key bindings used by [`ControllerInput`].
@@ -292,7 +292,7 @@ impl ControllerInput {
     ///
     /// Gestures are assigned at touch-down, permitting simultaneous joystick and
     /// look input. Touches starting on UI areas are left to egui.
-    pub fn process_eframe_input(&mut self, context: &egui::Context) {
+    pub fn process_input(&mut self, context: &egui::Context) {
         let pointer_capture = context.egui_wants_pointer_input();
         let (has_wheel_input, pointer_position) = context.input(|input| {
             (

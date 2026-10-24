@@ -3,19 +3,9 @@ use std::{
     fmt::{self, Debug, Write},
 };
 
-/// Derives field inspection for named structs and enums with unit variants.
-///
-/// Fields are inspected recursively. `#[inspect(flatten)]` exposes inherited
-/// fields at the same level; `#[inspect(readonly)]` displays a debug value;
-/// `#[inspect(skip)]` omits runtime storage. Field types must implement [`Inspect`].
-/// `#[inspect(setter = method)]` applies validated edits through an `&mut self`
-/// method that accepts the updated field value. These fields must also be [`Clone`].
-pub use trdevtools_derive::Inspect;
+pub use trmacros::Inspect;
 
-use crate::{
-    Color3, Face, MeshMaterialSlots,
-    glam::{EulerRot, Mat4, Quat, Vec3},
-};
+use crate::{glam::*, *};
 
 /// A value understood by the property editor.
 #[derive(Clone, Debug, PartialEq)]

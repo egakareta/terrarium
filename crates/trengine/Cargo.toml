@@ -20,6 +20,7 @@ env_logger = "0.11"
 log = "0.4"
 slotmap = "1"
 trdevtools = { workspace = true, optional = true }
+trmacros = { workspace = true, features = ["engine"] }
 tregui = { workspace = true, features = ["phosphor"], optional = true }
 trfont = { workspace = true }
 trrender = { workspace = true }

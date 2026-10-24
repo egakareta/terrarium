@@ -1,8 +1,4 @@
-use terrarium::{
-    App, AppCreationError, Camera, Color3, Engine, HasBasePart, HasCamera, HasPVInstance, HasPart,
-    Instance, InstanceId, Part, PartShape, PlayerController, Rig, Terrarium, Workspace, egui,
-    glam::Vec3,
-};
+use terrarium::{glam::*, *};
 
 const SPAWN: Vec3 = Vec3::new(0.0, 4.0, 22.0);
 
@@ -212,8 +208,9 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     rig
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
-    let rig = create_scene(&mut engine.workspace);
+    let rig = create_scene(workspace);
     Ok(PlayerApp { rig })
 }
 
@@ -259,7 +256,7 @@ mod tests {
             events,
             ..Default::default()
         };
-        let mut output = context.run_ui(input, |ui| workspace.process_eframe_input(ui.ctx()));
+        let mut output = context.run_ui(input, |ui| workspace.process_input(ui.ctx()));
         output.textures_delta.clear();
     }
 

@@ -1,85 +1,36 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{
-    Controller, ControllerActions, ControllerInput, ControllerKeyBindings, HasPVInstance,
-    InstanceData, InstanceId, PVInstance, Workspace, glam,
-    glam::{Mat4, Quat, Vec2, Vec3},
-};
+use crate::{glam::*, *};
 
-/// A perspective camera with a world-space pivot.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct Camera {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) instance: InstanceData,
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    pub(crate) pv_instance: PVInstance,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    subject: Option<InstanceId>,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    aspect: f32,
-    fovy: f32,
-    znear: f32,
-    zfar: f32,
-}
-
-/// Access to a camera's projection properties.
-pub trait HasCamera {
-    /// Returns shared access to the underlying [`Camera`].
-    fn camera(&self) -> &Camera;
-
-    /// Returns mutable access to the underlying [`Camera`].
-    fn camera_mut(&mut self) -> &mut Camera;
-
-    crate::__instance_property! {
-        self;
+instance! {
+    #[instance(default = false, inspect = false)]
+    /// A perspective camera with a world-space pivot.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+    pub struct Camera {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        pub(crate) instance: InstanceData,
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[compose]
+        pub(crate) pv_instance: PVInstance,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        #[property]
+        subject: Option<InstanceId>,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
         /// Viewport width divided by viewport height. Values set through this
         /// API are clamped to at least `0.001`.
-        getter aspect() -> f32 { self.camera().aspect }
-        setter set_aspect(aspect: f32) {
-            self.camera_mut().aspect = aspect.max(0.001);
-        }
-        builder with_aspect;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property(sanitize = |value: f32| value.max(0.001))]
+        aspect: f32,
         /// Vertical field of view in radians.
-        getter fovy() -> f32 { self.camera().fovy }
-        setter set_fovy(fovy: f32) {
-            self.camera_mut().fovy = fovy;
-        }
-        builder with_fovy;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property]
+        fovy: f32,
         /// Near clipping plane distance.
-        getter znear() -> f32 { self.camera().znear }
-        setter set_znear(znear: f32) {
-            self.camera_mut().znear = znear;
-        }
-        builder with_znear;
-    }
-
-    crate::__instance_property! {
-        self;
+        #[property]
+        znear: f32,
         /// Far clipping plane distance.
-        getter zfar() -> f32 { self.camera().zfar }
-        setter set_zfar(zfar: f32) {
-            self.camera_mut().zfar = zfar;
-        }
-        builder with_zfar;
-    }
-}
-
-impl<T: HasCamera + ?Sized> HasCamera for &mut T {
-    fn camera(&self) -> &Camera {
-        (**self).camera()
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        (**self).camera_mut()
+        #[property]
+        zfar: f32,
     }
 }
 
@@ -132,74 +83,60 @@ impl Camera {
     pub fn projection_matrix(&self) -> Mat4 {
         glam::camera::rh::proj::directx::perspective(self.fovy, self.aspect, self.znear, self.zfar)
     }
-
-    crate::__instance_property! {
-        self;
-        /// Instance followed in third-person mode. A missing subject leaves
-        /// the camera in free-moving mode; a supplied ID must belong to a
-        /// spatial instance in the active workspace.
-        pub getter subject() -> Option<InstanceId> { self.subject }
-        setter set_subject(subject: Option<InstanceId>) {
-            self.subject = subject;
-        }
-        builder with_subject;
-    }
 }
-
-crate::impl_instance!(
-    Camera,
-    class_name = "Camera",
-    data = instance,
-    inspect = Camera
-);
 
 /// Physical keyboard keys assigned to camera movement and orbit actions.
 pub type CameraKeyBindings = ControllerKeyBindings;
 
-/// Free-flight movement and third-person orbit for a [`Camera`].
-///
-/// Device state is stored in [`Self::input`]. Free flight follows the camera's
-/// look direction. With a subject, look and horizontal movement orbit, vertical
-/// movement changes pitch, and forward/backward movement adjusts distance.
-/// [`Self::update_camera_with_actions`] also accepts actions directly.
-/// Parent this instance directly to a workspace to receive input and update its
-/// active camera after physics.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct CameraController {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    instance: InstanceData,
-    /// Keyboard, mouse, and touch state used by this controller.
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub input: ControllerInput,
-    /// Movement and zoom speed in world units per second.
-    pub speed: f32,
-    /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
-    pub sensitivity: f32,
-    /// Distance from the subject's focus point in third-person mode.
-    pub subject_distance: f32,
-    /// Minimum camera distance from the subject's focus point.
-    pub min_subject_distance: f32,
-    /// Maximum camera distance from the subject's focus point.
-    pub max_subject_distance: f32,
-    /// Local-space offset from the subject pivot to the camera's focus point.
-    pub subject_offset: Vec3,
-    /// Orbit speed in radians per second for keyboard and joystick controls.
-    pub orbit_speed: f32,
-    /// Minimum vertical orbit angle in radians.
-    pub min_subject_pitch: f32,
-    /// Maximum vertical orbit angle in radians.
-    pub max_subject_pitch: f32,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    orbit_subject: Option<InstanceId>,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    orbit_yaw: f32,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    orbit_pitch: f32,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    queued_look: Vec2,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    queued_subject_zoom: f32,
+instance! {
+    #[instance(default = false, inspect = false)]
+    /// Free-flight movement and third-person orbit for a [`Camera`].
+    ///
+    /// Device state is stored in [`Self::input`]. Free flight follows the camera's
+    /// look direction. With a subject, look and horizontal movement orbit, vertical
+    /// movement changes pitch, and forward/backward movement adjusts distance.
+    /// [`Self::update_camera_with_actions`] also accepts actions directly.
+    ///
+    /// Parent this instance directly to a workspace to receive input and update its
+    /// active camera after physics.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+    pub struct CameraController {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        instance: InstanceData,
+        /// Keyboard, mouse, and touch state used by this controller.
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub input: ControllerInput,
+        /// Movement and zoom speed in world units per second.
+        pub speed: f32,
+        /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
+        pub sensitivity: f32,
+        /// Distance from the subject's focus point in third-person mode.
+        pub subject_distance: f32,
+        /// Minimum camera distance from the subject's focus point.
+        pub min_subject_distance: f32,
+        /// Maximum camera distance from the subject's focus point.
+        pub max_subject_distance: f32,
+        /// Local-space offset from the subject pivot to the camera's focus point.
+        pub subject_offset: Vec3,
+        /// Orbit speed in radians per second for keyboard and joystick controls.
+        pub orbit_speed: f32,
+        /// Minimum vertical orbit angle in radians.
+        pub min_subject_pitch: f32,
+        /// Maximum vertical orbit angle in radians.
+        pub max_subject_pitch: f32,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        orbit_subject: Option<InstanceId>,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        orbit_yaw: f32,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        orbit_pitch: f32,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        queued_look: Vec2,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        queued_subject_zoom: f32,
+    }
 }
 
 impl Default for CameraController {
@@ -437,13 +374,6 @@ impl CameraController {
     }
 }
 
-crate::impl_instance!(
-    CameraController,
-    class_name = "CameraController",
-    data = instance,
-    inspect = CameraController,
-);
-
 impl Deref for CameraController {
     type Target = ControllerInput;
 
@@ -470,7 +400,7 @@ impl Controller for CameraController {
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
         let subject = workspace.current_camera.subject().and_then(|id| {
             workspace
-                .instance(id)
+                .view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
         self.update_camera(&mut workspace.current_camera, subject, delta_seconds);
@@ -478,26 +408,6 @@ impl Controller for CameraController {
 
     fn remap_instances(&mut self, map: &dyn Fn(InstanceId) -> Option<InstanceId>) {
         self.orbit_subject = self.orbit_subject.and_then(map);
-    }
-}
-
-impl HasPVInstance for Camera {
-    fn pv(&self) -> &PVInstance {
-        &self.pv_instance
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        &mut self.pv_instance
-    }
-}
-
-impl HasCamera for Camera {
-    fn camera(&self) -> &Camera {
-        self
-    }
-
-    fn camera_mut(&mut self) -> &mut Camera {
-        self
     }
 }
 

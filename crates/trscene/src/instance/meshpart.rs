@@ -2,12 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use thiserror::Error;
 
-use crate::{
-    BasePart, Face, HasBasePart, HasMaterials, HasPVInstance, Instance, MATERIAL_SLOT_COUNT,
-    Material, Mesh, MeshMaterialSlots, PVInstance, Texture, TextureColorSpace, TextureError,
-    TextureFilter, TextureHandle, Vertex, Workspace,
-    glam::{Mat4, Vec2, Vec3},
-};
+use crate::{glam::*, *};
 
 /// Errors produced while decoding a glTF asset or deriving its render view.
 #[derive(Debug, Error)]
@@ -72,24 +67,46 @@ pub enum GltfError {
     Texture(#[from] TextureError),
 }
 
-/// A visible scene object backed by caller-provided or imported mesh data.
-///
-/// `MeshPart` exposes [`BasePart`] behavior through [`HasBasePart`] and
-/// [`PVInstance`] behavior through [`HasPVInstance`], so its hierarchy,
-/// transform, size, tint, and collision metadata use the same API as
-/// [`crate::Part`].
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct MeshPart {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    basepart: BasePart,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    mesh: MeshHandle,
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    mesh_revision: u64,
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    bounding_radius: f32,
-    pub(crate) material_slots: MeshMaterialSlots,
+instance! {
+    #[instance(default = false, inspect = false)]
+    /// A visible scene object backed by caller-provided or imported mesh data.
+    ///
+    /// `MeshPart` exposes [`BasePart`] behavior through [`BasePartExt`] and
+    /// [`crate::PVInstance`] behavior through [`PVInstanceExt`], so its hierarchy,
+    /// transform, size, tint, and collision metadata use the same API as
+    /// [`crate::Part`].
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+    pub struct MeshPart {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[extends]
+        basepart: BasePart,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        mesh: MeshHandle,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        mesh_revision: u64,
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        bounding_radius: f32,
+    }
+    impl MeshPart {
+        /// CPU-side geometry rendered by this mesh part. Replacing it updates
+        /// the bounds and schedules a new upload before the next frame.
+        pub fn mesh(&self) -> &Mesh {
+            self.mesh_part().mesh.mesh()
+        }
+        /// Sets `mesh`.
+        pub fn set_mesh(&mut self, mesh: Mesh) {
+            let mesh_part = self.mesh_part_mut();
+            mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
+            mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots().clone());
+            mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
+        }
+
+        /// Returns the shared mesh asset used by this part.
+        pub fn mesh_handle(&self) -> &MeshHandle {
+            &self.mesh_part().mesh
+        }
+    }
 }
 
 /// A mesh source accepted by [`crate::Workspace::add_mesh`].
@@ -255,11 +272,12 @@ impl MeshPart {
         let bounding_radius = mesh_bounding_radius(mesh.mesh());
         let material_slots = mesh.0.material_slots.clone();
         Self {
-            basepart: BasePart::new().with_name("MeshPart"),
+            basepart: BasePart::new()
+                .with_name("MeshPart")
+                .with_material_slots(material_slots),
             mesh,
             mesh_revision: 0,
             bounding_radius,
-            material_slots,
         }
     }
 
@@ -319,91 +337,6 @@ impl MeshPart {
 
     pub(crate) fn bounding_radius(&self) -> f32 {
         self.bounding_radius
-    }
-}
-
-crate::impl_instance!(
-    MeshPart,
-    class_name = "MeshPart",
-    data = basepart.instance,
-    inspect = MeshPart,
-);
-
-/// Access to the underlying [`MeshPart`].
-pub trait HasMeshPart {
-    /// Returns shared access to the underlying [`MeshPart`].
-    fn mesh_part(&self) -> &MeshPart;
-
-    /// Returns mutable access to the underlying [`MeshPart`].
-    fn mesh_part_mut(&mut self) -> &mut MeshPart;
-
-    crate::__instance_property! {
-        self;
-        /// CPU-side geometry rendered by this mesh part. Replacing it updates
-        /// the bounds and schedules a new upload before the next frame.
-        getter mesh() -> &Mesh { self.mesh_part().mesh.mesh() }
-        setter set_mesh(mesh: Mesh) {
-            let mesh_part = self.mesh_part_mut();
-            mesh_part.bounding_radius = mesh_bounding_radius(&mesh);
-            mesh_part.mesh = MeshHandle::from_parts(mesh, mesh_part.material_slots.clone());
-            mesh_part.mesh_revision = mesh_part.mesh_revision.wrapping_add(1);
-        }
-        builder with_mesh;
-    }
-
-    /// Returns the shared mesh asset used by this part.
-    fn mesh_handle(&self) -> &MeshHandle {
-        &self.mesh_part().mesh
-    }
-}
-
-impl HasMeshPart for MeshPart {
-    fn mesh_part(&self) -> &MeshPart {
-        self
-    }
-
-    fn mesh_part_mut(&mut self) -> &mut MeshPart {
-        self
-    }
-}
-
-impl<T: HasMeshPart + ?Sized> HasMeshPart for &mut T {
-    fn mesh_part(&self) -> &MeshPart {
-        (**self).mesh_part()
-    }
-
-    fn mesh_part_mut(&mut self) -> &mut MeshPart {
-        (**self).mesh_part_mut()
-    }
-}
-
-impl HasPVInstance for MeshPart {
-    fn pv(&self) -> &PVInstance {
-        self.basepart.pv()
-    }
-
-    fn pv_mut(&mut self) -> &mut PVInstance {
-        self.basepart.pv_mut()
-    }
-}
-
-impl HasBasePart for MeshPart {
-    fn base_part(&self) -> &BasePart {
-        &self.basepart
-    }
-
-    fn base_part_mut(&mut self) -> &mut BasePart {
-        &mut self.basepart
-    }
-}
-
-impl HasMaterials for MeshPart {
-    fn material_slots(&self) -> &MeshMaterialSlots {
-        &self.material_slots
-    }
-
-    fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
-        &mut self.material_slots
     }
 }
 
@@ -884,7 +817,6 @@ fn append_f32_pixels(rgba: &mut Vec<u8>, pixels: &[u8], channels: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Instance;
 
     #[test]
     fn material_returns_only_uniform_effective_slots() {

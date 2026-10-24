@@ -1,48 +1,49 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{
-    Controller, ControllerActions, ControllerInput, HasPVInstance, InstanceData, InstanceId, Rig,
-    Workspace,
-    glam::{Mat4, Quat, Vec3},
-};
+use crate::{glam::*, *};
 
-/// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
-///
-/// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
-/// mid-turn when movement stops. Mouse and touch look orbit the active camera
-/// when it follows this rig; the mouse wheel changes its orbit distance. Orbit
-/// input never turns an idle rig.
-///
-/// With the `physics` feature, unanchored rigs move through their physics bodies,
-/// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
-/// Anchored rigs, and builds without physics, move their poses directly. Descendants
-/// and scale are preserved in both cases.
-/// Movement uses the active camera's horizontal heading. To orbit around the
-/// player, set the camera subject to this rig. Disable duplicate camera input
-/// when both controllers would otherwise respond to the same device.
-/// Parent this instance directly to a workspace to receive input and updates.
-#[derive(Clone, Debug)]
-#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
-pub struct PlayerController {
-    #[cfg_attr(feature = "devtools", inspect(flatten))]
-    instance: InstanceData,
-    /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
-    #[cfg_attr(feature = "devtools", inspect(readonly))]
-    pub rig: Option<InstanceId>,
-    /// Device state and bindings used to generate controller actions.
-    #[cfg_attr(feature = "devtools", inspect(skip))]
-    pub input: ControllerInput,
-    /// Movement speed in world units per second.
-    pub speed: f32,
-    /// Upward jump velocity in world units per second.
-    pub jump_speed: f32,
-    /// Camera orbit sensitivity in radians per physical pixel.
-    pub sensitivity: f32,
-    /// Controls how quickly the rig turns toward its movement direction.
+instance! {
+    #[instance(default = false, inspect = false)]
+    /// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
     ///
-    /// Each moving frame uses `(turn_factor * delta_seconds).clamp(0.0, 1.0)`
-    /// along the shortest yaw arc. Zero disables turning; idle frames retain yaw.
-    pub turn_factor: f32,
+    /// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
+    /// mid-turn when movement stops. Mouse and touch look orbit the active camera
+    /// when it follows this rig; the mouse wheel changes its orbit distance. Orbit
+    /// input never turns an idle rig.
+    ///
+    /// With the `physics` feature, unanchored rigs move through their physics bodies,
+    /// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
+    /// Anchored rigs, and builds without physics, move their poses directly. Descendants
+    /// and scale are preserved in both cases.
+    /// Movement uses the active camera's horizontal heading. To orbit around the
+    /// player, set the camera subject to this rig. Disable duplicate camera input
+    /// when both controllers would otherwise respond to the same device.
+    ///
+    /// Parent this instance directly to a workspace to receive input and updates.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+    pub struct PlayerController {
+        #[cfg_attr(feature = "devtools", inspect(flatten))]
+        #[data]
+        instance: InstanceData,
+        /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
+        #[cfg_attr(feature = "devtools", inspect(readonly))]
+        pub rig: Option<InstanceId>,
+        /// Device state and bindings used to generate controller actions.
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        pub input: ControllerInput,
+        /// Movement speed in world units per second.
+        pub speed: f32,
+        /// Upward jump velocity in world units per second.
+        pub jump_speed: f32,
+        /// Camera orbit sensitivity in radians per physical pixel.
+        pub sensitivity: f32,
+        /// Controls how quickly the rig turns toward its movement direction.
+        ///
+        /// Each moving frame uses `(turn_factor * delta_seconds).clamp(0.0, 1.0)`
+        /// along the shortest yaw arc. Zero disables turning; idle frames retain yaw.
+        pub turn_factor: f32,
+    }
 }
 
 impl PlayerController {
@@ -230,13 +231,6 @@ impl PlayerController {
         }
     }
 }
-
-crate::impl_instance!(
-    PlayerController,
-    class_name = "PlayerController",
-    data = instance,
-    inspect = PlayerController,
-);
 
 impl Deref for PlayerController {
     type Target = ControllerInput;

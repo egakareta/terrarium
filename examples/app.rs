@@ -33,8 +33,9 @@ impl App for SceneApp {
     }
 }
 
+#[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
-    engine.lighting.with_clock_time(18.0);
+    workspace.lighting.with_clock_time(18.0);
 
     let dirt = engine.add_texture(Texture::from_bytes(
         include_bytes!("../assets/dirt.png"),
@@ -59,7 +60,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         include_bytes!("../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
-    let ground = engine.add_child_ref(
+    let ground = workspace.add_child_ref(
         Part::new()
             .with_name("Ground")
             .with_shape(PartShape::Block)
@@ -87,7 +88,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_material(Material::brick()),
     );
 
-    let tower = engine.add_child_with(
+    let tower = workspace.add_child_with(
         Part::new()
             .with_shape(PartShape::Cylinder)
             .with_position(Vec3::new(-3.4, 1.0, -1.8))
@@ -110,7 +111,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         },
     );
 
-    engine.add_child(
+    workspace.add_child(
         Part::new()
             .with_name("GrassBlock")
             .with_shape(PartShape::Block)
@@ -136,7 +137,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             ),
     );
 
-    let platform = engine.add_child(
+    let platform = workspace.add_child(
         Part::new()
             .with_shape(PartShape::Block)
             .with_position(Vec3::new(-1.0, 0.55, 1.6))
@@ -145,7 +146,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_material(Material::textured(festival_lantern).with_roughness(0.82)),
     );
 
-    let orb = engine.add_child_with(
+    let orb = workspace.add_child_with(
         Part::new()
             .with_shape(PartShape::Ball)
             .with_position(Vec3::new(3.3, 2.8, 0.0))
@@ -164,7 +165,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
         },
     );
 
-    engine.add_child(
+    workspace.add_child(
         Part::new()
             .with_shape(PartShape::Wedge)
             .with_position(Vec3::new(2.7, 1.5, 2.2))
@@ -173,7 +174,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_orientation(Vec3::new(0.0, 26.0, 0.0)),
     );
 
-    engine.add_child(
+    workspace.add_child(
         Part::new()
             .with_shape(PartShape::CornerWedge)
             .with_position(Vec3::new(-4.7, 0.6, 3.1))
@@ -182,7 +183,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_orientation(Vec3::new(0.0, -46.0, 0.0)),
     );
 
-    engine.add_child(
+    workspace.add_child(
         Part::new()
             .with_name("CyanGlass")
             .with_position(Vec3::new(0.0, 1.45, -10.15))
@@ -191,7 +192,7 @@ fn initialize(engine: &mut Engine) -> Result<SceneApp, RendererError> {
             .with_transparency(0.45)
             .with_can_collide(false),
     );
-    engine.add_child(
+    workspace.add_child(
         Part::new()
             .with_name("AmberGlass")
             .with_position(Vec3::new(0.0, 1.45, -10.75))

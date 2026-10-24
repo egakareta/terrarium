@@ -1,6 +1,7 @@
 use trscene::{
     AnimationClip, AnimationError, AnimationPlayer, AnimationTrack, BasePart, Camera, Easing,
-    HasPVInstance, Instance, Keyframe, Part, PointLight, Rig, Tween, Workspace,
+    Instance, InstanceExt, Keyframe, PVInstanceExt, Part, PointLight, Rig, RigExt, Tween,
+    Workspace,
     glam::{Mat4, Quat, Vec3},
 };
 
@@ -101,7 +102,7 @@ fn spatial_instance_access_preserves_transform_semantics() {
 
     assert_eq!(
         instance
-            .find_descendant(part_id)
+            .view::<dyn Instance>(part_id)
             .unwrap()
             .spatial()
             .unwrap()
@@ -277,7 +278,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
     rig.update_animation(0.75);
     assert_eq!(rig.animation().unwrap().time(), 0.5);
     assert_eq!(
-        rig.find_descendant(arm_id)
+        rig.view::<dyn Instance>(arm_id)
             .unwrap()
             .downcast_ref::<Part>()
             .unwrap()
@@ -290,7 +291,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
     rig.animation_mut().unwrap().seek(0.75).unwrap();
     rig.update_animation(0.0);
     assert_eq!(
-        rig.find_descendant(arm_id)
+        rig.view::<dyn Instance>(arm_id)
             .unwrap()
             .downcast_ref::<Part>()
             .unwrap()
@@ -305,7 +306,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
     rig.update_animation(5.0);
     assert!(rig.animation().unwrap().is_finished());
     assert_eq!(
-        rig.find_descendant(arm_id)
+        rig.view::<dyn Instance>(arm_id)
             .unwrap()
             .downcast_ref::<Part>()
             .unwrap()
@@ -318,14 +319,14 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
     assert!(!rig.animation().unwrap().is_finished());
     assert!(rig.stop_animation().is_some());
     let held = rig
-        .find_descendant(arm_id)
+        .view::<dyn Instance>(arm_id)
         .unwrap()
         .downcast_ref::<Part>()
         .unwrap()
         .pivot();
     rig.update_animation(1.0);
     assert_eq!(
-        rig.find_descendant(arm_id)
+        rig.view::<dyn Instance>(arm_id)
             .unwrap()
             .downcast_ref::<Part>()
             .unwrap()
@@ -463,7 +464,7 @@ fn invalid_clips_and_unresolved_targets_are_rejected_without_changing_the_pose()
     ));
     assert_eq!(rig.animation().unwrap().time(), 0.5);
     assert_eq!(
-        rig.find_descendant(arm_id)
+        rig.view::<dyn Instance>(arm_id)
             .unwrap()
             .downcast_ref::<Part>()
             .unwrap()
@@ -489,7 +490,7 @@ fn inspector_edits_carry_rig_parts_and_reject_singular_scale() {
     )
     .unwrap();
     assert_eq!(
-        rig.find_descendant(arm)
+        rig.view::<dyn Instance>(arm)
             .unwrap()
             .downcast_ref::<Part>()
             .unwrap()
@@ -510,7 +511,7 @@ fn inspector_edits_carry_rig_parts_and_reject_singular_scale() {
 #[cfg(feature = "physics")]
 #[test]
 fn dynamic_rig_parts_share_motion_and_keep_their_offsets_under_impulses() {
-    use trscene::{HasBasePart, rapier3d::math::Vector};
+    use trscene::{BasePartExt, rapier3d::math::Vector};
     let mut rig = Rig::new().with_anchored(false);
     let left = rig.add_child(Part::new().with_name("Left").with_pivot(translation(-1.0)));
     let right = rig.add_child(
@@ -569,7 +570,7 @@ fn dynamic_rig_parts_share_motion_and_keep_their_offsets_under_impulses() {
 #[cfg(feature = "physics")]
 #[test]
 fn animated_colliders_follow_local_poses_and_report_child_part_ids() {
-    use trscene::{BoxOverlapQuery, HasBasePart};
+    use trscene::{BasePartExt, BoxOverlapQuery};
     let mut rig = Rig::new();
     let arm_id = rig.add_child(Part::new().with_name("Arm").with_anchored(false));
     let ghost = rig.add_child(
