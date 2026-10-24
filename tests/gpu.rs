@@ -136,7 +136,7 @@ fn basepart_transparency_blends_front_geometry_with_background()
             hide_devtools!(engine);
             engine.lighting.clear_skybox();
             engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-            engine.workspace_mut().current_camera =
+            engine.workspace_mut().camera =
                 Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
             engine.workspace_mut().add_child(
                 Part::new()
@@ -218,7 +218,7 @@ fn always_on_top_outline_renders_through_occluding_geometry() -> Result<(), AppC
             .run(move |engine| {
                 engine.lighting.clear_skybox();
                 engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     Camera::new(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO, 1.0);
                 engine.workspace_mut().add_child(
                     Part::new()
@@ -287,7 +287,7 @@ fn material_triplanar_projection_samples_world_space_coordinates()
                 hide_devtools!(engine);
                 engine.lighting.clear_skybox();
                 engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     Camera::new(Vec3::new(0.13, 0.73, 5.0), Vec3::new(0.13, 0.73, 0.0), 1.0);
                 let texture = engine.add_texture(Texture::new(4, 4, texture_pixels)?)?;
                 let mut material = Material::textured(texture)
@@ -379,7 +379,7 @@ fn metallic_roughness_changes_rendered_environment_reflections() -> Result<(), A
             .with_size([128, 128])
             .with_headless(Some(1))
             .run(move |engine| {
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
                 engine.workspace_mut().add_child(
                     Part::new()
@@ -430,7 +430,7 @@ fn occlusion_texture_changes_ambient_but_preserves_direct_light() -> Result<(), 
                 engine.lighting.clear_skybox();
                 engine.lighting.outdoor_ambient = outdoor_ambient;
                 engine.set_clear_color([0.0, 0.0, 0.0, 1.0]);
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
                 let occlusion_map = engine.add_texture(Texture::linear(
                     1,
@@ -491,7 +491,7 @@ fn dielectric_reflectance_changes_rendered_direct_specular() -> Result<(), AppCr
                 engine.lighting.ambient = Color3::BLACK;
                 engine.lighting.outdoor_ambient = Color3::BLACK;
                 engine.lighting.with_sun_direction(Vec3::new(0.0, 0.5, 1.0));
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     Camera::new(Vec3::new(0.0, 1.0, 5.0), Vec3::new(0.0, 1.0, 0.0), 1.0);
                 engine.workspace_mut().add_child(
                     Part::new()
@@ -558,7 +558,7 @@ fn directional_shadow_long_shadow_has_clean_edges_and_lit_floor() -> Result<(), 
             .with_headless(Some(1))
             .run(move |engine| {
                 hide_devtools!(engine);
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     diagnostic_camera(camera_offset, clock_time, caster_height);
                 engine.lighting.with_clock_time(clock_time);
                 engine.lighting.shadow_softness = softness;
@@ -1188,7 +1188,7 @@ fn point_light_shadows_change_occlusion_on_receivers() -> Result<(), AppCreation
             .with_size([128, 128])
             .with_headless(Some(1))
             .run(move |engine| {
-                engine.workspace_mut().current_camera =
+                engine.workspace_mut().camera =
                     Camera::new(Vec3::new(4.0, 4.0, 6.0), Vec3::new(0.0, 0.0, 0.0), 1.0);
                 engine.lighting.clear_skybox();
                 engine.lighting.brightness = 0.0;

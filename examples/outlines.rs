@@ -66,7 +66,7 @@ impl App for OutlinesApp {
             self.focus_on_duck = focus_on_duck;
             engine
                 .workspace_mut()
-                .current_camera
+                .camera
                 .set_subject(focus_on_duck.then_some(self.mesh_part));
         }
     }
@@ -95,10 +95,7 @@ fn main() {
                 .camera_controller_mut()
                 .subject_offset = focus_offset;
 
-            engine
-                .workspace_mut()
-                .current_camera
-                .set_subject(Some(mesh_part));
+            engine.workspace_mut().camera.set_subject(Some(mesh_part));
 
             let mut app = OutlinesApp {
                 mesh_part,

@@ -174,7 +174,7 @@ fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
 fn player_mouse_wheel_changes_camera_orbit_distance() {
     let mut workspace = Workspace::new();
     let rig = workspace.add_child(Rig::new());
-    workspace.current_camera.set_subject(Some(rig));
+    workspace.camera.set_subject(Some(rig));
     workspace.camera_controller_mut().subject_distance = 5.0;
     workspace.controllers.add(PlayerController::new(rig));
 
@@ -201,7 +201,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     workspace.camera_controller_mut().set_enabled(false);
     let rig = workspace.add_child(dynamic_player_rig(Vec3::Y * 4.0));
     let falling = workspace.add_child(dynamic_player_rig(Vec3::new(10.0, 4.0, 0.0)));
-    workspace.current_camera.set_subject(Some(rig));
+    workspace.camera.set_subject(Some(rig));
     let mut player = PlayerController::new(rig);
     player.process_key(KeyCode::KeyW, true);
     let controller = workspace.controllers.add(player);
@@ -264,7 +264,7 @@ fn every_device_subset_can_drive_a_registered_player_independently() {
         let mut workspace = Workspace::new();
         workspace.camera_controller_mut().set_enabled(false);
         let rig = workspace.add_child(Rig::new());
-        workspace.current_camera.set_subject(Some(rig));
+        workspace.camera.set_subject(Some(rig));
         workspace.camera_controller_mut().subject_offset = Vec3::Y;
         workspace.update_camera(0.0);
         let id = workspace.controllers.add(
@@ -290,7 +290,7 @@ fn every_device_subset_can_drive_a_registered_player_independently() {
         frame(&context, &mut workspace, vec![key(egui::Key::W, false)]);
         workspace.process_device_event(&DeviceEvent::MouseMotion { delta: (20.0, 0.0) });
         workspace.update(0.1);
-        let forward = workspace.current_camera.forward();
+        let forward = workspace.camera.forward();
         assert!((forward.x - if mouse { 0.05_f32.sin() } else { 0.0 }).abs() < 1e-5);
         assert!(
             workspace
@@ -324,7 +324,7 @@ fn every_device_subset_can_drive_a_registered_player_independently() {
                 < 1e-5
         );
         assert!(
-            (workspace.current_camera.forward().x
+            (workspace.camera.forward().x
                 - ((usize::from(mouse) + usize::from(touchscreen)) as f32 * 0.05).sin())
             .abs()
                 < 1e-5
@@ -352,7 +352,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     let mut workspace = Workspace::new();
     workspace.camera_controller_mut().set_enabled(false);
     let rig = workspace.add_child(Rig::new());
-    workspace.current_camera.set_subject(Some(rig));
+    workspace.camera.set_subject(Some(rig));
     workspace.camera_controller_mut().subject_offset = Vec3::Y;
     workspace.update_camera(0.0);
     let id = workspace.controllers.add(PlayerController::new(rig));
@@ -387,7 +387,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     output.textures_delta.clear();
     workspace.update(0.1);
     assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::ZERO);
-    assert!(workspace.current_camera.forward().x > 0.0);
+    assert!(workspace.camera.forward().x > 0.0);
     assert!(
         workspace
             .get::<Rig>(rig)
@@ -396,7 +396,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             .abs_diff_eq(Vec3::NEG_Z, 1e-5)
     );
 
-    let forward = workspace.current_camera.forward();
+    let forward = workspace.camera.forward();
     let pointer_context = Context::default();
     let mut output = pointer_context.run_ui(
         RawInput {
@@ -458,7 +458,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     player.process_mouse_motion((20.0, 0.0));
     player.process_window_event(&WindowEvent::Focused(false));
     let pose = workspace.get::<Rig>(rig).unwrap().pose();
-    let camera_pose = workspace.current_camera.pose();
+    let camera_pose = workspace.camera.pose();
     workspace.update(0.1);
     assert!(
         workspace
@@ -467,12 +467,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             .pose()
             .abs_diff_eq(pose, 1e-5)
     );
-    assert!(
-        workspace
-            .current_camera
-            .pose()
-            .abs_diff_eq(camera_pose, 1e-5)
-    );
+    assert!(workspace.camera.pose().abs_diff_eq(camera_pose, 1e-5));
 }
 
 #[derive(Clone, Debug)]
@@ -613,7 +608,7 @@ fn workspace_cloning_retargets_players_and_custom_controllers_to_cloned_rigs() {
     let mut workspace = Workspace::new();
     workspace.camera_controller_mut().set_enabled(false);
     let rig = workspace.add_child(Rig::new().with_name("Player"));
-    workspace.current_camera.set_subject(Some(rig));
+    workspace.camera.set_subject(Some(rig));
     let mut player = PlayerController::new(rig);
     player.process_key(KeyCode::KeyW, true);
     workspace.controllers.add(player);
@@ -635,16 +630,8 @@ fn workspace_cloning_retargets_players_and_custom_controllers_to_cloned_rigs() {
             .abs_diff_eq(Vec3::new(0.4, 0.0, -0.6), 1e-5)
     );
     assert_eq!(workspace.get::<Rig>(rig).unwrap().position(), Vec3::ZERO);
-    assert_eq!(cloned.current_camera.subject(), Some(cloned_rig.id()));
-    assert!(
-        (cloned
-            .current_camera
-            .position()
-            .distance(cloned_rig.position())
-            - 5.0)
-            .abs()
-            < 1e-5
-    );
+    assert_eq!(cloned.camera.subject(), Some(cloned_rig.id()));
+    assert!((cloned.camera.position().distance(cloned_rig.position()) - 5.0).abs() < 1e-5);
 }
 
 #[test]

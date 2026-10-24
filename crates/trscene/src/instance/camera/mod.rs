@@ -381,12 +381,12 @@ impl Controller for CameraController {
     }
 
     fn update(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let subject = workspace.current_camera.subject().and_then(|id| {
+        let subject = workspace.camera.subject().and_then(|id| {
             workspace
                 .view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
         });
-        self.update_camera(&mut workspace.current_camera, subject, delta_seconds);
+        self.update_camera(&mut workspace.camera, subject, delta_seconds);
     }
 }
 

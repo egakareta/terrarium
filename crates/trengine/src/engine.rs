@@ -668,7 +668,7 @@ fn prepare_workspace(
         (rect.width() * pixels_per_point).round().max(1.0) as u32,
         (rect.height() * pixels_per_point).round().max(1.0) as u32,
     ];
-    workspace.current_camera.resize(size[0], size[1]);
+    workspace.camera.resize(size[0], size[1]);
     #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
     let mut renderer = renderer.lock().expect("engine renderer lock poisoned");
     #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]

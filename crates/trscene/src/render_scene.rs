@@ -154,7 +154,7 @@ impl Workspace {
         RenderScene {
             id: render_id(self.id()),
             structure_revision: self.lookup().generation(),
-            camera: render_camera(&self.current_camera),
+            camera: render_camera(&self.camera),
             lighting: &self.lighting,
             nodes: self
                 .children()

@@ -36,7 +36,7 @@ fn workspace_defaults_and_empty_presets_have_no_starting_geometry() {
 fn baseplate_preset_provides_a_floor_without_changing_the_camera() {
     let workspace = Workspace::preset(WorkspacePreset::Baseplate);
     assert_preset(&workspace, WorkspacePreset::Baseplate);
-    assert_eq!(workspace.current_camera.pose(), Camera::default().pose());
+    assert_eq!(workspace.camera.pose(), Camera::default().pose());
 }
 
 #[cfg(feature = "physics")]

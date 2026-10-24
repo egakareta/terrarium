@@ -192,7 +192,7 @@ fn create_scene(workspace: &mut Workspace) -> InstanceId {
     let rig = workspace.add_child(rig);
     workspace.controllers.add(PlayerController::new(rig));
     workspace.camera_controller_mut().set_enabled(false);
-    workspace.current_camera = Camera::new(
+    workspace.camera = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
         SPAWN + Vec3::Y,
         16.0 / 9.0,
@@ -224,7 +224,7 @@ fn player_example_loads_headlessly() -> Result<(), AppCreationError> {
         .expect("native headless runs return the engine");
     assert_eq!(engine.get_all::<Rig>().count(), 1);
     assert_eq!(
-        engine.current_camera.subject(),
+        engine.camera.subject(),
         Some(engine.get_all::<Rig>().next().unwrap().id())
     );
     Ok(())
@@ -382,7 +382,7 @@ mod tests {
         let position = workspace.get::<Rig>(rig).unwrap().position();
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
         let focus = position + Vec3::Y;
-        let offset = workspace.current_camera.position() - focus;
+        let offset = workspace.camera.position() - focus;
         workspace.process_device_event(&terrarium::winit::event::DeviceEvent::MouseMotion {
             delta: (80.0, -20.0),
         });
@@ -392,10 +392,10 @@ mod tests {
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
         assert!((player.position() - position).with_y(0.0).length() < 1e-4);
         let focus = player.position() + Vec3::Y;
-        let orbit = workspace.current_camera.position() - focus;
+        let orbit = workspace.camera.position() - focus;
         assert!(!orbit.abs_diff_eq(offset, 1e-3));
         assert!((orbit.length() - offset.length()).abs() < 1e-4);
-        assert!(workspace.current_camera.forward().dot(-orbit.normalize()) > 0.9999);
+        assert!(workspace.camera.forward().dot(-orbit.normalize()) > 0.9999);
     }
 
     #[test]
@@ -420,7 +420,7 @@ mod tests {
         let facing = player.forward();
         assert!(facing.x > 0.0 && facing.x < 0.9, "{facing:?}");
         assert!(facing.z < -0.1, "{facing:?}");
-        assert!(workspace.current_camera.forward().x > 0.9);
+        assert!(workspace.camera.forward().x > 0.9);
     }
 
     #[test]
@@ -430,7 +430,7 @@ mod tests {
         advance(&mut workspace, 120);
         let facing = workspace.get::<Rig>(rig).unwrap().forward();
         let focus = workspace.get::<Rig>(rig).unwrap().position() + Vec3::Y;
-        let offset = workspace.current_camera.position() - focus;
+        let offset = workspace.camera.position() - focus;
         let context = egui::Context::default();
         for (phase, x) in [
             (egui::TouchPhase::Start, 400.0),
@@ -450,7 +450,7 @@ mod tests {
         }
         workspace.update(1.0 / 60.0);
         let player = workspace.get::<Rig>(rig).unwrap();
-        let orbit = workspace.current_camera.position() - (player.position() + Vec3::Y);
+        let orbit = workspace.camera.position() - (player.position() + Vec3::Y);
         let angle = -60.0 * workspace.camera_controller().sensitivity;
         let expected = terrarium::glam::Quat::from_rotation_y(angle) * offset;
         assert!(orbit.abs_diff_eq(expected, 1e-4), "{orbit:?}");

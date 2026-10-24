@@ -60,7 +60,7 @@ instance! {
         #[data]
         instance: Box<InstanceData>,
         /// The camera used when this workspace is rendered.
-        pub current_camera: Camera,
+        pub camera: Camera,
         #[cfg_attr(feature = "devtools", inspect(skip))]
         camera_controller: CameraController,
         /// Additional controllers, updated in registration order before physics and the camera.
@@ -120,7 +120,7 @@ impl Workspace {
         let instance = InstanceData::new_root("Workspace");
         Self {
             instance,
-            current_camera: Camera::default(),
+            camera: Camera::default(),
             camera_controller: CameraController::default(),
             controllers: Controllers::default(),
             tween_manager: TweenManager::default(),
@@ -303,13 +303,13 @@ impl Workspace {
     /// A spatial subject is followed at the configured offset and orbit distance.
     /// Without a valid subject, input moves the camera freely.
     pub fn update_camera(&mut self, delta: f32) {
-        let subject = self.current_camera.subject().and_then(|id| {
+        let subject = self.camera.subject().and_then(|id| {
             self.view::<dyn Instance>(id)
                 .and_then(|instance| instance.spatial().map(|spatial| spatial.rigid_pose()))
                 .map(|pose| (id, pose))
         });
         self.camera_controller
-            .update_camera(&mut self.current_camera, subject, delta);
+            .update_camera(&mut self.camera, subject, delta);
     }
 
     /// Advances the simulation when enabled.
@@ -451,7 +451,7 @@ impl Clone for Workspace {
         for child in self.children() {
             instance.add_child(child.clone());
         }
-        let mut current_camera = self.current_camera.clone();
+        let mut current_camera = self.camera.clone();
         if let Some(subject) = current_camera.subject() {
             current_camera.set_subject(cloned_instance_id(
                 self.instance.children(),
@@ -461,7 +461,7 @@ impl Clone for Workspace {
         }
         let mut workspace = Self {
             instance,
-            current_camera,
+            camera: current_camera,
             camera_controller: self.camera_controller.clone(),
             controllers: self.controllers.clone(),
             tween_manager: self.tween_manager.clone(),
@@ -711,7 +711,7 @@ mod tests {
     fn camera_subject_follows_a_spatial_instance_and_can_be_cleared() {
         let mut workspace = Workspace::new();
         let subject_id = workspace.add_child(Part::new());
-        workspace.current_camera.set_subject(Some(subject_id));
+        workspace.camera.set_subject(Some(subject_id));
         workspace.camera_controller_mut().subject_distance = 8.0;
         workspace.camera_controller_mut().subject_offset = Vec3::Y;
 
@@ -720,12 +720,12 @@ mod tests {
         workspace.update_camera(1.0 / 60.0);
 
         let focus = Vec3::Y;
-        let camera_position = workspace.current_camera.position();
+        let camera_position = workspace.camera.position();
         assert!((camera_position.distance(focus) - 8.0).abs() < 1e-5);
-        assert!(workspace.current_camera.forward().y < 0.0);
+        assert!(workspace.camera.forward().y < 0.0);
         assert!(
             workspace
-                .current_camera
+                .camera
                 .forward()
                 .dot((focus - camera_position).normalize())
                 > 0.9999
@@ -736,14 +736,14 @@ mod tests {
         );
         workspace.update_camera(1.0 / 60.0);
 
-        let moved_position = workspace.current_camera.position();
+        let moved_position = workspace.camera.position();
         assert!((moved_position.x - camera_position.x - 10.0).abs() < 1e-5);
 
         let mut cloned_workspace = workspace.clone();
-        let cloned_subject = cloned_workspace.current_camera.subject().unwrap();
+        let cloned_subject = cloned_workspace.camera.subject().unwrap();
         assert_ne!(cloned_subject, subject_id);
         cloned_workspace.update_camera(1.0 / 60.0);
-        let cloned_camera_position = cloned_workspace.current_camera.position();
+        let cloned_camera_position = cloned_workspace.camera.position();
         cloned_workspace
             .get_mut::<Part>(cloned_subject)
             .unwrap()
@@ -752,16 +752,15 @@ mod tests {
             )));
         cloned_workspace.update_camera(1.0 / 60.0);
         assert!(
-            (cloned_workspace.current_camera.position().x - cloned_camera_position.x - 10.0).abs()
-                < 1e-5
+            (cloned_workspace.camera.position().x - cloned_camera_position.x - 10.0).abs() < 1e-5
         );
 
-        workspace.current_camera.set_subject(None);
+        workspace.camera.set_subject(None);
         workspace.camera_controller_mut().forward = true;
         workspace.update_camera(0.1);
 
-        assert_eq!(workspace.current_camera.subject(), None);
-        assert!(workspace.current_camera.position().z < moved_position.z);
+        assert_eq!(workspace.camera.subject(), None);
+        assert!(workspace.camera.position().z < moved_position.z);
     }
 
     #[test]

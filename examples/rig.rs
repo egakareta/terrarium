@@ -86,7 +86,7 @@ fn initialize(engine: &mut Engine) -> Result<RigApp, AppCreationError> {
     }
     rig.play_animation(AnimationPlayer::new(AnimationClip::new(tracks)).with_looping(true))?;
     let rig = workspace.add_child(rig);
-    engine.current_camera = terrarium::Camera::new(Vec3::new(5.0, 3.0, 7.0), Vec3::Y, 16.0 / 9.0);
+    engine.camera = terrarium::Camera::new(Vec3::new(5.0, 3.0, 7.0), Vec3::Y, 16.0 / 9.0);
     Ok(RigApp { rig })
 }
 

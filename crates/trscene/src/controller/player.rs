@@ -146,12 +146,12 @@ impl PlayerController {
         let anchored = rig.anchored();
 
         let mut reference = ControllerActions::default();
-        if workspace.current_camera.subject() == Some(id) {
+        if workspace.camera.subject() == Some(id) {
             let camera = workspace.camera_controller_mut();
             camera.queue_look(actions.look * self.sensitivity);
             reference.look = camera.queued_look();
         }
-        let movement_rotation = reference.yaw_rotation(workspace.current_camera.pose(), 1.0);
+        let movement_rotation = reference.yaw_rotation(workspace.camera.pose(), 1.0);
         let delta_seconds = super::frame_delta(delta_seconds);
         let (movement, rotation) = self.motion(actions, movement_rotation, pose, delta_seconds);
         #[cfg(feature = "physics")]
@@ -248,7 +248,7 @@ impl Controller for PlayerController {
         if scroll_delta != 0.0 {
             let follows_rig = self
                 .rig
-                .is_some_and(|id| workspace.current_camera.subject() == Some(id));
+                .is_some_and(|id| workspace.camera.subject() == Some(id));
             if follows_rig {
                 workspace
                     .camera_controller_mut()

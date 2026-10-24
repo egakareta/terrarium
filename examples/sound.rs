@@ -115,7 +115,7 @@ impl App for SoundApp {
                     ui.label(format!("Loop position: {:.2} s", position.as_secs_f32()));
                 }
                 let position = engine.get::<Part>(self.emitter).unwrap().position();
-                let distance = position.distance(engine.current_camera.position());
+                let distance = position.distance(engine.camera.position());
                 ui.label(format!("Emitter: ({:.1}, {:.1}, {:.1}) m", position.x, position.y, position.z));
                 ui.label(format!("Distance: {distance:.1} m"));
                 ui.label("HRTF, distance attenuation, and Doppler are enabled.");
@@ -129,7 +129,7 @@ impl App for SoundApp {
 
 #[with_workspace]
 fn initialize(engine: &mut Engine) -> Result<SoundApp, AppCreationError> {
-    engine.current_camera = Camera::new(Vec3::new(0.0, 1.5, 9.0), Vec3::Y, 1.0);
+    engine.camera = Camera::new(Vec3::new(0.0, 1.5, 9.0), Vec3::Y, 1.0);
     workspace.add_child(
         Part::new()
             .with_name("Ground")
