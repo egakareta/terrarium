@@ -35,7 +35,7 @@ instance! {
         /// Movement speed in world units per second.
         pub speed: f32,
         #[property]
-        /// Movement scale applied while sprint is held. Defaults to `2.25`.
+        /// Movement scale applied while sprint is held. Defaults to `3.0`.
         pub sprint_scale: f32,
         #[property]
         /// Upward jump velocity in world units per second. Non-positive or non-finite
@@ -76,7 +76,7 @@ impl PlayerController {
     /// Creates a controller for a custom rig with WASD/Space/Shift and drag-look bindings.
     ///
     /// Space uses the up action to jump a grounded dynamic rig. The down action is
-    /// unbound. Shift scales movement by `2.25` by default. Mouse and touch look orbit
+    /// unbound. Shift scales movement by `3.0` by default. Mouse and touch look orbit
     /// the active camera when it follows the rig.
     pub fn new(rig: InstanceId) -> Self {
         let mut input = ControllerInput::default();
@@ -88,9 +88,9 @@ impl PlayerController {
             rig: Some(rig),
             input,
             camera_controller: CameraController::default(),
-            speed: 6.0,
-            sprint_scale: 2.25,
-            jump_speed: 7.0,
+            speed: 1.3,
+            sprint_scale: 3.0,
+            jump_speed: 3.0,
             sensitivity: 0.0025,
             turn_factor: 10.0,
             animations: PlayerAnimations::default(),

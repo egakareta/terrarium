@@ -116,11 +116,12 @@ fn add_map(workspace: &mut Workspace) {
     ));
     let rise = 3.0_f32;
     let run = 12.0_f32;
+    // Overlap both landings so the upright player collider clears their vertical faces.
     workspace.add_child(
         map_part(
             "Ramp",
-            Vec3::new(15.0, 1.35, 13.0),
-            Vec3::new(5.0, 0.3, rise.hypot(run)),
+            Vec3::new(15.0, 1.4, 13.0),
+            Vec3::new(5.0, 0.3, rise.hypot(run) + 2.0),
             stone,
         )
         .with_orientation(Vec3::new((rise / run).atan().to_degrees(), 0.0, 0.0)),
@@ -312,14 +313,14 @@ mod tests {
         let falling = workspace.get::<Rig>(rig).unwrap();
         assert!(falling.position().y < SPAWN.y - 0.8);
         assert!(falling.position().y > 0.5);
-        assert!(falling.position().z < SPAWN.z - 2.5);
+        assert!(falling.position().z < SPAWN.z - controller.speed * 30.0 / 60.0 * 0.8);
         assert!(falling.forward().x > 0.1);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
 
         advance(&mut workspace, &mut controller, 150);
         let landed = workspace.get::<Rig>(rig).unwrap();
         assert!(landed.position().y.abs() < 0.05, "{:?}", landed.position());
-        assert!(landed.position().z < SPAWN.z - 14.0);
+        assert!(landed.position().z < SPAWN.z - controller.speed * 180.0 / 60.0 * 0.8);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Walk);
         assert!(
             landed
@@ -367,19 +368,39 @@ mod tests {
                 > before
         );
 
-        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, true);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::ShiftLeft, true);
         advance(&mut workspace, &mut controller, 15);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Sprint);
-        controller.process_key(winit::keyboard::KeyCode::KeyW, false);
-        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, false);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::KeyW, false);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::ShiftLeft, false);
         advance(&mut workspace, &mut controller, 15);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
 
-        controller.process_key(winit::keyboard::KeyCode::Space, true);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::Space, true);
         advance(&mut workspace, &mut controller, 3);
-        controller.process_key(winit::keyboard::KeyCode::Space, false);
+        controller
+            .input_mut()
+            .unwrap()
+            .process_key(winit::keyboard::KeyCode::Space, false);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Jump);
-        advance(&mut workspace, &mut controller, 50);
+        for _ in 0..120 {
+            if controller.animation_state() == PlayerAnimationState::Fall {
+                break;
+            }
+            advance(&mut workspace, &mut controller, 1);
+        }
         assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
         advance(&mut workspace, &mut controller, 80);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
@@ -391,7 +412,8 @@ mod tests {
         let mut workspace = Workspace::new();
         let (rig, mut controller) = create_test_scene(&mut workspace);
         walk_forward(&mut workspace, &mut controller);
-        advance(&mut workspace, &mut controller, 720);
+        let frames = ((SPAWN.z + 32.0) / controller.speed * 60.0 * 1.5).ceil() as usize;
+        advance(&mut workspace, &mut controller, frames);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.z > -31.2 && position.z < -30.8, "{position:?}");
         assert!(position.y.abs() < 0.05, "{position:?}");
@@ -406,7 +428,8 @@ mod tests {
             .unwrap()
             .with_position(Vec3::new(15.0, 0.05, 22.0));
         walk_forward(&mut workspace, &mut controller);
-        advance(&mut workspace, &mut controller, 180);
+        let frames = (18.0 / controller.speed * 60.0 * 1.5).ceil() as usize;
+        advance(&mut workspace, &mut controller, frames);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.y > 2.9 && position.y < 3.1, "{position:?}");
         assert!(position.z < 6.5, "{position:?}");
@@ -427,7 +450,7 @@ mod tests {
         );
         advance(&mut workspace, &mut controller, 2);
         let player = workspace.get::<Rig>(rig).unwrap();
-        assert!(player.position().x > initial.x + 0.1);
+        assert!(player.position().x > initial.x + controller.speed * 2.0 / 60.0 * 0.8);
         let partial_facing = player.forward();
         assert!(
             partial_facing.x > 0.0 && partial_facing.x < 0.9,
@@ -510,7 +533,10 @@ mod tests {
 
         let player = workspace.get::<Rig>(rig).unwrap();
         let displacement = player.position() - initial;
-        assert!(displacement.x > 0.09, "{displacement:?}");
+        assert!(
+            displacement.x > controller.speed / 60.0 * 0.8,
+            "{displacement:?}"
+        );
         assert!(displacement.z.abs() < 1e-4, "{displacement:?}");
         let facing = player.forward();
         assert!(facing.x > 0.0 && facing.x < 0.9, "{facing:?}");
