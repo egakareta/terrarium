@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>this is terrarium</title>
+    <link rel="icon" href="/terrarium/simple/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/simple/terrarium-5301384ca438679.js';
-const wasm = await init({ module_or_path: '/terrarium/simple/terrarium-e0eae29810f394ca_bg.wasm' });
+import init, * as bindings from '/terrarium/simple/terrarium-56f09bd7386cdd08.js';
+const wasm = await init({ module_or_path: '/terrarium/simple/terrarium-a4eeb3613ec1bd16_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/simple/terrarium-5301384ca438679.js" crossorigin="anonymous" integrity="sha384-Y957sLJCk7CdGD2bnvyHDLlN3j4nkaGZYMHCXIuuh8NA2j9M2CpNkuAzaj9LqdaZ"><link rel="modulepreload" href="/terrarium/simple/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/simple/terrarium-e0eae29810f394ca_bg.wasm" crossorigin="anonymous" integrity="sha384-C09mVKRyVxTmSw6gdX9MgjHaC8BTaDy5jmuYgruMGOcHEE55zsj/H7cLwTxI4/gk" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/simple/terrarium-56f09bd7386cdd08.js" crossorigin="anonymous" integrity="sha384-WCd6u1uswCen4aSb56ltWvf5rRtKJqOVdskIB6rx6+BfLfOVkPsVDXNwh94BzUAd"><link rel="modulepreload" href="/terrarium/simple/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/simple/terrarium-a4eeb3613ec1bd16_bg.wasm" crossorigin="anonymous" integrity="sha384-UZJaUewGf8iRb3YuXsBbAWgWO2nMGxEf3ctfCZVSO3zFYKWw5w0opNXlbF91lMns" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>

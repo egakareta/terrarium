@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>this is terrarium</title>
+    <link rel="icon" href="/terrarium/gltf/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/gltf/terrarium-f34e075e9f5d7554.js';
-const wasm = await init({ module_or_path: '/terrarium/gltf/terrarium-4fe27328e6f55f58_bg.wasm' });
+import init, * as bindings from '/terrarium/gltf/terrarium-2d8951ae53210808.js';
+const wasm = await init({ module_or_path: '/terrarium/gltf/terrarium-f3c45c52ada37550_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/gltf/terrarium-f34e075e9f5d7554.js" crossorigin="anonymous" integrity="sha384-meRZPLRCJaXZhq9h3E1Y18RnKGj+FetLShTkpEqcbQCsOR1lzb7BOnoh8/NPlJxV"><link rel="modulepreload" href="/terrarium/gltf/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/gltf/terrarium-4fe27328e6f55f58_bg.wasm" crossorigin="anonymous" integrity="sha384-/bcyWQUAgJAQhHeD9UR6p+jWvAKkQZqP6JISqZAg5n8wLxLSOZ2awhqPCsWwBy7U" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/gltf/terrarium-2d8951ae53210808.js" crossorigin="anonymous" integrity="sha384-MrsyBSWPWAmT6rUEx9YGDsezPj3DIVwavM1obu1SllrJ1hIaV3Nx3ltsM6Yyyvv/"><link rel="modulepreload" href="/terrarium/gltf/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/gltf/terrarium-f3c45c52ada37550_bg.wasm" crossorigin="anonymous" integrity="sha384-3rImAbzN4LQYsTvkJRiM13ycuLjEpF7osu7ir6XimA5BiTrkZhxiPc4wgKjUsnqM" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>

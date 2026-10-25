@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>this is terrarium</title>
+    <link rel="icon" href="/terrarium/viewport/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/viewport/terrarium-ba3cd9a226d74077.js';
-const wasm = await init({ module_or_path: '/terrarium/viewport/terrarium-76131c965e106174_bg.wasm' });
+import init, * as bindings from '/terrarium/viewport/terrarium-c3a1b4f4d4d954a4.js';
+const wasm = await init({ module_or_path: '/terrarium/viewport/terrarium-9b01c833e00bffd4_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/viewport/terrarium-ba3cd9a226d74077.js" crossorigin="anonymous" integrity="sha384-qGNRXYM6ZhAw0czvK6Y7NdYDrRuTg7+RNysxJSEiMDZo+y9pvuWlKfkevWK9q4Q6"><link rel="modulepreload" href="/terrarium/viewport/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/viewport/terrarium-76131c965e106174_bg.wasm" crossorigin="anonymous" integrity="sha384-8qGafz28xoT+iJ/HP+34eZqiuW1YQbEbbVVL0i4o+plgPcqaxRBy/EoGjEj1gzCy" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/viewport/terrarium-c3a1b4f4d4d954a4.js" crossorigin="anonymous" integrity="sha384-tQwloz2GnHw7dYdg4Fs9kjEvWQGoFmIDYnoqM/1wCid2LstdSwSVC2OokLQXiW4d"><link rel="modulepreload" href="/terrarium/viewport/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/viewport/terrarium-9b01c833e00bffd4_bg.wasm" crossorigin="anonymous" integrity="sha384-0I1WonUtWhYymUeLpbx32+Nr8q8B8RM3iNBZeR5OpVWDLSy9XnjuOTM8RvTQzWho" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>

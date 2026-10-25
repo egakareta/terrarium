@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>this is terrarium</title>
+    <link rel="icon" href="/terrarium/app/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/app/terrarium-3e0be8270544ed72.js';
-const wasm = await init({ module_or_path: '/terrarium/app/terrarium-9b5ef480790101b0_bg.wasm' });
+import init, * as bindings from '/terrarium/app/terrarium-a91d871eefedd832.js';
+const wasm = await init({ module_or_path: '/terrarium/app/terrarium-150d64e69cb55cd1_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -30,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/app/terrarium-3e0be8270544ed72.js" crossorigin="anonymous" integrity="sha384-5Pga8NQR+CdrdEbjFBpKBrIOTNtUXzogf7ADfDkqjZ0vVNE4S8u9kMtMznmDGqsv"><link rel="modulepreload" href="/terrarium/app/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/app/terrarium-9b5ef480790101b0_bg.wasm" crossorigin="anonymous" integrity="sha384-4vtbkPvea3HRcP/FSzu7A2qYuEEiNRRylWcS6jluBqLfXTCjggO3Rz0NeisVrPcM" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/app/terrarium-a91d871eefedd832.js" crossorigin="anonymous" integrity="sha384-D44m6Kw3pT8BzKSdKKWoLRY81YMgRojlhOaQKs0diKyEPWqgM7MxkM8n+u+iKDfr"><link rel="modulepreload" href="/terrarium/app/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/app/terrarium-150d64e69cb55cd1_bg.wasm" crossorigin="anonymous" integrity="sha384-OONOxVXmPkf8aGRf42coif2Y0/lNB60ZdTv74Gy/n83Pn114d8797e7ETY9dlrmX" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
