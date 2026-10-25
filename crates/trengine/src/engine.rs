@@ -331,7 +331,10 @@ impl Engine {
         let controller = {
             let mut controller = controller;
             if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
-                controller.set_touchscreen_detected(true);
+                ControllerInput::set_touchscreen_detected(
+                    Project::<ControllerInput>::project_mut(&mut controller),
+                    true,
+                );
             }
             controller
         };
@@ -496,6 +499,7 @@ impl Engine {
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let _ = config.env_logger;
 
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         let wgpu_options_customized = config.wgpu_options.is_some();
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
         if let Some(configure) = config.wgpu_options {

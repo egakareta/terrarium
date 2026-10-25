@@ -1,3 +1,5 @@
+#![cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
+
 use terrarium::{glam::*, *};
 
 // Software WGPU adapters share context state across the headless test cases.
