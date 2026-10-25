@@ -153,7 +153,7 @@ instance! {
                     was_dragging
                 }
                 WindowEvent::Focused(false) => {
-                    ControllerInput::clear(Project::<ControllerInput>::project_mut(self));
+                    self.controller_input_mut().clear();
                     false
                 }
                 _ => false,
@@ -232,8 +232,7 @@ instance! {
                         .is_some_and(|layer| layer.order != egui::Order::Background)
             });
             context.input(|input| {
-                ControllerInput::process_eframe_input_inner(
-                    Project::<ControllerInput>::project_mut(self),
+                self.controller_input_mut().process_eframe_input_inner(
                     input,
                     pointer_capture,
                     wheel_capture,
@@ -241,7 +240,7 @@ instance! {
                     |position| captured_touches.contains(&position),
                 );
             });
-            let input = Project::<ControllerInput>::project(self);
+            let input = self.controller_input_mut();
             if input.touch_enabled && input.touch.detected {
                 input.touch.paint(context);
             }
@@ -249,7 +248,7 @@ instance! {
 
         /// Sets every movement action bound to `key` and reports whether it matched.
         pub fn process_key(&mut self, key: KeyCode, pressed: bool) -> bool {
-            let input = Project::<ControllerInput>::project_mut(self);
+            let input = self.controller_input_mut();
             if !input.keyboard_enabled {
                 return false;
             }
