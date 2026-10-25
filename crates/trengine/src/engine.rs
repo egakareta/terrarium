@@ -157,7 +157,7 @@ instance! {
         instance: Box<InstanceData>,
         /// The controller driven by this engine. Defaults to a camera controller.
         #[property(borrow)]
-        pub controller: Box<dyn Controller>,
+        pub controller: Box<dyn ControllerView>,
         renderer: RendererHandle,
         /// The docked workspace inspector.
         #[cfg(feature = "devtools")]
@@ -234,7 +234,7 @@ fn controller_delta(delta_seconds: f32) -> f32 {
 
 pub(crate) fn step_engine(
     workspace: &mut Workspace,
-    controller: &mut dyn Controller,
+    controller: &mut dyn ControllerView,
     delta_seconds: f32,
 ) {
     workspace.step_tweens(delta_seconds);
@@ -282,9 +282,7 @@ impl Engine {
 
     /// Reports whether a bound movement key is down for the controller.
     pub fn has_movement_input(&self, input: &egui::InputState) -> bool {
-        self.controller
-            .input()
-            .is_some_and(|controls| controls.has_movement_input(input))
+        self.controller.has_movement_input(input)
     }
 
     /// Advances tweens, animations, the controller, physics, and audio.
@@ -607,7 +605,7 @@ impl Engine {
     }
 }
 
-fn process_engine_input(controller: &mut dyn Controller, context: &egui::Context) -> f32 {
+fn process_engine_input(controller: &mut dyn ControllerView, context: &egui::Context) -> f32 {
     let delta = context.input(|input| input.stable_dt);
     let delta = if delta.is_finite() {
         delta.clamp(0.0, 0.1)

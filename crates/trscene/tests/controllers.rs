@@ -13,7 +13,7 @@ use trscene::{
 fn frame(
     context: &Context,
     _workspace: &mut Workspace,
-    controller: &mut dyn Controller,
+    controller: &mut dyn ControllerView,
     events: Vec<Event>,
 ) {
     let input = RawInput {
@@ -27,7 +27,7 @@ fn frame(
     output.textures_delta.clear();
 }
 
-fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_seconds: f32) {
+fn step(workspace: &mut Workspace, controller: &mut dyn ControllerView, delta_seconds: f32) {
     workspace.step_tweens(delta_seconds);
     workspace.step_animations(delta_seconds);
     controller.step(workspace, delta_seconds);
@@ -40,7 +40,7 @@ fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_second
 
 fn process_device_event(
     _workspace: &mut Workspace,
-    controller: &mut dyn Controller,
+    controller: &mut dyn ControllerView,
     event: &DeviceEvent,
 ) {
     controller.process_device_event(event);
@@ -778,49 +778,40 @@ instance! {
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct CustomController {
-        #[data]
-        identity: InstanceData,
+        #[extends]
+        controller: Controller,
         rig: InstanceId,
-        input: Option<ControllerInput>,
-        actions: ControllerActions,
+        actions: Option<ControllerActions>,
     }
-}
 
-impl Controller for CustomController {
-    fn input(&self) -> Option<&ControllerInput> {
-        self.input.as_ref()
-    }
-    fn input_mut(&mut self) -> Option<&mut ControllerInput> {
-        self.input.as_mut()
-    }
-    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let actions = self
-            .input
-            .as_mut()
-            .map_or(self.actions, ControllerInput::take_actions);
-        if let Some(rig) = workspace.get_mut::<Rig>(self.rig) {
-            let position = rig.position() + actions.translation(Quat::IDENTITY, 4.0, delta_seconds);
-            rig.with_position(position);
+    impl CustomController {
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let actions = self
+                .actions
+                .unwrap_or_else(|| self.controller.take_actions());
+            if let Some(rig) = workspace.get_mut::<Rig>(self.rig) {
+                let position = rig.position() + actions.translation(Quat::IDENTITY, 4.0, delta_seconds);
+                rig.with_position(position);
+            }
         }
     }
 }
 
 #[test]
-fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
+fn a_custom_controller_can_use_inherited_input_or_scripted_actions() {
     let mut workspace = Workspace::new();
     let controlled = workspace.add_child(Rig::new());
-    let mut input = ControllerInput::default()
-        .with_mouse_enabled(false)
-        .with_touch_enabled(false);
-    let mut key_bindings = input.key_bindings().clone();
-    key_bindings.forward = vec![KeyCode::KeyJ];
-    input.set_key_bindings(key_bindings);
     let mut controller = CustomController {
-        identity: InstanceData::new("CustomController"),
+        controller: Controller::default().with_name("CustomController"),
         rig: controlled,
-        input: Some(input),
-        actions: ControllerActions::default(),
+        actions: None,
     };
+    controller.set_mouse_enabled(false);
+    controller.set_touch_enabled(false);
+    let mut key_bindings = controller.key_bindings().clone();
+    key_bindings.forward = vec![KeyCode::KeyJ];
+    controller.set_key_bindings(key_bindings);
 
     frame(
         &Context::default(),
@@ -840,13 +831,12 @@ fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
     let mut autonomous_workspace = Workspace::new();
     let autonomous = autonomous_workspace.add_child(Rig::new());
     let mut autonomous_controller = CustomController {
-        identity: InstanceData::new("CustomController"),
+        controller: Controller::default().with_name("CustomController"),
         rig: autonomous,
-        input: None,
-        actions: ControllerActions {
+        actions: Some(ControllerActions {
             movement: Vec3::X,
             ..Default::default()
-        },
+        }),
     };
     step(&mut autonomous_workspace, &mut autonomous_controller, 0.1);
     assert!(
@@ -862,19 +852,20 @@ instance! {
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlaceRig {
-        #[data]
-        identity: InstanceData,
+        #[extends]
+        controller: Controller,
         rig: InstanceId,
         position: Vec3,
     }
-}
 
-impl Controller for PlaceRig {
-    fn step(&mut self, workspace: &mut Workspace, _: f32) {
-        workspace
-            .get_mut::<Rig>(self.rig)
-            .unwrap()
-            .with_position(self.position);
+    impl PlaceRig {
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, _delta_seconds: f32) {
+            workspace
+                .get_mut::<Rig>(self.rig)
+                .unwrap()
+                .with_position(self.position);
+        }
     }
 }
 
@@ -883,7 +874,7 @@ fn a_single_controller_can_be_reconfigured_between_steps() {
     let mut workspace = Workspace::new();
     let rig = workspace.add_child(Rig::new());
     let mut controller = PlaceRig {
-        identity: InstanceData::new("PlaceRig"),
+        controller: Controller::default().with_name("PlaceRig"),
         rig,
         position: Vec3::X,
     };

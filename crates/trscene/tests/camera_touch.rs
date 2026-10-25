@@ -1,9 +1,9 @@
 use trscene::{
-    Camera, CameraController, Controller, ControllerInputExt, Instance, PVInstanceExt, Part,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
-    glam::Mat4,
+    glam::*,
+    *,
 };
 
 fn touch(device: u64, id: u64, phase: TouchPhase, position: Pos2) -> Event {

@@ -20,14 +20,11 @@ instance! {
     /// the camera when its subject is this rig.
     #[derive(Clone, Debug)]
     pub struct PlayerController {
-        #[data]
-        data: InstanceData,
+        #[extends]
+        controller: Controller,
         #[property]
         /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
         pub rig: Option<InstanceId>,
-        /// Device state and bindings used to generate controller actions.
-        #[compose]
-        input: ControllerInput,
         #[property(borrow)]
         /// Camera behavior used when the workspace camera follows this rig.
         pub camera_controller: CameraController,
@@ -69,6 +66,41 @@ instance! {
             self.animations = animations;
             self.animated_state = None;
         }
+
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let player = Project::<PlayerController>::project_mut(self);
+            let (actions, scroll_delta) = ControllerInput::take_actions_and_scroll(
+                Project::<ControllerInput>::project_mut(&mut player.controller),
+                player.sprint_scale,
+            );
+            player.step_workspace_with_actions(workspace, actions, delta_seconds);
+            if scroll_delta != 0.0 {
+                let follows_rig = player
+                    .rig
+                    .is_some_and(|id| workspace.camera().subject() == Some(id));
+                if follows_rig {
+                    player.camera_controller.queue_subject_zoom(scroll_delta);
+                }
+            }
+        }
+
+        #[r#override(Controller::post_physics)]
+        fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let player = Project::<PlayerController>::project_mut(self);
+            player.update_animation(workspace);
+            let subject = workspace.subject().and_then(|id| {
+                workspace
+                    .view::<dyn Instance>(id)
+                    .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
+            });
+            player.camera_controller.step_camera_with_actions(
+                workspace.camera_mut(),
+                subject,
+                ControllerActions::default(),
+                delta_seconds,
+            );
+        }
     }
 }
 
@@ -79,14 +111,13 @@ impl PlayerController {
     /// unbound. Shift scales movement by `3.0` by default. Mouse and touch look orbit
     /// the active camera when it follows the rig.
     pub fn new(rig: InstanceId) -> Self {
-        let mut input = ControllerInput::default();
-        let mut key_bindings = input.key_bindings().clone();
+        let mut controller = Controller::default().with_name("PlayerController");
+        let mut key_bindings = controller.key_bindings().clone();
         key_bindings.down.clear();
-        input.set_key_bindings(key_bindings);
+        controller.set_key_bindings(key_bindings);
         Self {
-            data: InstanceData::new("PlayerController"),
+            controller,
             rig: Some(rig),
-            input,
             camera_controller: CameraController::default(),
             speed: 1.3,
             sprint_scale: 3.0,
@@ -111,7 +142,11 @@ impl PlayerController {
     /// no physics step is performed. Use this controller as the engine's custom
     /// controller for camera-relative movement, camera orbit, and physics integration.
     pub fn step_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
-        let actions = self.input.take_actions_and_scroll(self.sprint_scale).0;
+        let actions = ControllerInput::take_actions_and_scroll(
+            Project::<ControllerInput>::project_mut(&mut self.controller),
+            self.sprint_scale,
+        )
+        .0;
         self.step_rig_with_actions(rig, actions, delta_seconds);
     }
 
@@ -286,43 +321,5 @@ impl PlayerController {
             let position = rig.position() + movement;
             rig.with_position(position);
         }
-    }
-}
-
-impl Controller for PlayerController {
-    fn input(&self) -> Option<&ControllerInput> {
-        Some(&self.input)
-    }
-
-    fn input_mut(&mut self) -> Option<&mut ControllerInput> {
-        Some(&mut self.input)
-    }
-
-    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let (actions, scroll_delta) = self.input.take_actions_and_scroll(self.sprint_scale);
-        self.step_workspace_with_actions(workspace, actions, delta_seconds);
-        if scroll_delta != 0.0 {
-            let follows_rig = self
-                .rig
-                .is_some_and(|id| workspace.camera().subject() == Some(id));
-            if follows_rig {
-                self.camera_controller.queue_subject_zoom(scroll_delta);
-            }
-        }
-    }
-
-    fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        self.update_animation(workspace);
-        let subject = workspace.subject().and_then(|id| {
-            workspace
-                .view::<dyn Instance>(id)
-                .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
-        });
-        self.camera_controller.step_camera_with_actions(
-            workspace.camera_mut(),
-            subject,
-            ControllerActions::default(),
-            delta_seconds,
-        );
     }
 }

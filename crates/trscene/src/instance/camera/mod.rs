@@ -94,18 +94,15 @@ instance! {
     #[instance(default = false)]
     /// Free-flight movement and third-person orbit for a [`Camera`].
     ///
-    /// Device state is stored in [`Self::input`]. Free flight follows the camera's
+    /// It inherits device state from [`Controller`]. Free flight follows the camera's
     /// look direction. With a subject, look and horizontal movement orbit, vertical
     /// movement changes pitch, and forward/backward movement adjusts the camera's
     /// subject distance. The camera owns the subject offset used to calculate focus.
     /// [`Self::step_camera_with_actions`] also accepts actions directly.
     #[derive(Clone, Debug)]
     pub struct CameraController {
-        #[data]
-        data: InstanceData,
-        /// Keyboard, mouse, and touch state used by this controller.
-        #[compose]
-        input: ControllerInput,
+        #[extends]
+        controller: Controller,
         #[property]
         /// Movement and zoom speed in world units per second.
         pub speed: f32,
@@ -136,6 +133,19 @@ instance! {
         queued_look: Vec2,
         queued_subject_zoom: f32,
     }
+
+    impl CameraController {
+        #[r#override(Controller::post_physics)]
+        fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let camera_controller = Project::<CameraController>::project_mut(self);
+            let subject = workspace.subject().and_then(|id| {
+                workspace
+                    .view::<dyn Instance>(id)
+                    .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
+            });
+            camera_controller.step_camera(workspace.camera_mut(), subject, delta_seconds);
+        }
+    }
 }
 
 impl Default for CameraController {
@@ -158,11 +168,10 @@ impl CameraController {
         sensitivity: f32,
         key_bindings: CameraKeyBindings,
     ) -> Self {
-        let mut input = ControllerInput::default();
-        input.set_key_bindings(key_bindings);
+        let mut controller = Controller::default().with_name("CameraController");
+        controller.set_key_bindings(key_bindings);
         Self {
-            data: InstanceData::new("CameraController"),
-            input,
+            controller,
             speed,
             sprint_scale: 2.5,
             sensitivity,
@@ -205,7 +214,11 @@ impl CameraController {
         subject: Option<(InstanceId, Mat4)>,
         delta_seconds: f32,
     ) {
-        let actions = self.input.take_actions_and_scroll(self.sprint_scale).0;
+        let actions = ControllerInput::take_actions_and_scroll(
+            Project::<ControllerInput>::project_mut(&mut self.controller),
+            self.sprint_scale,
+        )
+        .0;
         self.step_camera_with_actions(camera, subject, actions, delta_seconds);
     }
 
@@ -329,27 +342,6 @@ impl CameraController {
     }
 }
 
-impl Controller for CameraController {
-    fn input(&self) -> Option<&ControllerInput> {
-        Some(&self.input)
-    }
-
-    fn input_mut(&mut self) -> Option<&mut ControllerInput> {
-        Some(&mut self.input)
-    }
-
-    fn step(&mut self, _workspace: &mut Workspace, _delta_seconds: f32) {}
-
-    fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let subject = workspace.subject().and_then(|id| {
-            workspace
-                .view::<dyn Instance>(id)
-                .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
-        });
-        self.step_camera(workspace.camera_mut(), subject, delta_seconds);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,27 +377,85 @@ mod tests {
 
     #[test]
     fn egui_keyboard_capture_clears_camera_movement() {
+        let context = crate::egui::Context::default();
+        let mut text = String::new();
         let mut controller = CameraController::default();
         controller.set_forward(true);
         controller.set_sprint(true);
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-        controller
-            .input
-            .process_eframe_input_inner(&input, false, false, true, |_| false);
+        let screen_rect = crate::egui::Rect::from_min_size(
+            crate::egui::Pos2::ZERO,
+            crate::egui::vec2(800.0, 600.0),
+        );
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                ..Default::default()
+            },
+            |ui| {
+                ui.text_edit_singleline(&mut text).request_focus();
+            },
+        );
+        output.textures_delta.clear();
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                events: vec![crate::egui::Event::Key {
+                    key: crate::egui::Key::W,
+                    physical_key: Some(crate::egui::Key::W),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: crate::egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                ui.text_edit_singleline(&mut text);
+                controller.process_input(ui.ctx());
+            },
+        );
+        output.textures_delta.clear();
         assert!(!controller.forward());
         assert!(!controller.sprint());
     }
 
     #[test]
     fn egui_pointer_capture_clears_camera_look_delta() {
+        let context = crate::egui::Context::default();
         let mut controller = CameraController::default();
         controller.set_mouse_look_delta((4.0, -2.0));
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-        controller
-            .input
-            .process_eframe_input_inner(&input, true, true, false, |_| false);
+        let screen_rect = crate::egui::Rect::from_min_size(
+            crate::egui::Pos2::ZERO,
+            crate::egui::vec2(800.0, 600.0),
+        );
+        let mut pointer_position = crate::egui::Pos2::ZERO;
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                ..Default::default()
+            },
+            |ui| pointer_position = ui.button("capture").rect.center(),
+        );
+        output.textures_delta.clear();
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                events: vec![
+                    crate::egui::Event::PointerMoved(pointer_position),
+                    crate::egui::Event::PointerButton {
+                        pos: pointer_position,
+                        button: crate::egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: crate::egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                let _ = ui.button("capture");
+                controller.process_input(ui.ctx());
+            },
+        );
+        output.textures_delta.clear();
         assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
     }
 
@@ -427,12 +477,9 @@ mod tests {
         let mut controller = CameraController::default();
         controller.set_mouse_enabled(false);
         assert!(!controller.mouse_enabled());
-        Controller::process_device_event(
-            &mut controller,
-            &DeviceEvent::MouseMotion {
-                delta: (10.0, -5.0),
-            },
-        );
+        controller.process_device_event(&DeviceEvent::MouseMotion {
+            delta: (10.0, -5.0),
+        });
         assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
         let mut camera = Camera::default();
         let initial_forward = camera.forward();

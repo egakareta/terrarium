@@ -31,9 +31,9 @@ impl Plugin for TerrariumPlugin {
         }
         app.world_mut().init_non_send::<Workspace>();
         app.world_mut().init_non_send::<EguiContext>();
-        if !app.world().contains_non_send::<Box<dyn Controller>>() {
+        if !app.world().contains_non_send::<Box<dyn ControllerView>>() {
             app.world_mut()
-                .insert_non_send(Box::new(CameraController::default()) as Box<dyn Controller>);
+                .insert_non_send(Box::new(CameraController::default()) as Box<dyn ControllerView>);
         }
         app.add_systems(PostUpdate, advance_workspace.in_set(TerrariumSet::Advance));
     }
@@ -63,7 +63,7 @@ impl EguiContext {
 fn advance_workspace(
     time: Res<Time>,
     mut workspace: NonSendMut<Workspace>,
-    mut controller: NonSendMut<Box<dyn Controller>>,
+    mut controller: NonSendMut<Box<dyn ControllerView>>,
 ) {
     crate::engine::step_engine(&mut workspace, &mut **controller, time.delta_secs());
 }
@@ -103,7 +103,7 @@ pub(crate) fn finalize_app(app: &mut BevyApp, workspace: &mut Workspace) -> bool
 pub(crate) fn step_app(
     app: &mut BevyApp,
     workspace: &mut Workspace,
-    controller: &mut Box<dyn Controller>,
+    controller: &mut Box<dyn ControllerView>,
     context: &egui::Context,
     delta: f32,
 ) -> Option<f32> {
@@ -145,12 +145,12 @@ fn finish_plugins(app: &mut BevyApp) -> bool {
 fn with_workspace<T>(
     app: &mut BevyApp,
     workspace: &mut Workspace,
-    mut controller: Option<&mut Box<dyn Controller>>,
+    mut controller: Option<&mut Box<dyn ControllerView>>,
     update: impl FnOnce(&mut BevyApp) -> T,
 ) -> T {
     std::mem::swap(workspace, &mut app.world_mut().non_send_mut::<Workspace>());
     if let Some(controller) = controller.as_mut() {
-        let mut bevy_controller = app.world_mut().non_send_mut::<Box<dyn Controller>>();
+        let mut bevy_controller = app.world_mut().non_send_mut::<Box<dyn ControllerView>>();
         std::mem::swap(*controller, &mut *bevy_controller);
     }
     app.world_mut()
@@ -169,13 +169,16 @@ fn with_workspace<T>(
 struct WorkspaceScope<'a> {
     app: &'a mut BevyApp,
     workspace: &'a mut Workspace,
-    controller: Option<&'a mut Box<dyn Controller>>,
+    controller: Option<&'a mut Box<dyn ControllerView>>,
 }
 
 impl Drop for WorkspaceScope<'_> {
     fn drop(&mut self) {
         if let Some(controller) = &mut self.controller {
-            let mut bevy_controller = self.app.world_mut().non_send_mut::<Box<dyn Controller>>();
+            let mut bevy_controller = self
+                .app
+                .world_mut()
+                .non_send_mut::<Box<dyn ControllerView>>();
             std::mem::swap(*controller, &mut *bevy_controller);
         }
         std::mem::swap(

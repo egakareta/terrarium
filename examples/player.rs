@@ -42,7 +42,11 @@ impl App for PlayerApp {
             ui.label("Drag: orbit camera · Touch: joystick and drag");
             ui.separator();
             ui.label("Explore the buildings and take the ramp to the lookout.");
-            if let Some(player) = engine.controller().downcast_ref::<PlayerController>() {
+            if let Some(player) = engine
+                .controller()
+                .as_instance()
+                .downcast_ref::<PlayerController>()
+            {
                 ui.label(format!("Animation: {:?}", player.animation_state()));
             }
             if ui.button("Respawn").clicked() {
@@ -237,7 +241,7 @@ mod tests {
     fn input_frame(
         context: &egui::Context,
         _workspace: &mut Workspace,
-        controller: &mut dyn Controller,
+        controller: &mut dyn ControllerView,
         events: Vec<egui::Event>,
     ) {
         let input = egui::RawInput {
@@ -254,7 +258,7 @@ mod tests {
         output.textures_delta.clear();
     }
 
-    fn walk_forward(workspace: &mut Workspace, controller: &mut dyn Controller) {
+    fn walk_forward(workspace: &mut Workspace, controller: &mut dyn ControllerView) {
         input_frame(
             &egui::Context::default(),
             workspace,
@@ -263,13 +267,13 @@ mod tests {
         );
     }
 
-    fn advance(workspace: &mut Workspace, controller: &mut dyn Controller, frames: usize) {
+    fn advance(workspace: &mut Workspace, controller: &mut dyn ControllerView, frames: usize) {
         for _ in 0..frames {
             step(workspace, controller, 1.0 / 60.0);
         }
     }
 
-    fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_seconds: f32) {
+    fn step(workspace: &mut Workspace, controller: &mut dyn ControllerView, delta_seconds: f32) {
         workspace.step_tweens(delta_seconds);
         workspace.step_animations(delta_seconds);
         controller.step(workspace, delta_seconds);
@@ -282,7 +286,7 @@ mod tests {
 
     fn process_device_event(
         _workspace: &mut Workspace,
-        controller: &mut dyn Controller,
+        controller: &mut dyn ControllerView,
         event: &terrarium::winit::event::DeviceEvent,
     ) {
         controller.process_device_event(event);
@@ -368,32 +372,17 @@ mod tests {
                 > before
         );
 
-        controller
-            .input_mut()
-            .unwrap()
-            .process_key(winit::keyboard::KeyCode::ShiftLeft, true);
+        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, true);
         advance(&mut workspace, &mut controller, 15);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Sprint);
-        controller
-            .input_mut()
-            .unwrap()
-            .process_key(winit::keyboard::KeyCode::KeyW, false);
-        controller
-            .input_mut()
-            .unwrap()
-            .process_key(winit::keyboard::KeyCode::ShiftLeft, false);
+        controller.process_key(winit::keyboard::KeyCode::KeyW, false);
+        controller.process_key(winit::keyboard::KeyCode::ShiftLeft, false);
         advance(&mut workspace, &mut controller, 15);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
 
-        controller
-            .input_mut()
-            .unwrap()
-            .process_key(winit::keyboard::KeyCode::Space, true);
+        controller.process_key(winit::keyboard::KeyCode::Space, true);
         advance(&mut workspace, &mut controller, 3);
-        controller
-            .input_mut()
-            .unwrap()
-            .process_key(winit::keyboard::KeyCode::Space, false);
+        controller.process_key(winit::keyboard::KeyCode::Space, false);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Jump);
         for _ in 0..120 {
             if controller.animation_state() == PlayerAnimationState::Fall {
