@@ -99,7 +99,7 @@ property attribute accepts these options:
 | `default = expression`  | Uses the expression to initialize the field. Without an explicit initializer, fields use `Default::default()`. |
 |                         |
 | `sanitize = expression` | Calls the expression as a function on values passed to the setter.                                             |
-| `borrow`                | Makes the getter return `&T` instead of cloning and returning `T`.                                             |
+| `borrow`                | Returns `&T` from the getter and generates `<field>_mut(&mut self) -> &mut T`.                                 |
 | `into`                  | Makes the builder accept `impl Into<T>` and convert its argument. The setter still accepts `T`.                |
 
 For example:

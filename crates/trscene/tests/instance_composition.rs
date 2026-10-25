@@ -207,7 +207,8 @@ fn base_part_materials_are_available_on_every_subtype() {
         workspace
             .view_mut::<BasePart>(id)
             .unwrap()
-            .set_material_slot(Face::Top, top);
+            .material_slots_mut()
+            .set(Face::Top, top);
         assert_eq!(
             workspace
                 .view::<BasePart>(id)
@@ -450,9 +451,16 @@ instance!({
 #[test]
 fn independent_capabilities_and_new_root_types_keep_one_scene_identity() {
     let mut group = Group::default().with_label("assembly".into());
+    group.label_mut().push_str(" root");
+    assert_eq!(group.label(), "assembly root");
     let part = group.add_child(MotorPart::default().with_speed(8.0).with_position(Vec3::Y));
     let mut workspace = Workspace::new();
     let group = workspace.add_child(group);
+    workspace
+        .view_mut::<Group>(group)
+        .unwrap()
+        .label_mut()
+        .truncate(8);
     assert_eq!(workspace.view::<Group>(group).unwrap().label(), "assembly");
     assert_eq!(
         workspace.view::<dyn Instance>(part).unwrap().parent(),

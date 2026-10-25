@@ -27,7 +27,7 @@ instance!({
         rig: Option<InstanceId>,
         /// Camera motion used when the workspace camera follows this rig.
         #[property(borrow)]
-        pub camera_rig: CameraRig,
+        camera_rig: CameraRig,
         #[property]
         /// Movement speed in world units per second.
         speed: f32,

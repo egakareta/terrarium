@@ -13,7 +13,7 @@ instance!({
         pub(crate) pv_instance: PVInstance,
         /// Directional materials used when rendering this part.
         #[property(borrow)]
-        pub(crate) material_slots: MeshMaterialSlots,
+        material_slots: MeshMaterialSlots,
         /// Tint applied when rendering this part.
         #[property(default = Color3::WHITE)]
         color: Color3,
@@ -35,11 +35,6 @@ instance!({
     }
 
     impl BasePart {
-        /// Returns mutable directional material storage.
-        pub fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
-            &mut self.material_slots
-        }
-
         /// Returns a material when all directional slots have the same effective value.
         /// Unassigned slots use [`Material::default()`].
         pub fn material(&self) -> Option<&Material> {

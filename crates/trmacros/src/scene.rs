@@ -684,6 +684,16 @@ fn expand(
                 #[doc = concat!("Returns `", stringify!(#field_name), "`.")]
                 fn #field_name(&self) -> #return_type { #read }
             });
+            if borrow {
+                let getter_mut = format_ident!("{field_name}_mut");
+                methods.push(parse_quote! {
+                    #(#cfg)* #(#docs)*
+                    #[doc = concat!("Returns mutable access to `", stringify!(#field_name), "`.")]
+                    fn #getter_mut(&mut self) -> &mut #ty {
+                        &mut #runtime::Project::<#class>::project_mut(self).#field_name
+                    }
+                });
+            }
             methods.push(parse_quote! {
                 #(#cfg)* #[doc = concat!("Sets `", stringify!(#field_name), "`.")] #(#docs)*
                 fn #setter(&mut self, value: #ty) { #runtime::Project::<#class>::project_mut(self).#field_name = #value; }

@@ -183,7 +183,9 @@ fn controller_configuration_is_exposed_as_instance_properties() {
         trscene::devtools::PropertyValue::Number(3.0),
     )
     .unwrap();
-    assert_eq!(player_controller.camera_rig.orbit_speed(), 3.0);
+    assert_eq!(player_controller.camera_rig().orbit_speed(), 3.0);
+    player_controller.camera_rig_mut().set_orbit_speed(4.0);
+    assert_eq!(player_controller.camera_rig().orbit_speed(), 4.0);
 }
 
 #[test]

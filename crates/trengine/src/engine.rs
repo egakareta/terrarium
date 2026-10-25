@@ -157,7 +157,7 @@ instance!({
         instance: Box<InstanceData>,
         /// The controller driven by this engine. Defaults to a camera controller.
         #[property(borrow)]
-        pub controller: Box<dyn ControllerView>,
+        controller: Box<dyn ControllerView>,
         renderer: RendererHandle,
         /// The docked workspace inspector.
         #[cfg(feature = "devtools")]
