@@ -788,20 +788,24 @@ mod tests {
     fn native_window_defaults_to_maximized_unless_sized() {
         let default = Terrarium::default();
         let default_viewport = native_viewport(
-            &default.title,
+            default.title(),
             default.size.unwrap_or(DEFAULT_WINDOW_SIZE),
             default.size.is_some(),
         );
+        assert_eq!(default_viewport.title.as_deref(), Some("App"));
         assert_eq!(default_viewport.maximized, Some(true));
         assert_eq!(default_viewport.fullscreen, None);
         assert_eq!(default_viewport.inner_size, None);
 
-        let sized = Terrarium::default().with_size([960, 540]);
+        let sized = Terrarium::default()
+            .with_title("Terrarium")
+            .with_size([960, 540]);
         let sized_viewport = native_viewport(
-            &sized.title,
+            sized.title(),
             sized.size.unwrap_or(DEFAULT_WINDOW_SIZE),
             sized.size.is_some(),
         );
+        assert_eq!(sized_viewport.title.as_deref(), Some("Terrarium"));
         assert_eq!(sized_viewport.fullscreen, None);
         assert_eq!(sized_viewport.inner_size, Some(egui::vec2(960.0, 540.0)));
     }
@@ -1070,13 +1074,13 @@ instance!({
         #[property(borrow)]
         bevy_app: Option<bevy_app::App>,
         /// The application title on native platforms.
-        #[property(default = "App".to_owned(), into)]
+        #[property(default = "App".to_owned(), borrow, into)]
         title: String,
         /// Explicit window size. An unset size uses a maximized native window and the default fallback size.
         #[property(default = None, into)]
         size: Option<[u32; 2]>,
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        #[property(default = "app".to_owned(), into)]
+        #[property(default = "app".to_owned(), borrow, into)]
         canvas_id: String,
         /// Optional one-shot wgpu configuration callback.
         #[property(borrow, default = None)]
