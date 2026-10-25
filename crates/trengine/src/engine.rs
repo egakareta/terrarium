@@ -331,10 +331,9 @@ impl Engine {
         let controller = {
             let mut controller = controller;
             if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
-                ControllerInput::set_touchscreen_detected(
-                    Project::<ControllerInput>::project_mut(&mut controller),
-                    true,
-                );
+                controller
+                    .controller_input_mut()
+                    .set_touchscreen_detected(true);
             }
             controller
         };

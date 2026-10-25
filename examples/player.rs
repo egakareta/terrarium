@@ -180,7 +180,7 @@ fn create_scene(workspace: &mut Workspace) -> PlayerController {
     add_map(workspace);
     workspace.lighting.with_clock_time(15.0);
     let player = PlayerController::spawn(workspace);
-    let rig = player.rig.unwrap();
+    let rig = player.rig().unwrap();
     workspace.get_mut::<Rig>(rig).unwrap().with_position(SPAWN);
     *workspace.camera_mut() = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
@@ -194,7 +194,7 @@ fn create_scene(workspace: &mut Workspace) -> PlayerController {
 
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
     let player = create_scene(engine.workspace_mut());
-    let rig = player.rig.unwrap();
+    let rig = player.rig().unwrap();
     let _ = engine
         .workspace_mut()
         .camera_mut()
@@ -294,7 +294,7 @@ mod tests {
 
     fn create_test_scene(workspace: &mut Workspace) -> (InstanceId, PlayerController) {
         let mut controller = create_scene(workspace);
-        let rig = controller.rig.unwrap();
+        let rig = controller.rig().unwrap();
         workspace.camera_mut().set_subject_offset(Vec3::Y);
         workspace.camera_mut().set_subject_distance(7.6);
         controller.post_physics(workspace, 0.0);
@@ -317,14 +317,14 @@ mod tests {
         let falling = workspace.get::<Rig>(rig).unwrap();
         assert!(falling.position().y < SPAWN.y - 0.8);
         assert!(falling.position().y > 0.5);
-        assert!(falling.position().z < SPAWN.z - controller.speed * 30.0 / 60.0 * 0.8);
+        assert!(falling.position().z < SPAWN.z - controller.speed() * 30.0 / 60.0 * 0.8);
         assert!(falling.forward().x > 0.1);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
 
         advance(&mut workspace, &mut controller, 150);
         let landed = workspace.get::<Rig>(rig).unwrap();
         assert!(landed.position().y.abs() < 0.05, "{:?}", landed.position());
-        assert!(landed.position().z < SPAWN.z - controller.speed * 180.0 / 60.0 * 0.8);
+        assert!(landed.position().z < SPAWN.z - controller.speed() * 180.0 / 60.0 * 0.8);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Walk);
         assert!(
             landed
@@ -401,7 +401,7 @@ mod tests {
         let mut workspace = Workspace::new();
         let (rig, mut controller) = create_test_scene(&mut workspace);
         walk_forward(&mut workspace, &mut controller);
-        let frames = ((SPAWN.z + 32.0) / controller.speed * 60.0 * 1.5).ceil() as usize;
+        let frames = ((SPAWN.z + 32.0) / controller.speed() * 60.0 * 1.5).ceil() as usize;
         advance(&mut workspace, &mut controller, frames);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.z > -31.2 && position.z < -30.8, "{position:?}");
@@ -417,7 +417,7 @@ mod tests {
             .unwrap()
             .with_position(Vec3::new(15.0, 0.05, 22.0));
         walk_forward(&mut workspace, &mut controller);
-        let frames = (18.0 / controller.speed * 60.0 * 1.5).ceil() as usize;
+        let frames = (18.0 / controller.speed() * 60.0 * 1.5).ceil() as usize;
         advance(&mut workspace, &mut controller, frames);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.y > 2.9 && position.y < 3.1, "{position:?}");
@@ -439,7 +439,7 @@ mod tests {
         );
         advance(&mut workspace, &mut controller, 2);
         let player = workspace.get::<Rig>(rig).unwrap();
-        assert!(player.position().x > initial.x + controller.speed * 2.0 / 60.0 * 0.8);
+        assert!(player.position().x > initial.x + controller.speed() * 2.0 / 60.0 * 0.8);
         let partial_facing = player.forward();
         assert!(
             partial_facing.x > 0.0 && partial_facing.x < 0.9,
@@ -510,7 +510,7 @@ mod tests {
         advance(&mut workspace, &mut controller, 120);
         let initial = workspace.get::<Rig>(rig).unwrap().position();
         walk_forward(&mut workspace, &mut controller);
-        let sensitivity = controller.camera_controller.sensitivity;
+        let sensitivity = controller.sensitivity();
         process_device_event(
             &mut workspace,
             &mut controller,
@@ -523,7 +523,7 @@ mod tests {
         let player = workspace.get::<Rig>(rig).unwrap();
         let displacement = player.position() - initial;
         assert!(
-            displacement.x > controller.speed / 60.0 * 0.8,
+            displacement.x > controller.speed() / 60.0 * 0.8,
             "{displacement:?}"
         );
         assert!(displacement.z.abs() < 1e-4, "{displacement:?}");
@@ -562,7 +562,7 @@ mod tests {
         step(&mut workspace, &mut controller, 1.0 / 60.0);
         let player = workspace.get::<Rig>(rig).unwrap();
         let orbit = workspace.camera().position() - (player.position() + Vec3::Y);
-        let angle = -60.0 * controller.camera_controller.sensitivity;
+        let angle = -60.0 * controller.sensitivity();
         let expected = terrarium::glam::Quat::from_rotation_y(angle) * offset;
         assert!(orbit.abs_diff_eq(expected, 1e-4), "{orbit:?}");
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
@@ -580,7 +580,7 @@ mod tests {
         step(&mut workspace, &mut controller, 0.0);
         let initial_facing = workspace.get::<Rig>(rig).unwrap().forward();
         walk_forward(&mut workspace, &mut controller);
-        let sensitivity = controller.camera_controller.sensitivity;
+        let sensitivity = controller.sensitivity();
         process_device_event(
             &mut workspace,
             &mut controller,

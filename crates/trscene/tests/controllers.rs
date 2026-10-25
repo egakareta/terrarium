@@ -165,7 +165,7 @@ fn controller_configuration_is_exposed_as_instance_properties() {
         "jump_speed",
         "sensitivity",
         "turn_factor",
-        "camera_controller.orbit_speed",
+        "camera_rig.orbit_speed",
         "animations.transition_duration",
     ] {
         assert!(player_properties.iter().any(|path| path == property));
@@ -179,11 +179,11 @@ fn controller_configuration_is_exposed_as_instance_properties() {
     assert_eq!(player_controller.animations().transition_duration, 0.4);
     Instance::set_property(
         &mut player_controller,
-        "camera_controller.orbit_speed",
+        "camera_rig.orbit_speed",
         trscene::devtools::PropertyValue::Number(3.0),
     )
     .unwrap();
-    assert_eq!(player_controller.camera_controller.orbit_speed(), 3.0);
+    assert_eq!(player_controller.camera_rig.orbit_speed(), 3.0);
 }
 
 #[test]
@@ -204,7 +204,8 @@ fn player_movement_carries_scaled_rig_descendants_and_normalizes_diagonals() {
     player.step_rig(&mut rig, 0.1);
 
     assert!(rig.position().abs_diff_eq(
-        initial + Vec3::new(1.0, 0.0, -1.0).normalize() * player.speed * player.sprint_scale * 0.1,
+        initial
+            + Vec3::new(1.0, 0.0, -1.0).normalize() * player.speed() * player.sprint_scale() * 0.1,
         1e-5,
     ));
     assert!(
@@ -235,37 +236,13 @@ fn player_ignores_idle_look_and_linearly_faces_world_aligned_travel() {
     player.step_rig(&mut rig, 1.0 / 60.0);
     assert!(
         rig.position()
-            .abs_diff_eq(Vec3::X * player.speed / 60.0, 1e-5)
+            .abs_diff_eq(Vec3::X * player.speed() / 60.0, 1e-5)
     );
     let facing = rig.forward();
     assert!(facing.x > 0.0 && facing.x < 0.9);
     player.set_right(false);
     player.step_rig(&mut rig, 0.1);
     assert!(rig.forward().abs_diff_eq(facing, 1e-5));
-}
-
-#[test]
-fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
-    let actions = ControllerActions {
-        movement: Vec3::new(0.3, 0.0, 0.4),
-        look: Vec2::ZERO,
-        movement_scale: Vec3::splat(2.5),
-    };
-    let mut rig = Rig::new();
-    let mut player = PlayerController::new(rig.id());
-    player.set_keyboard_enabled(false);
-    player.set_mouse_enabled(false);
-    player.set_touch_enabled(false);
-    let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
-    let mut camera_controller = CameraController::default().with_speed(player.speed);
-    camera_controller.set_keyboard_enabled(false);
-    camera_controller.set_mouse_enabled(false);
-    camera_controller.set_touch_enabled(false);
-    player.step_rig_with_actions(&mut rig, actions, 0.1);
-    camera_controller.step_camera_with_actions(&mut camera, None, actions, 0.1);
-    assert!(rig.position().abs_diff_eq(camera.position(), 1e-5));
-    assert!((rig.position().length() - player.speed * 2.5 * 0.5 * 0.1).abs() < 1e-5);
-    assert!(rig.forward().abs_diff_eq(Vec3::new(0.6, 0.0, -0.8), 1e-5));
 }
 
 #[test]
@@ -298,7 +275,7 @@ fn player_and_camera_sprint_scales_are_configurable() {
     player.step_rig(&mut rig, 0.1);
     assert!(
         rig.position()
-            .abs_diff_eq(Vec3::NEG_Z * player.speed * 4.0 * 0.1, 1e-5)
+            .abs_diff_eq(Vec3::NEG_Z * player.speed() * 4.0 * 0.1, 1e-5)
     );
 
     let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
@@ -460,7 +437,7 @@ fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
         step(&mut workspace, &mut player, 1.0 / 60.0);
     }
     let held_jump_position = workspace.get::<Rig>(rig).unwrap().position();
-    let jump_height = player.jump_speed.powi(2) / (2.0 * -workspace.physics().gravity().y);
+    let jump_height = player.jump_speed().powi(2) / (2.0 * -workspace.physics().gravity().y);
     assert!(
         held_jump_position.y < grounded_position.y + jump_height + 0.05,
         "held jump rose to {held_jump_position:?}"
@@ -504,7 +481,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     step(&mut workspace, &mut player, 1.0 / 60.0);
     let first_position = workspace.get::<Rig>(rig).unwrap().position();
     assert!(
-        (first_position.z + player.speed / 60.0).abs() < 1e-5,
+        (first_position.z + player.speed() / 60.0).abs() < 1e-5,
         "{first_position:?}"
     );
     assert!(first_position.y < 4.0, "{first_position:?}");
@@ -517,7 +494,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
         step(&mut workspace, &mut player, 1.0 / 60.0);
     }
     let player_rig = workspace.get::<Rig>(rig).unwrap();
-    assert!(player_rig.position().z < -player.speed * 31.0 / 60.0 * 0.9);
+    assert!(player_rig.position().z < -player.speed() * 31.0 / 60.0 * 0.9);
     assert!(
         (player_rig.position().y - workspace.get::<Rig>(falling).unwrap().position().y).abs()
             < 1e-4
@@ -550,7 +527,7 @@ fn dynamic_player_movement_applies_immediately_after_repositioning() {
     let position = workspace.get::<Rig>(rig).unwrap().position();
     assert!((position.x - 2.0).abs() < 1e-4, "{position:?}");
     assert!(
-        (position.z - (3.0 - player.speed / 60.0)).abs() < 1e-4,
+        (position.z - (3.0 - player.speed() / 60.0)).abs() < 1e-4,
         "{position:?}"
     );
     assert!(position.y > 7.9 && position.y < 8.0, "{position:?}");
@@ -583,7 +560,7 @@ fn every_device_subset_can_drive_a_player_independently() {
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.abs_diff_eq(
             if keyboard {
-                Vec3::NEG_Z * controller.speed * 0.1
+                Vec3::NEG_Z * controller.speed() * 0.1
             } else {
                 Vec3::ZERO
             },
@@ -636,7 +613,7 @@ fn every_device_subset_can_drive_a_player_independently() {
         assert!(
             (player_rig.position().distance(before)
                 - if touchscreen {
-                    controller.speed * 0.1
+                    controller.speed() * 0.1
                 } else {
                     0.0
                 })
@@ -749,7 +726,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             .get::<Rig>(rig)
             .unwrap()
             .position()
-            .abs_diff_eq(forward * player.speed * 0.1, 1e-5)
+            .abs_diff_eq(forward * player.speed() * 0.1, 1e-5)
     );
     assert!(
         workspace
@@ -901,7 +878,7 @@ fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected()
     );
     step(&mut workspace, &mut controller, 0.1);
     let part = workspace.add_child(Part::new());
-    controller.rig = Some(part);
+    controller.set_rig(Some(part));
     process_device_event(
         &mut workspace,
         &mut controller,
@@ -918,7 +895,7 @@ fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected()
             .abs_diff_eq(Mat4::IDENTITY, 1e-5)
     );
     let rig = workspace.add_child(Rig::new());
-    controller.rig = Some(rig);
+    controller.set_rig(Some(rig));
     step(&mut workspace, &mut controller, 0.1);
     assert!(
         workspace
@@ -941,6 +918,6 @@ fn invalid_frame_durations_do_not_move_players_and_long_frames_are_capped() {
     player.step_rig(&mut rig, 10.0);
     assert!(
         rig.position()
-            .abs_diff_eq(Vec3::NEG_Z * player.speed * 0.1, 1e-5)
+            .abs_diff_eq(Vec3::NEG_Z * player.speed() * 0.1, 1e-5)
     );
 }

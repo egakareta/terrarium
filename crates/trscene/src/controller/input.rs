@@ -76,8 +76,13 @@ instance! {
         /// Whether a sprint key is held.
         sprint: bool,
         #[property]
+        /// Movement scale applied while sprint is held.
+        sprint_scale: f32,
+        #[property]
         /// Accumulated mouse-look delta `(x, y)`, consumed by [`Self::take_actions`].
         mouse_look_delta: (f32, f32),
+        #[property]
+        /// Accumulated mouse-scroll delta `y`, consumed by [`Self::take_actions`].
         mouse_scroll_delta: f32,
         /// Button that enables cursor-drag look for normalized egui input.
         #[property]
@@ -90,17 +95,13 @@ instance! {
         touch_enabled: bool,
         mouse_dragging: bool,
         last_cursor_position: Option<(f64, f64)>,
-        touch: super::touch::TouchControls,
+        pub(crate) touch: super::touch::TouchControls,
     }
 
     impl ControllerInput {
         /// Reads movement and consumes accumulated look and wheel input from enabled devices.
         pub fn take_actions(&mut self) -> ControllerActions {
-            ControllerInput::take_actions_and_scroll(
-                Project::<ControllerInput>::project_mut(self),
-                2.5,
-            )
-            .0
+            self.controller_input_mut().take_actions_inner().0
         }
 
         /// Updates key and drag state from a winit window event.
@@ -120,10 +121,7 @@ instance! {
                         MouseScrollDelta::LineDelta(_, y) => *y,
                         MouseScrollDelta::PixelDelta(position) => position.y as f32 / 100.0,
                     };
-                    ControllerInput::queue_mouse_scroll(
-                        Project::<ControllerInput>::project_mut(self),
-                        zoom,
-                    )
+                    self.controller_input_mut().queue_mouse_scroll(zoom)
                 }
                 WindowEvent::MouseInput { state, button, .. }
                     if *button == self.mouse_drag_button =>
@@ -137,9 +135,7 @@ instance! {
                 }
                 WindowEvent::CursorMoved { position, .. } if self.mouse_dragging => {
                     if !self.mouse_enabled {
-                        ControllerInput::stop_mouse_drag(
-                            Project::<ControllerInput>::project_mut(self),
-                        );
+                        self.controller_input_mut().stop_mouse_drag();
                         return false;
                     }
                     if let Some((last_x, last_y)) = self.last_cursor_position {
@@ -153,9 +149,7 @@ instance! {
                 }
                 WindowEvent::CursorLeft { .. } => {
                     let was_dragging = self.mouse_dragging;
-                    ControllerInput::stop_mouse_drag(
-                        Project::<ControllerInput>::project_mut(self),
-                    );
+                    self.controller_input_mut().stop_mouse_drag();
                     was_dragging
                 }
                 WindowEvent::Focused(false) => {
@@ -356,6 +350,7 @@ impl Default for ControllerInput {
             up: false,
             down: false,
             sprint: false,
+            sprint_scale: 2.5,
             mouse_look_delta: (0.0, 0.0),
             mouse_scroll_delta: 0.0,
             mouse_drag_button: MouseButton::Left,
@@ -370,10 +365,7 @@ impl Default for ControllerInput {
 }
 
 impl ControllerInput {
-    pub(crate) fn take_actions_and_scroll(
-        &mut self,
-        sprint_scale: f32,
-    ) -> (ControllerActions, f32) {
+    pub(crate) fn take_actions_inner(&mut self) -> (ControllerActions, f32) {
         if !self.mouse_enabled {
             self.mouse_look_delta = (0.0, 0.0);
             self.mouse_scroll_delta = 0.0;
@@ -395,7 +387,7 @@ impl ControllerInput {
             look: Vec2::new(self.mouse_look_delta.0, self.mouse_look_delta.1)
                 + Vec2::new(self.touch.look_delta.x, self.touch.look_delta.y),
             movement_scale: if self.sprint {
-                Vec3::splat(sprint_scale)
+                Vec3::splat(self.sprint_scale)
             } else {
                 Vec3::ONE
             },
@@ -428,30 +420,6 @@ impl ControllerInput {
     /// Returns whether at least one of keyboard, mouse, or touch is enabled.
     pub fn is_enabled(&self) -> bool {
         self.keyboard_enabled || self.mouse_enabled || self.touch_enabled
-    }
-
-    /// Returns this input with all devices enabled or disabled.
-    pub fn with_enabled(mut self, enabled: bool) -> Self {
-        self.set_enabled(enabled);
-        self
-    }
-
-    /// Returns this input with keyboard input enabled or disabled.
-    pub fn with_keyboard_enabled(mut self, enabled: bool) -> Self {
-        self.set_keyboard_enabled(enabled);
-        self
-    }
-
-    /// Returns this input with mouse input enabled or disabled.
-    pub fn with_mouse_enabled(mut self, enabled: bool) -> Self {
-        self.set_mouse_enabled(enabled);
-        self
-    }
-
-    /// Returns this input with touch input enabled or disabled.
-    pub fn with_touch_enabled(mut self, enabled: bool) -> Self {
-        self.set_touch_enabled(enabled);
-        self
     }
 
     pub(crate) fn process_eframe_input_inner(
@@ -520,10 +488,8 @@ impl ControllerInput {
     /// Clears held actions and pending look gestures without changing device settings.
     pub fn clear(&mut self) {
         self.clear_keyboard_input();
-        self.mouse_look_delta = (0.0, 0.0);
-        self.mouse_scroll_delta = 0.0;
-        self.stop_mouse_drag();
-        self.touch.clear();
+        self.clear_mouse_input();
+        self.clear_touch_input();
     }
 
     fn queue_mouse_scroll(&mut self, zoom: f32) -> bool {
@@ -536,7 +502,7 @@ impl ControllerInput {
         }
     }
 
-    fn clear_keyboard_input(&mut self) {
+    pub(crate) fn clear_keyboard_input(&mut self) {
         self.forward = false;
         self.backward = false;
         self.left = false;
@@ -544,6 +510,16 @@ impl ControllerInput {
         self.up = false;
         self.down = false;
         self.sprint = false;
+    }
+
+    pub(crate) fn clear_mouse_input(&mut self) {
+        self.mouse_look_delta = (0.0, 0.0);
+        self.mouse_scroll_delta = 0.0;
+        self.stop_mouse_drag();
+    }
+
+    pub(crate) fn clear_touch_input(&mut self) {
+        self.touch.clear();
     }
 
     fn stop_mouse_drag(&mut self) {
