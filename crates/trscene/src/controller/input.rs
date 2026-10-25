@@ -40,7 +40,7 @@ impl Default for ControllerKeyBindings {
     }
 }
 
-instance! {
+instance!({
     #[instance(default = false)]
     /// Device state translated into [`ControllerActions`].
     ///
@@ -336,7 +336,7 @@ instance! {
             }
         }
     }
-}
+});
 
 impl Default for ControllerInput {
     fn default() -> Self {

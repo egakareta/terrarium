@@ -2,7 +2,7 @@
 
 use terrarium::*;
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlacePart {
@@ -20,7 +20,7 @@ instance! {
                 .with_position(glam::Vec3::X);
         }
     }
-}
+});
 
 #[test]
 fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), AppCreationError> {

@@ -2,7 +2,7 @@ use crate::{glam::*, *};
 mod rig;
 pub use rig::*;
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// A perspective camera capability with a world-space pivot and subject framing.
     #[derive(Clone, Debug)]
@@ -35,7 +35,7 @@ instance! {
         #[property]
         zfar: f32,
     }
-}
+});
 
 impl Default for Camera {
     fn default() -> Self {
@@ -89,7 +89,7 @@ impl Camera {
     }
 }
 
-instance! {
+instance!({
     #[instance(default = false)]
     /// Free-flight movement and third-person orbit for a [`Camera`].
     ///
@@ -113,14 +113,14 @@ instance! {
         fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
             let camera_controller = self.camera_controller_mut();
             let subject = workspace.subject().and_then(|id| {
-                workspace
-                    .view::<dyn Instance>(id)
-                    .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
+                workspace.view::<dyn Instance>(id).and_then(|instance| {
+                    instance.spatial().map(|spatial| (id, spatial.rigid_pose()))
+                })
             });
             camera_controller.step_camera(workspace.camera_mut(), subject, delta_seconds);
         }
     }
-}
+});
 
 impl Default for CameraController {
     fn default() -> Self {

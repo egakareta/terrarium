@@ -15,7 +15,7 @@ use terrarium::{
 #[derive(Resource)]
 struct Subject(InstanceId);
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlacePartController {
@@ -33,7 +33,7 @@ instance! {
                 .with_position(Vec3::X);
         }
     }
-}
+});
 
 #[test]
 fn workspace_tweens_follow_bevy_virtual_time() {

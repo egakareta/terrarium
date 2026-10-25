@@ -74,6 +74,9 @@ struct Definition {
 
 impl Parse for Definition {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let content;
+        braced!(content in input);
+        let input = &content;
         let mut item: ItemStruct = input.parse()?;
         if !item.generics.params.is_empty() || item.generics.where_clause.is_some() {
             return Err(syn::Error::new_spanned(

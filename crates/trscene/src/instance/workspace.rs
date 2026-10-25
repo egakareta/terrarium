@@ -50,7 +50,7 @@ pub enum WorkspacePreset {
     Baseplate,
 }
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
     #[derive(Debug)]
@@ -85,7 +85,7 @@ instance! {
         /// Scene-wide lighting configuration.
         pub lighting: Lighting,
     }
-}
+});
 
 impl Workspace {
     /// Updates the indexed address after transferring this workspace between runtime owners.

@@ -3,7 +3,7 @@ use trscene::{glam::*, *};
 mod models {
     use super::*;
 
-    instance! {
+    instance!({
         #[instance(path = crate::models)]
         /// A custom primitive with authored spring stiffness.
         #[derive(Clone, Debug)]
@@ -14,12 +14,12 @@ mod models {
             #[property(default = 20.0)]
             stiffness: f32,
         }
-    }
+    });
 }
 
 use models::{SpringPart, SpringPartExt};
 
-instance! {
+instance!({
     /// A second level of custom composition.
     #[derive(Clone, Debug)]
     pub struct WeightedSpring {
@@ -29,18 +29,18 @@ instance! {
         #[property(default = 2.0)]
         mass: f32,
     }
-}
+});
 
-instance! {
+instance!({
     /// A custom assembly using the built-in rig transform semantics.
     #[derive(Clone, Debug)]
     pub struct CustomRig {
         #[extends]
         rig: Rig,
     }
-}
+});
 
-instance! {
+instance!({
     /// A primitive that constrains its position to the horizontal plane.
     #[derive(Clone, Debug)]
     pub struct PlanarPart {
@@ -66,16 +66,16 @@ instance! {
                 .set_material(Material::from_color(Color3::BLACK));
         }
     }
-}
+});
 
-instance! {
+instance!({
     /// A descendant that retains its parent's transform override.
     #[derive(Clone, Debug)]
     pub struct CustomPlanarPart {
         #[extends]
         part: PlanarPart,
     }
-}
+});
 
 fn paint<T: BasePartExt + ?Sized>(part: &mut T, color: Color3) {
     part.set_color(color);
@@ -414,7 +414,7 @@ fn inspector_edits_custom_properties_and_preserves_inherited_transform_semantics
     );
 }
 
-instance! {
+instance!({
     /// An independently reusable capability without a scene identity.
     #[derive(Clone, Debug)]
     pub struct Motor {
@@ -422,9 +422,9 @@ instance! {
         #[property(default = 2.0)]
         speed: f32,
     }
-}
+});
 
-instance! {
+instance!({
     /// A primitive composed with an independent motor capability.
     #[derive(Clone, Debug)]
     pub struct MotorPart {
@@ -433,9 +433,9 @@ instance! {
         #[compose]
         motor: Motor,
     }
-}
+});
 
-instance! {
+instance!({
     /// A scene node authored without a built-in parent type.
     #[derive(Clone, Debug)]
     pub struct Group {
@@ -445,7 +445,7 @@ instance! {
         #[property(borrow, default = "group".into())]
         label: String,
     }
-}
+});
 
 #[test]
 fn independent_capabilities_and_new_root_types_keep_one_scene_identity() {
@@ -466,14 +466,14 @@ fn independent_capabilities_and_new_root_types_keep_one_scene_identity() {
     assert!(workspace.view::<BasePart>(group).is_none());
 }
 
-instance! {
+instance!({
     /// A custom light using the built-in point-light capability.
     #[derive(Clone, Debug)]
     pub struct CustomLight {
         #[extends]
         light: PointLight,
     }
-}
+});
 
 #[test]
 fn custom_lights_are_included_in_render_snapshots() {
@@ -488,7 +488,7 @@ fn custom_lights_are_included_in_render_snapshots() {
 }
 
 #[cfg(feature = "meshpart")]
-instance! {
+instance!({
     /// A custom mesh whose provider has an explicit default initializer.
     #[derive(Clone, Debug)]
     pub struct CustomMesh {
@@ -496,7 +496,7 @@ instance! {
         #[default(MeshPart::new(Mesh::block(1.0, [1.0; 4])))]
         mesh: MeshPart,
     }
-}
+});
 
 #[cfg(feature = "meshpart")]
 #[test]
@@ -516,14 +516,14 @@ fn custom_meshes_render_updated_geometry() {
 }
 
 #[cfg(feature = "sound")]
-instance! {
+instance!({
     /// A custom sound using the built-in audio capability.
     #[derive(Clone, Debug)]
     pub struct CustomSound {
         #[extends]
         sound: Sound,
     }
-}
+});
 
 #[cfg(feature = "sound")]
 #[test]

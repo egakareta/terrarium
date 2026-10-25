@@ -1,6 +1,6 @@
 use trscene::{BasePart, Part as Primitive, Workspace, glam::Mat4 as Transform, *};
 
-instance! {
+instance!({
     /// A custom type built through a renamed runtime dependency and parent import.
     #[derive(Clone, Debug)]
     pub struct RenamedPart {
@@ -18,12 +18,12 @@ instance! {
             self.pv_instance_mut().set_pivot(pivot);
         }
     }
-}
+});
 
 mod models {
     use super::*;
 
-    instance! {
+    instance!({
         #[instance(path = crate::models)]
         /// A descendant whose module does not import its parent's argument types.
         #[derive(Clone, Debug)]
@@ -31,7 +31,7 @@ mod models {
             #[extends]
             part: RenamedPart,
         }
-    }
+    });
 }
 
 #[test]

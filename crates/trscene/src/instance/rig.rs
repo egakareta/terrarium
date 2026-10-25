@@ -12,7 +12,7 @@ struct AnimationTransition {
     elapsed: f32,
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// A spatial assembly whose descendants move together when its pivot changes.
     ///
@@ -104,7 +104,9 @@ instance! {
                     if matches.next().is_some() {
                         return Err(AnimationError::AmbiguousTarget(track.target().to_vec()));
                     }
-                    parent_pivot = instance.spatial().map_or(parent_pivot, |spatial| spatial.world_pivot());
+                    parent_pivot = instance
+                        .spatial()
+                        .map_or(parent_pivot, |spatial| spatial.world_pivot());
                     instance = child.as_ref();
                 }
                 let Some(pivot) = instance.spatial().map(|spatial| spatial.world_pivot()) else {
@@ -161,7 +163,8 @@ instance! {
                 player.update(delta_seconds);
                 if let Some(transition) = &mut self.transition {
                     if !player.is_paused() && delta_seconds.is_finite() && delta_seconds > 0.0 {
-                        transition.elapsed = (transition.elapsed + delta_seconds).min(transition.duration);
+                        transition.elapsed =
+                            (transition.elapsed + delta_seconds).min(transition.duration);
                     }
                     if transition.elapsed >= transition.duration {
                         self.transition = None;
@@ -172,7 +175,7 @@ instance! {
             self.animation = Some(player);
         }
     }
-}
+});
 
 fn apply_animation<T: RigExt + ?Sized>(rig: &mut T, player: &AnimationPlayer) {
     let pivot = rig.pivot();

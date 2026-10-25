@@ -3,7 +3,7 @@ use crate::{glam::*, *};
 #[cfg(feature = "default-player-rig")]
 mod default_rig;
 
-instance! {
+instance!({
     #[instance(default = false)]
     /// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
     ///
@@ -68,10 +68,12 @@ instance! {
 
         #[r#override(Controller::step)]
         fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-            let (actions, scroll_delta) = self
-                .controller_input_mut()
-                .take_actions_inner();
-            self.player_controller_mut().step_workspace_with_actions(workspace, actions, delta_seconds);
+            let (actions, scroll_delta) = self.controller_input_mut().take_actions_inner();
+            self.player_controller_mut().step_workspace_with_actions(
+                workspace,
+                actions,
+                delta_seconds,
+            );
             if scroll_delta != 0.0 {
                 let follows_rig = self
                     .rig()
@@ -87,9 +89,9 @@ instance! {
             let player = self.player_controller_mut();
             player.update_animation(workspace);
             let subject = workspace.subject().and_then(|id| {
-                workspace
-                    .view::<dyn Instance>(id)
-                    .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
+                workspace.view::<dyn Instance>(id).and_then(|instance| {
+                    instance.spatial().map(|spatial| (id, spatial.rigid_pose()))
+                })
             });
             player.camera_rig.update_camera(
                 workspace.camera_mut(),
@@ -100,7 +102,7 @@ instance! {
             );
         }
     }
-}
+});
 
 impl PlayerController {
     /// Creates a controller for a custom rig with WASD/Space/Shift and drag-look bindings.

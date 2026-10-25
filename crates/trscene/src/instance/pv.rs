@@ -1,6 +1,6 @@
 use crate::{glam::*, *};
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// An object that has a physical location in the world.
     #[derive(Clone, Debug)]
@@ -121,7 +121,7 @@ instance! {
             pivot_hierarchy_to(self, pivot);
         }
     }
-}
+});
 
 impl PVInstance {
     /// Creates an instance at the identity transform.

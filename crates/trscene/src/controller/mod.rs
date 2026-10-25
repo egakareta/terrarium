@@ -9,14 +9,14 @@
 //! ```
 //! use trscene::{Controller, ControllerInputExt};
 //!
-//! trscene::instance! {
+//! trscene::instance!({
 //!     #[instance(default = false)]
 //!     #[derive(Clone, Debug)]
 //!     struct Autopilot {
 //!         #[extends]
 //!         controller: Controller,
 //!     }
-//! }
+//! });
 //!
 //! let mut controller = Autopilot {
 //!     controller: Controller::default(),
@@ -39,7 +39,7 @@ pub use input::*;
 pub use player::*;
 pub use player_animation::*;
 
-instance! {
+instance!({
     /// Base instance for input-driven and scripted controller behavior.
     ///
     /// Extend this type with `#[extends]` and override [`Self::step`] or
@@ -66,4 +66,4 @@ instance! {
         /// subjects after dynamic scene transforms have been synchronized.
         pub fn post_physics(&mut self, _workspace: &mut Workspace, _delta_seconds: f32) {}
     }
-}
+});

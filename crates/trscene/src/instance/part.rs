@@ -1,6 +1,6 @@
 use crate::*;
 
-instance! {
+instance!({
     /// A named, transformable scene node with optional collision metadata.
     ///
     /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
@@ -73,7 +73,7 @@ instance! {
             Self::default()
         }
     }
-}
+});
 
 fn sanitize_transparency(value: f32) -> f32 {
     if value.is_finite() {
@@ -83,7 +83,7 @@ fn sanitize_transparency(value: f32) -> f32 {
     }
 }
 
-instance! {
+instance!({
     /// A visible scene object rendered with one of the built-in primitive shapes.
     #[derive(Clone, Debug)]
     pub struct Part {
@@ -100,7 +100,7 @@ instance! {
             Self::default()
         }
     }
-}
+});
 
 #[cfg(test)]
 mod tests {

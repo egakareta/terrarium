@@ -1,6 +1,6 @@
 use crate::{glam::*, *};
 
-instance! {
+instance!({
     #[instance(default = false)]
     /// Stateful camera motion shared by camera and player controllers.
     ///
@@ -55,7 +55,7 @@ instance! {
             }
         }
     }
-}
+});
 
 impl Default for CameraRig {
     fn default() -> Self {

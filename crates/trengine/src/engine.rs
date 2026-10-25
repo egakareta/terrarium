@@ -145,7 +145,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// The instance-tree root and owner of a [`Workspace`], [`Controller`], and renderer integrated
     /// with [`eframe`]. The default controller is a [`CameraController`].
@@ -175,7 +175,7 @@ instance! {
         #[cfg(feature = "bevy")]
         bevy_app: Option<bevy_app::App>,
     }
-}
+});
 
 trscene::__instance_inspection_items! {
     impl trscene::devtools::Inspect for Engine {
@@ -1056,7 +1056,7 @@ impl DerefMut for Engine {
     }
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// The primary entry point for configuring and running a Terrarium application.
     pub struct Terrarium {
@@ -1096,7 +1096,7 @@ instance! {
         #[property(default = cfg!(feature = "default-fonts"))]
         bundled_fonts: bool,
     }
-}
+});
 
 impl Terrarium {
     /// Creates a Terrarium application launcher with an empty workspace and default settings.

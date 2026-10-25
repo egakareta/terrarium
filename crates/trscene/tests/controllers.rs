@@ -751,7 +751,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     assert!(workspace.camera().pose().abs_diff_eq(camera_pose, 1e-5));
 }
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct CustomController {
@@ -768,12 +768,13 @@ instance! {
                 .actions
                 .unwrap_or_else(|| self.controller.take_actions());
             if let Some(rig) = workspace.get_mut::<Rig>(self.rig) {
-                let position = rig.position() + actions.translation(Quat::IDENTITY, 4.0, delta_seconds);
+                let position =
+                    rig.position() + actions.translation(Quat::IDENTITY, 4.0, delta_seconds);
                 rig.with_position(position);
             }
         }
     }
-}
+});
 
 #[test]
 fn a_custom_controller_can_use_inherited_input_or_scripted_actions() {
@@ -825,7 +826,7 @@ fn a_custom_controller_can_use_inherited_input_or_scripted_actions() {
     );
 }
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlaceRig {
@@ -844,7 +845,7 @@ instance! {
                 .with_position(self.position);
         }
     }
-}
+});
 
 #[test]
 fn a_single_controller_can_be_reconfigured_between_steps() {

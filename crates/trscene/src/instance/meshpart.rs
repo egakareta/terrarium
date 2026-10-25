@@ -76,7 +76,7 @@ pub enum GltfError {
     UnsupportedMorphTargets,
 }
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// A visible scene object backed by caller-provided or imported mesh data.
     ///
@@ -103,7 +103,10 @@ instance! {
         /// CPU-side geometry rendered by this mesh part. Replacing it updates
         /// the bounds and schedules a new upload before the next frame.
         pub fn mesh(&self) -> &Mesh {
-            self.mesh_part().deformed_mesh.as_ref().unwrap_or_else(|| self.mesh_part().mesh.mesh())
+            self.mesh_part()
+                .deformed_mesh
+                .as_ref()
+                .unwrap_or_else(|| self.mesh_part().mesh.mesh())
         }
         /// Sets `mesh`.
         pub fn set_mesh(&mut self, mesh: Mesh) {
@@ -119,7 +122,7 @@ instance! {
             &self.mesh_part().mesh
         }
     }
-}
+});
 
 /// A mesh source accepted by [`crate::Workspace::add_mesh`].
 pub enum MeshSource<'a> {
