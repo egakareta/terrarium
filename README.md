@@ -16,3 +16,9 @@ This will be filled out when the project is further along.
 
 - [Cookbook](https://egakareta.github.io/terrarium/docs/)
 - [API Reference](https://docs.rs/crate/terrarium/)
+
+## License
+
+Dual-licensed under the [MIT License](https://opensource.org/licenses/MIT) and the [Apache License, Version 2.0](https://www.apache.org/licenses/LICENSE-2.0). Choose whichever you prefer. This license only applies to Terrarium code.
+
+By submitting a contribution, including code submitted through a pull request, you agree that your contribution will be dual-licensed under the MIT License and the Apache License, Version 2.0, without any additional terms or conditions.
