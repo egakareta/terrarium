@@ -7,8 +7,11 @@ mod workload;
 
 #[test]
 fn caller_encoder_renders_and_resizes_output() -> Result<(), Box<dyn std::error::Error>> {
-    let instance =
-        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
+    // Renderer caches retain device resources, so their native instance must stay alive too.
+    static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
+    let instance = INSTANCE.get_or_init(|| {
+        wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env())
+    });
     let adapter = pollster::block_on(instance.request_adapter(&Default::default()))?;
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
