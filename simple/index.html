@@ -7,8 +7,8 @@
     <link rel="icon" href="/terrarium/simple/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/simple/terrarium-57e245d586e63627.js';
-const wasm = await init({ module_or_path: '/terrarium/simple/terrarium-1ffe9c15767c18cf_bg.wasm' });
+import init, * as bindings from '/terrarium/simple/terrarium-9beaa70160ac798f.js';
+const wasm = await init({ module_or_path: '/terrarium/simple/terrarium-9b2a779312093d8f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/simple/terrarium-57e245d586e63627.js" crossorigin="anonymous" integrity="sha384-7qCV+kiM1lU4u2S5TSy99HS4Q/F2tuVXaGuX2AeBHCagn6hV6THnaPdvvES9vdZI"><link rel="modulepreload" href="/terrarium/simple/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/simple/terrarium-1ffe9c15767c18cf_bg.wasm" crossorigin="anonymous" integrity="sha384-nOJvLTXhe7vcfjrXrPk4ql/0Uo62ISJ0Fw9MfliW70TdNltXeh3Vw1DCTuLP1JkF" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/simple/terrarium-9beaa70160ac798f.js" crossorigin="anonymous" integrity="sha384-mScEDpa5fgBENz1I5DczrebNrcaNigqeNC3bg4EMRVaQCI1MCV9+qfa+BwuIlBqo"><link rel="modulepreload" href="/terrarium/simple/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/simple/terrarium-9b2a779312093d8f_bg.wasm" crossorigin="anonymous" integrity="sha384-DK5ASOcR+DUhotff3yK70EK4lV5i0Z/2zjkSsqiOrkSU89SWlV6TZX0C/3N4vJDZ" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>

@@ -7,8 +7,8 @@
     <link rel="icon" href="/terrarium/physics/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/physics/terrarium-1c9f18a77845e64d.js';
-const wasm = await init({ module_or_path: '/terrarium/physics/terrarium-2bc5bee897918220_bg.wasm' });
+import init, * as bindings from '/terrarium/physics/terrarium-510647fea640738d.js';
+const wasm = await init({ module_or_path: '/terrarium/physics/terrarium-6fedca616477533f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/physics/terrarium-1c9f18a77845e64d.js" crossorigin="anonymous" integrity="sha384-sK3mLfHj5aKkmYTsbUtuYGZ142xYmpYRVqXVLl4quGbWOup1W63I+wRGKLBCFohJ"><link rel="modulepreload" href="/terrarium/physics/snippets/renfs-57f1a408f12cbd01/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/physics/terrarium-2bc5bee897918220_bg.wasm" crossorigin="anonymous" integrity="sha384-W4un4F/Ji13ZoCpS+3C2BqhsmHYogJD1ePiyv7pGOlM/VNVjh8sUITTuf/ZM281+" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/physics/terrarium-510647fea640738d.js" crossorigin="anonymous" integrity="sha384-61vnZnLj4/V0bvyoFuyX/qvx/hGNrpBrEO21HRRq4R0V5tkzg1sDVex3I9yFLayD"><link rel="modulepreload" href="/terrarium/physics/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/physics/terrarium-6fedca616477533f_bg.wasm" crossorigin="anonymous" integrity="sha384-xpOXhoWsPPZ27V6OsGISv6TZTSACbPJAaX/JlchYvSfy4HAIUgNILhwUwtIDPl0W" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
