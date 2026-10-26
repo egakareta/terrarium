@@ -1,5 +1,5 @@
 [build]
-rustflags = ["-Zhint-mostly-unused=yes"]
+rustflags = ["-Zcross-crate-inline-threshold=always"]
 
 [profile.dev]
 opt-level = 1
