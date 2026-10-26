@@ -156,6 +156,10 @@ default = [
 static_linking = ["dep:trinternal"]
 dynamic_linking = ["dep:trdylib", "dep:trinternal"]
 
+# exists because --all-features would select `dynamic_linking`
+# this still compiles trdylib, but does not link with the binary
+no_dynamic_linking = []
+
 # auto-managed by cargo-forward-flags
 # <forward trinternal>
 asio = ["trinternal?/asio"]
