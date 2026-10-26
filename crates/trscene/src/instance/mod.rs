@@ -26,7 +26,7 @@ mod meshpart;
 mod outline;
 mod part;
 mod pv;
-mod rig;
+pub(crate) mod rig;
 #[cfg(feature = "sound")]
 mod sound;
 mod workspace;

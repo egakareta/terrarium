@@ -324,10 +324,14 @@ impl Workspace {
             PhysicsInstance::collect(child.as_ref(), &mut instances);
         }
         let transforms = self.physics.step(&instances, delta_seconds);
-        for (id, transform) in transforms {
+        for (id, transform, articulated) in transforms {
             if let Some(instance) = self.view_mut::<dyn Instance>(id) {
-                apply_transform(instance, transform);
+                apply_transform(instance, transform, articulated);
             }
+        }
+        #[cfg(feature = "meshpart")]
+        for child in self.children_mut() {
+            crate::instance::rig::update_physics_skins(child, false);
         }
     }
 
