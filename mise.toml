@@ -59,6 +59,11 @@ run = """
 set -eu
 mkdir -p examples/dist
 for example in app gltf outlines physics simple viewport; do
+  cargo build --release --locked --all-features \\
+    --target wasm32-unknown-unknown --example "$example" --timings
+  mkdir -p "examples/dist/.timings/$example"
+  cp "${CARGO_TARGET_DIR:-target}/cargo-timings/cargo-timing.html" \\
+    "examples/dist/.timings/$example/index.html"
   trunk build --release --locked --all-features --example "$example" \\
     --dist "examples/dist/$example" \\
     --public-url "${PAGES_BASE_PATH:-}/$example/"
