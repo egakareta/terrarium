@@ -174,8 +174,15 @@ mod native {
         }
         let required_features =
             wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        let supports_timestamps = adapter.features().contains(required_features);
+        if ctx.is_test() && !supports_timestamps {
+            println!(
+                "Skipping GPU timing in test mode: encoder timestamp queries are unsupported."
+            );
+            return Ok(Vec::new());
+        }
         ensure!(
-            adapter.features().contains(required_features),
+            supports_timestamps,
             "adapter does not support timestamp queries inside command encoders"
         );
         let (device, queue) =
