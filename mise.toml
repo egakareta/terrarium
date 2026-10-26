@@ -45,7 +45,7 @@ run = "cargo test --workspace --all-targets --all-features"
 [tasks."test:wasm"]
 description = "Run .rs tests for wasm"
 run = "wasm-pack test --headless --chrome"
-env = { WASM_BINDGEN_TEST_WEBDRIVER_JSON = "tests/webdriver.json" }
+env = { CARGO_UNSTABLE_BUILD_STD = "std,panic_abort", WASM_BINDGEN_TEST_WEBDRIVER_JSON = "tests/webdriver.json" }
 
 [tasks."bench:native"]
 description = "Run benchmarks for native"
@@ -54,7 +54,7 @@ run = "cargo bench --workspace --benches"
 [tasks."build:examples:web"]
 description = "Build the web examples gallery for GitHub Pages"
 dir = "{{config_root}}"
-env = { RUSTFLAGS = "" }
+env = { CARGO_UNSTABLE_BUILD_STD = "std,panic_abort", RUSTFLAGS = "" }
 run = """
 set -eu
 mkdir -p examples/dist
@@ -71,22 +71,7 @@ done
 cp assets/web/examples.html examples/dist/index.html
 """
 
-[tasks."serve:examples:app"]
-description = "Serve the example app with Trunk"
-dir = "{{config_root}}"
-run = "trunk serve"
-
-[tasks."run:examples:app"]
-description = "Run the example app natively"
-dir = "{{config_root}}"
-run = "cargo run --example app"
-
-[tasks."wsl:examples:app"]
-description = "Run the example app in WSL"
-dir = "{{config_root}}"
-env = { CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUNNER = "/usr/bin/env" }
-run = "cargo xwin run --example app --target x86_64-pc-windows-msvc"
-
+# this lets you run the cli with `terrarium ...`
 [env]
 _.path = { path = ["{{ exec(command='cmdshim path') }}"], tools = true }
 
