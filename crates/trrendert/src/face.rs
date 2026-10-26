@@ -1,5 +1,3 @@
-use crate::*;
-
 /// A direction on the six-sided local-space cube.
 ///
 /// [`Top`](Self::Top) faces toward `+Y`,
@@ -9,7 +7,7 @@ use crate::*;
 /// [`Right`](Self::Right) toward `+X`,
 /// [`Left`](Self::Left) toward `-X`.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-#[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+#[cfg_attr(feature = "devtools", derive(crate::devtools::Inspect))]
 pub enum Face {
     /// The face toward `+Y`.
     Top,
