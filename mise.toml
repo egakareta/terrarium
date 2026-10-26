@@ -69,6 +69,7 @@ for example in app gltf outlines physics simple viewport; do
     --public-url "${PAGES_BASE_PATH:-}/$example/"
 done
 cp assets/web/examples.html examples/dist/index.html
+cp assets/favicon.svg examples/dist/favicon.svg
 """
 
 # this lets you run the cli with `terrarium ...`
