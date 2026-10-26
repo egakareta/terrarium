@@ -158,6 +158,7 @@ mod native {
     pub fn run(mut ctx: BenchmarkContext) -> Result<Vec<SubBenchResult>> {
         let config = Config::from_env()?;
         let size = config.size;
+        let mut workload = RenderWorkload::new(config.parts, size)?;
         // Renderer caches retain device resources, so their native instance must stay alive too.
         static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
         let instance = INSTANCE.get_or_init(|| {
@@ -207,7 +208,6 @@ mod native {
             b: 0.050,
             a: 1.0,
         });
-        let mut workload = RenderWorkload::new(config.parts, size)?;
         let timestamps = Timestamps::new(&device);
         let warmup_frames = if ctx.is_test() {
             config.warmup_frames.min(1)
