@@ -9,6 +9,9 @@ mod workload;
 fn caller_encoder_renders_and_resizes_output() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Write as _;
 
+    let _ = writeln!(std::io::stderr(), "render encoder: creating workspace");
+    let mut workspace = Workspace::new();
+    workspace.lighting.clear_skybox();
     let _ = writeln!(std::io::stderr(), "render encoder: creating instance");
     // Renderer caches retain device resources, so their native instance must stay alive too.
     static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
@@ -27,8 +30,6 @@ fn caller_encoder_renders_and_resizes_output() -> Result<(), Box<dyn std::error:
     let _ = writeln!(std::io::stderr(), "render encoder: device ready");
     let mut renderer = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, [8, 8])?;
     let _ = writeln!(std::io::stderr(), "render encoder: renderer ready");
-    let mut workspace = Workspace::new();
-    workspace.lighting.clear_skybox();
     renderer.with_clear_color(wgpu::Color::RED);
 
     for size in [[8, 8], [32, 16]] {
