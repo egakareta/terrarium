@@ -93,7 +93,7 @@ name = "sound"
 required-features = ["sound"]
 
 [[bench]]
-name = "wgpu_benchmark"
+name = "render_benchmark"
 harness = false
 
 [[test]]

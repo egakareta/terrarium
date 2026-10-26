@@ -1,10 +1,3 @@
-use std::{
-    env,
-    fmt::Display,
-    str::FromStr,
-    time::{Duration, Instant},
-};
-
 use terrarium::{glam::*, *};
 
 const ANIMATED_PARTS_RATIO: usize = 4;
@@ -18,35 +11,8 @@ const DYNAMIC_LAYER_MAX_BLOCKS: usize = 2_000;
 const DYNAMIC_LAYER_HEIGHT: f32 = 1.35;
 const TEXTURED_PART_DIVISOR: usize = 5;
 
-#[derive(Clone, Copy)]
-struct Config {
-    parts: usize,
-    warmup_frames: usize,
-    measured_frames: usize,
-    width: u32,
-    height: u32,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            parts: 20_000,
-            warmup_frames: 60,
-            measured_frames: 360,
-            width: 1280,
-            height: 720,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Sample {
-    cpu_submission: Duration,
-    frame_complete: Duration,
-}
-
-struct Benchmark {
-    config: Config,
+pub(super) struct RenderWorkload {
+    workspace: Workspace,
     base_camera_pivot: Mat4,
     part_ids: Vec<InstanceId>,
     base_parts: Vec<Part>,
@@ -56,78 +22,44 @@ struct Benchmark {
     random_state: u64,
     animation_frame: usize,
     animation_pool_start: usize,
-    warmup_remaining: usize,
-    samples: Vec<Sample>,
-    logic_started: Option<Instant>,
-    frame_started: Option<Instant>,
-    cpu_submission: Option<Duration>,
-    finished: bool,
 }
 
-impl Benchmark {
-    fn new(engine: &mut Engine, config: Config) -> Result<Self, RendererError> {
-        engine.set_clear_color([0.012, 0.019, 0.050, 1.0]);
-        let (part_ids, upper_layer_extent, benchmark_materials) = create_benchmark_workspace(
-            engine.workspace_mut(),
-            config.parts,
-            config.width,
-            config.height,
-        )?;
-        let base_camera_pivot = engine.camera().pivot();
-        let base_parts = engine.get_all::<Part>().cloned().collect();
-        let random_state = 0x4d59_5df4_d0f3_3173;
-        let mut app = Self {
-            config,
+impl RenderWorkload {
+    pub(super) fn new(parts: usize, size: [u32; 2]) -> Result<Self, RendererError> {
+        let mut workspace = Workspace::new();
+        let (part_ids, upper_layer_extent, benchmark_materials) =
+            create_benchmark_workspace(&mut workspace, parts, size[0], size[1])?;
+        let base_camera_pivot = workspace.camera().pivot();
+        let base_parts = part_ids
+            .iter()
+            .map(|&id| {
+                workspace
+                    .get::<Part>(id)
+                    .expect("newly created benchmark part")
+                    .clone()
+            })
+            .collect();
+        let mut workload = Self {
+            workspace,
             base_camera_pivot,
             part_ids,
             base_parts,
             upper_layer_extent,
             upper_layer_ids: Vec::new(),
             benchmark_materials,
-            random_state,
+            random_state: 0x4d59_5df4_d0f3_3173,
             animation_frame: 0,
             animation_pool_start: 0,
-            warmup_remaining: config.warmup_frames,
-            samples: Vec::with_capacity(config.measured_frames),
-            logic_started: None,
-            frame_started: None,
-            cpu_submission: None,
-            finished: false,
         };
-        app.replace_upper_layer(engine);
-        Ok(app)
+        workload.replace_upper_layer();
+        Ok(workload)
     }
 
-    fn finish_previous_frame(&mut self, engine: &mut Engine, ctx: &egui::Context) {
-        let Some(started) = self.frame_started.take() else {
-            return;
-        };
-        if let Err(error) = engine.renderer().wait_for_gpu() {
-            report_renderer_error(error);
-            self.finished = true;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-
-        if self.warmup_remaining > 0 {
-            self.warmup_remaining -= 1;
-        } else {
-            self.samples.push(Sample {
-                cpu_submission: self
-                    .cpu_submission
-                    .take()
-                    .expect("scene submission time should be recorded"),
-                frame_complete: started.elapsed(),
-            });
-            if self.samples.len() == self.config.measured_frames {
-                print_report(self.config, &self.samples, self.benchmark_materials.len());
-                self.finished = true;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-        }
+    pub(super) fn workspace(&self) -> &Workspace {
+        &self.workspace
     }
 
-    fn animate_parts(&mut self, engine: &mut Engine) {
+    pub(super) fn advance(&mut self) {
         let part_count = self.part_ids.len();
         let animated_count = part_count / ANIMATED_PARTS_RATIO
             + usize::from(!part_count.is_multiple_of(ANIMATED_PARTS_RATIO));
@@ -139,7 +71,7 @@ impl Benchmark {
         {
             for offset in 0..animated_count {
                 let index = (self.animation_pool_start + offset) % part_count;
-                self.reset_part(engine, index);
+                self.reset_part(index);
             }
             self.animation_pool_start = (self.animation_pool_start + animated_count) % part_count;
         }
@@ -149,7 +81,7 @@ impl Benchmark {
                 .animation_frame
                 .is_multiple_of(DYNAMIC_LAYER_CHANGE_INTERVAL)
         {
-            self.replace_upper_layer(engine);
+            self.replace_upper_layer();
         }
 
         let time = self.animation_frame as f32 * 0.02;
@@ -159,7 +91,7 @@ impl Benchmark {
                 * (time * CAMERA_ZOOM_SPEED).sin();
         let (_, camera_rotation, camera_position) =
             self.base_camera_pivot.to_scale_rotation_translation();
-        engine
+        self.workspace
             .camera_mut()
             .with_pose(Mat4::from_rotation_translation(
                 camera_rotation,
@@ -174,7 +106,7 @@ impl Benchmark {
             let pulse = (time * 1.4 + index as f32 * 0.021).sin() * 0.18;
             let color_shift = time * 1.7 + index as f32 * 0.017;
 
-            if let Some(part) = engine.get_mut::<Part>(id) {
+            if let Some(part) = self.workspace.get_mut::<Part>(id) {
                 let (_, base_rotation, base_position) =
                     base.pivot().to_scale_rotation_translation();
                 let position = base_position
@@ -206,10 +138,10 @@ impl Benchmark {
         self.animation_frame += 1;
     }
 
-    fn replace_upper_layer(&mut self, engine: &mut Engine) {
+    fn replace_upper_layer(&mut self) {
         let previous_layer = std::mem::take(&mut self.upper_layer_ids);
         for id in previous_layer {
-            if let Some(instance) = engine.view_mut::<dyn Instance>(id) {
+            if let Some(instance) = self.workspace.view_mut::<dyn Instance>(id) {
                 instance.destroy();
             }
         }
@@ -245,7 +177,7 @@ impl Benchmark {
                 block = block.with_material_slot(slot, material);
             }
             self.upper_layer_ids
-                .push(block.set_parent(engine.workspace_mut()));
+                .push(block.set_parent(&mut self.workspace));
         }
     }
 
@@ -260,43 +192,12 @@ impl Benchmark {
         self.next_random() as f32 / u64::MAX as f32
     }
 
-    fn reset_part(&mut self, engine: &mut Engine, index: usize) {
+    fn reset_part(&mut self, index: usize) {
         let id = self.part_ids[index];
         let base = &self.base_parts[index];
-        if let Some(part) = engine.get_mut::<Part>(id) {
+        if let Some(part) = self.workspace.get_mut::<Part>(id) {
             part.with_pivot(base.pivot()).with_color(base.color());
         }
-    }
-}
-
-impl App for Benchmark {
-    fn logic(&mut self, engine: &mut Engine, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.finished {
-            return;
-        }
-        self.finish_previous_frame(engine, ctx);
-        if self.finished {
-            return;
-        }
-        self.logic_started = Some(Instant::now());
-        self.animate_parts(engine);
-        ctx.request_repaint();
-    }
-
-    fn render(&mut self, engine: &mut Engine, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.finished {
-            return;
-        }
-        let started = self.logic_started.take().unwrap_or_else(Instant::now);
-        if let Err(error) = engine.prepare(ui) {
-            report_renderer_error(error);
-            self.finished = true;
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-        self.cpu_submission = Some(started.elapsed());
-        self.frame_started = Some(started);
-        engine.paint(ui);
     }
 }
 
@@ -368,32 +269,30 @@ fn create_benchmark_workspace(
     Ok((part_ids, extent, benchmark_materials))
 }
 
-/// Loads one workspace texture per benchmark material so textured parts cycle
-/// through distinct base-color maps, filters, and PBR factors instead of
-/// sharing a single material.
+/// Loads the six textured materials used by the workload.
 fn load_benchmark_materials(workspace: &mut Workspace) -> Result<Vec<Material>, RendererError> {
     let cobblestone = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/cobblestone.png"),
+        include_bytes!("../../assets/cobblestone.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let dirt = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/dirt.png"),
+        include_bytes!("../../assets/dirt.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let grass_top = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/grass_top.png"),
+        include_bytes!("../../assets/grass_top.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let grass_side = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/grass_side.png"),
+        include_bytes!("../../assets/grass_side.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let castle_brick = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/castle_brick.png"),
+        include_bytes!("../../assets/castle_brick.png"),
         TextureColorSpace::Srgb,
     )?)?;
     let festival_lantern = workspace.add_texture(Texture::from_bytes(
-        include_bytes!("../assets/festival_lantern.png"),
+        include_bytes!("../../assets/festival_lantern.png"),
         TextureColorSpace::Srgb,
     )?)?;
 
@@ -425,119 +324,4 @@ fn load_benchmark_materials(workspace: &mut Workspace) -> Result<Vec<Material>, 
         castle_brick_material,
         lantern_material,
     ])
-}
-
-fn print_report(config: Config, samples: &[Sample], material_count: usize) {
-    let mut cpu_submission = samples
-        .iter()
-        .map(|sample| sample.cpu_submission.as_secs_f64() * 1_000.0)
-        .collect::<Vec<_>>();
-    let mut frame_complete = samples
-        .iter()
-        .map(|sample| sample.frame_complete.as_secs_f64() * 1_000.0)
-        .collect::<Vec<_>>();
-    cpu_submission.sort_unstable_by(f64::total_cmp);
-    frame_complete.sort_unstable_by(f64::total_cmp);
-
-    let frame_average = average(&frame_complete);
-    println!("render benchmark");
-    println!("  parts: {}", config.parts);
-    println!(
-        "  textured parts: {} ({}%), one random face each across {} materials",
-        config.parts / TEXTURED_PART_DIVISOR,
-        100 / TEXTURED_PART_DIVISOR,
-        material_count
-    );
-    println!(
-        "  animated parts: {} (25%), pool changes every {} frames",
-        config.parts / ANIMATED_PARTS_RATIO
-            + usize::from(!config.parts.is_multiple_of(ANIMATED_PARTS_RATIO)),
-        ANIMATION_POOL_CHANGE_INTERVAL
-    );
-    println!("  warmup frames: {}", config.warmup_frames);
-    println!("  measured frames: {}", samples.len());
-    println!("  CPU submission: {}", format_statistics(&cpu_submission));
-    println!("  End-to-end frame: {}", format_statistics(&frame_complete));
-    println!("  completed-frame FPS: {:.1}", 1_000.0 / frame_average);
-}
-
-fn format_statistics(samples: &[f64]) -> String {
-    format!(
-        "avg {:.3} ms | p50 {:.3} ms | p95 {:.3} ms | p99 {:.3} ms | min {:.3} ms | max {:.3} ms",
-        average(samples),
-        percentile(samples, 0.50),
-        percentile(samples, 0.95),
-        percentile(samples, 0.99),
-        samples[0],
-        samples[samples.len() - 1],
-    )
-}
-
-fn average(samples: &[f64]) -> f64 {
-    samples.iter().sum::<f64>() / samples.len() as f64
-}
-
-fn percentile(samples: &[f64], percentile: f64) -> f64 {
-    let index = ((samples.len() - 1) as f64 * percentile).round() as usize;
-    samples[index]
-}
-
-fn report_renderer_error(error: RendererError) {
-    eprintln!("render benchmark failed: {error}");
-}
-
-fn parse_value<T>(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<T, String>
-where
-    T: FromStr,
-    T::Err: Display,
-{
-    let value = args
-        .next()
-        .ok_or_else(|| format!("missing value for {flag}"))?;
-    value
-        .parse()
-        .map_err(|error| format!("invalid value for {flag}: {error}"))
-}
-
-fn parse_config() -> Result<Config, String> {
-    let mut config = Config::default();
-    let mut args = env::args().skip(1);
-    while let Some(argument) = args.next() {
-        match argument.as_str() {
-            "--parts" => config.parts = parse_value(&mut args, "--parts")?,
-            "--warmup" => config.warmup_frames = parse_value(&mut args, "--warmup")?,
-            "--frames" => config.measured_frames = parse_value(&mut args, "--frames")?,
-            "--width" => config.width = parse_value(&mut args, "--width")?,
-            "--height" => config.height = parse_value(&mut args, "--height")?,
-            _ => return Err(format!("unknown argument: {argument}")),
-        }
-    }
-
-    if config.parts == 0 {
-        return Err("--parts must be greater than zero".into());
-    }
-    if config.measured_frames == 0 {
-        return Err("--frames must be greater than zero".into());
-    }
-    if config.width == 0 || config.height == 0 {
-        return Err("--width and --height must be greater than zero".into());
-    }
-    Ok(config)
-}
-
-fn main() {
-    let config = parse_config().unwrap();
-    println!(
-        "Rendering {} parts for {} warmup + {} measured frames...",
-        config.parts, config.warmup_frames, config.measured_frames
-    );
-
-    Terrarium::new()
-        .with_title("Render benchmark")
-        .with_size([config.width, config.height])
-        .with_wgpu_options(Some(Box::new(|wgpu_options| {
-            wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
-        })))
-        .run(move |engine| Benchmark::new(engine, config))
-        .unwrap();
 }
