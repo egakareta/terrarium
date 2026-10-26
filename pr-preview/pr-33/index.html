@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#101014" />
+    <title>terrarium examples</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #101014;
+        color: #f1eee8;
+      }
+      body {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 56px 24px;
+      }
+      body.modal-open {
+        overflow: hidden;
+      }
+      h1 {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      p {
+        color: #aaa6b2;
+        line-height: 1.6;
+      }
+      .examples {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+        gap: 16px;
+        margin-top: 32px;
+      }
+      .example {
+        border: 1px solid #36333f;
+        border-radius: 12px;
+        background: #19181f;
+        overflow: hidden;
+      }
+      .example:focus-within {
+        border-color: #b4a0ff;
+      }
+      .example-info {
+        padding: 20px;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 1rem;
+        color: #d4c7ff;
+      }
+      .example-info p {
+        margin: 0 0 12px;
+        font-size: 0.92rem;
+      }
+      a {
+        color: #d4c7ff;
+        text-underline-offset: 3px;
+      }
+      a:hover {
+        color: #eee9ff;
+      }
+      a:focus-visible,
+      button:focus-visible {
+        outline: 2px solid #b4a0ff;
+        outline-offset: 4px;
+      }
+      .example-info a {
+        display: inline-block;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+      }
+      footer {
+        margin-top: 36px;
+        font-size: 0.9rem;
+      }
+      .example-modal {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100dvh;
+        max-width: none;
+        max-height: none;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        box-sizing: border-box;
+        color: inherit;
+        overflow: hidden;
+      }
+      .example-modal[open] {
+        display: flex;
+        flex-direction: column;
+      }
+      .modal-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 16px;
+        border-bottom: 1px solid #36333f;
+        background: #19181f;
+      }
+      .modal-toolbar h2 {
+        flex: 1;
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .modal-toolbar a {
+        font-size: 0.9rem;
+      }
+      .modal-toolbar button {
+        padding: 8px 12px;
+        border: 1px solid #55515f;
+        border-radius: 8px;
+        background: #25232e;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+      }
+      .modal-toolbar button:hover {
+        background: #36333f;
+      }
+      .example-modal iframe {
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+        border: 0;
+      }
+      @media (max-width: 480px) {
+        .modal-toolbar {
+          gap: 8px;
+          padding: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Terrarium examples <img src="favicon.svg" width="40" height="40" alt="" /></h1>
+    <p>
+      Open an example to try it here. Click inside the preview, then use WASD and left-click drag to
+      move the camera. Use the link in the top bar to open the full-size app.
+    </p>
+    <main class="examples">
+      <article class="example">
+        <div class="example-info">
+          <h2>app</h2>
+          <p>the main example</p>
+          <a href="app/" data-example="app" aria-haspopup="dialog" aria-controls="example-modal"
+            >open app</a
+          >
+        </div>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>gltf</h2>
+          <p>a custom 3d model</p>
+          <a href="gltf/" data-example="gltf" aria-haspopup="dialog" aria-controls="example-modal"
+            >open gltf</a
+          >
+        </div>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>outlines</h2>
+          <p>outline a mesh easily</p>
+          <a
+            href="outlines/"
+            data-example="outlines"
+            aria-haspopup="dialog"
+            aria-controls="example-modal"
+            >open outlines</a
+          >
+        </div>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>physics</h2>
+          <p>realistic physics with rapier</p>
+          <a
+            href="physics/"
+            data-example="physics"
+            aria-haspopup="dialog"
+            aria-controls="example-modal"
+            >open physics</a
+          >
+        </div>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>simple</h2>
+          <p>the smallest terrarium scene: one cube</p>
+          <a
+            href="simple/"
+            data-example="simple"
+            aria-haspopup="dialog"
+            aria-controls="example-modal"
+            >open simple</a
+          >
+        </div>
+      </article>
+      <article class="example">
+        <div class="example-info">
+          <h2>viewport</h2>
+          <p>render scenes into textures and display them in egui</p>
+          <a
+            href="viewport/"
+            data-example="viewport"
+            aria-haspopup="dialog"
+            aria-controls="example-modal"
+            >open viewport</a
+          >
+        </div>
+      </article>
+    </main>
+    <footer>
+      <p>
+        source code is available in the
+        <a href="https://github.com/egakareta/terrarium/tree/master/examples">examples directory</a>
+      </p>
+    </footer>
+    <dialog class="example-modal" id="example-modal" aria-labelledby="example-title">
+      <div class="modal-toolbar">
+        <h2 id="example-title">example</h2>
+        <button type="button" id="example-close" aria-label="Close example" autofocus>close</button>
+      </div>
+      <iframe id="example-preview" title="Example preview" allowfullscreen></iframe>
+    </dialog>
+    <script>
+      const modal = document.getElementById("example-modal");
+      const title = document.getElementById("example-title");
+      const preview = document.getElementById("example-preview");
+      let activeLink;
+
+      document.querySelectorAll("[data-example]").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          if (
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey ||
+            typeof modal.showModal !== "function"
+          ) {
+            return;
+          }
+          event.preventDefault();
+          activeLink = link;
+          title.textContent = link.dataset.example;
+          preview.title = `${link.dataset.example} example`;
+          preview.src = link.href;
+          modal.showModal();
+          document.body.classList.add("modal-open");
+        });
+      });
+
+      document.getElementById("example-close").addEventListener("click", () => modal.close());
+
+      function closeOnEscape(event) {
+        if (modal.open && event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          modal.close();
+        }
+      }
+      document.addEventListener("keydown", closeOnEscape, true);
+      preview.addEventListener("load", () => {
+        preview.contentDocument?.addEventListener("keydown", closeOnEscape, true);
+      });
+
+      modal.addEventListener("click", (event) => {
+        if (event.target !== modal) return;
+        const bounds = modal.getBoundingClientRect();
+        if (
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom
+        ) {
+          modal.close();
+        }
+      });
+
+      modal.addEventListener("close", () => {
+        preview.removeAttribute("src");
+        preview.title = "Example preview";
+        document.body.classList.remove("modal-open");
+        activeLink?.focus();
+        activeLink = undefined;
+      });
+    </script>
+  </body>
+</html>
