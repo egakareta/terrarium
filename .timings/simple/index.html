@@ -193,10 +193,10 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <td>Max concurrency:</td><td>1 (jobs=4 ncpu=4)</td>
 </tr>
 <tr>
-<td>Build start:</td><td>2026-10-26T11:28:28.965070987Z</td>
+<td>Build start:</td><td>2026-10-26T12:21:00.52462762Z</td>
 </tr>
 <tr>
-<td>Total time:</td><td>1.8s</td>
+<td>Total time:</td><td>1.4s</td>
 </tr>
 <tr>
 <td>rustc:</td><td>rustc 1.96.0-nightly (3b1b0ef4d 2026-03-11)<br>Host: x86_64-unknown-linux-gnu<br>Target: wasm32-unknown-unknown, x86_64-unknown-linux-gnu</td>
@@ -245,9 +245,9 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <tr>
 <td>1.</td>
 <td>terrarium v0.1.0 simple "example"</td>
-<td>1.5s</td>
+<td>1.2s</td>
 
-<td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
+<td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, no_dynamic_linking, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
 </tr>
 
 <tr>
@@ -2767,7 +2767,7 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <td>terrarium v0.1.0</td>
 <td>0.0s</td>
 
-<td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
+<td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, no_dynamic_linking, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
 </tr>
 
 <tr>
@@ -8617,6 +8617,7 @@ const UNIT_DATA = [
       "mp3",
       "mp4",
       "nightly",
+      "no_dynamic_linking",
       "persistence",
       "phosphor",
       "physics",
@@ -10389,6 +10390,7 @@ const UNIT_DATA = [
       "mp3",
       "mp4",
       "nightly",
+      "no_dynamic_linking",
       "persistence",
       "phosphor",
       "physics",
@@ -10401,8 +10403,8 @@ const UNIT_DATA = [
       "webgpu",
       "x11"
     ],
-    "start": 0.34,
-    "duration": 1.49,
+    "start": 0.25,
+    "duration": 1.19,
     "unblocked_units": [],
     "unblocked_rmeta_units": [],
     "sections": null
@@ -10416,13 +10418,13 @@ const CONCURRENCY_DATA = [
     "inactive": 1
   },
   {
-    "t": 0.34,
+    "t": 0.25,
     "active": 1,
     "waiting": 0,
     "inactive": 0
   },
   {
-    "t": 1.83,
+    "t": 1.44,
     "active": 0,
     "waiting": 0,
     "inactive": 0
@@ -10430,12 +10432,12 @@ const CONCURRENCY_DATA = [
 ];
 const CPU_USAGE = [
   [
-    0.841820247,
-    57.65765765765766
+    0.757458725,
+    62.5
   ],
   [
-    1.342046447,
-    96.48241206030151
+    1.257659626,
+    73.36683417085428
   ]
 ];
 // Position of the vertical axis.
