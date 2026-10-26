@@ -7,27 +7,43 @@ mod workload;
 
 #[test]
 fn caller_encoder_renders_and_resizes_output() -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Write as _;
+
+    let _ = writeln!(std::io::stderr(), "render encoder: creating instance");
     // Renderer caches retain device resources, so their native instance must stay alive too.
     static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
     let instance = INSTANCE.get_or_init(|| {
         wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env())
     });
+    let _ = writeln!(std::io::stderr(), "render encoder: requesting adapter");
     let adapter = pollster::block_on(instance.request_adapter(&Default::default()))?;
+    let _ = writeln!(
+        std::io::stderr(),
+        "render encoder adapter: {:?}",
+        adapter.get_info()
+    );
     let (device, queue) =
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+    let _ = writeln!(std::io::stderr(), "render encoder: device ready");
     let mut renderer = Renderer::new(&device, &queue, wgpu::TextureFormat::Rgba8Unorm, [8, 8])?;
+    let _ = writeln!(std::io::stderr(), "render encoder: renderer ready");
     let mut workspace = Workspace::new();
     workspace.lighting.clear_skybox();
     renderer.with_clear_color(wgpu::Color::RED);
 
     for size in [[8, 8], [32, 16]] {
+        let _ = writeln!(std::io::stderr(), "render encoder: encoding {size:?}");
         let mut encoder = device.create_command_encoder(&Default::default());
         renderer.encode(&workspace.render_scene(), size, &mut encoder)?;
+        let _ = writeln!(std::io::stderr(), "render encoder: submitting {size:?}");
         queue.submit(Some(encoder.finish()));
+        let _ = writeln!(std::io::stderr(), "render encoder: reading {size:?}");
         let pixels = renderer.read_pixels()?;
+        let _ = writeln!(std::io::stderr(), "render encoder: read {size:?}");
         assert_eq!(pixels.len(), (size[0] * size[1]) as usize);
         assert!(pixels.iter().all(|&pixel| pixel == [255, 0, 0, 255]));
     }
+    let _ = writeln!(std::io::stderr(), "render encoder: complete");
     Ok(())
 }
 
