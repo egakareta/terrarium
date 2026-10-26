@@ -30,6 +30,7 @@ pub struct PhysicsWorld {
     last_transforms: HashMap<InstanceId, Mat4>,
     player_motions: HashMap<InstanceId, PlayerMotion>,
     joints: HashMap<InstanceId, ImpulseJointHandle>,
+    tissue_anchors: HashMap<InstanceId, RigidBodyHandle>,
 }
 
 struct PlayerMotion {
@@ -51,6 +52,8 @@ struct BodyEntry {
     handle: RigidBodyHandle,
     anchored: bool,
     fallback_mass: bool,
+    soft_tissue: bool,
+    ragdolled: bool,
     colliders: HashMap<InstanceId, ColliderEntry>,
 }
 
@@ -64,6 +67,7 @@ pub(crate) struct PhysicsInstance {
     assembly: InstanceId,
     joint: Option<PhysicsJoint>,
     articulated: bool,
+    ragdolled: bool,
 }
 
 #[derive(Debug)]
@@ -92,6 +96,7 @@ impl PhysicsWorld {
             last_transforms: HashMap::new(),
             player_motions: HashMap::new(),
             joints: HashMap::new(),
+            tissue_anchors: HashMap::new(),
         }
     }
 
@@ -243,6 +248,12 @@ impl PhysicsWorld {
 
         // Apply controls after synchronization, which may create bodies or reset teleported ones.
         for (id, motion) in self.player_motions.drain() {
+            if instances
+                .iter()
+                .any(|instance| instance.id == id && instance.ragdolled)
+            {
+                continue;
+            }
             let Some(entry) = self.bodies.get(&id) else {
                 continue;
             };
@@ -278,7 +289,10 @@ impl PhysicsWorld {
 
         if delta_seconds.is_finite() && delta_seconds > 0.0 {
             self.world.integration_parameters.dt = delta_seconds.min(0.1);
+            self.update_tissue_anchors(instances, delta_seconds.min(0.1));
             self.world.step();
+        } else {
+            self.update_tissue_anchors(instances, 0.0);
         }
 
         let mut transforms = Vec::new();
@@ -356,7 +370,20 @@ impl PhysicsWorld {
                 })
                 .unwrap_or_else(|| {
                     self.last_transforms.remove(&instance.id);
-                    let handle = self.world.insert_body(body_builder(instance));
+                    let mut builder = body_builder(instance);
+                    if let Some(parent) = instance
+                        .joint
+                        .as_ref()
+                        .and_then(|joint| self.bodies.get(&joint.parent))
+                        .and_then(|entry| self.world.bodies.get(entry.handle))
+                    {
+                        let offset = rapier_vector(instance.transform.w_axis.truncate())
+                            - parent.translation();
+                        builder = builder
+                            .linvel(parent.linvel() + parent.angvel().cross(offset))
+                            .angvel(parent.angvel());
+                    }
+                    let handle = self.world.insert_body(builder);
                     self.world
                         .bodies
                         .get_mut(handle)
@@ -367,6 +394,8 @@ impl PhysicsWorld {
                         anchored: instance.anchored,
                         fallback_mass: instance.articulated
                             && !instance.parts.iter().any(|part| part.can_collide),
+                        soft_tissue: false,
+                        ragdolled: false,
                         colliders: HashMap::new(),
                     }
                 });
@@ -379,6 +408,12 @@ impl PhysicsWorld {
                 body.set_linvel(rapier_vector(Vec3::ZERO), true);
                 body.set_angvel(rapier_vector(Vec3::ZERO), true);
             }
+            if let Some(delta) = teleports.get(&instance.assembly)
+                && let Some(handle) = self.tissue_anchors.get(&instance.id)
+                && let Some(body) = self.world.bodies.get_mut(*handle)
+            {
+                body.set_position(rapier_pose(*delta * body_transform(body)), true);
+            }
             self.update_instance(instance, &mut entry);
             self.bodies.insert(instance.id, entry);
         }
@@ -390,6 +425,20 @@ impl PhysicsWorld {
             .iter()
             .filter_map(|instance| instance.joint.as_ref().map(|joint| (instance.id, joint)))
             .collect();
+        self.tissue_anchors.retain(|id, handle| {
+            if active.get(id).is_some_and(|joint| {
+                matches!(
+                    joint.binding.joint.motion,
+                    RigJointMotion::SoftTissue { .. }
+                )
+            }) && self.world.bodies.get(*handle).is_some()
+            {
+                true
+            } else {
+                self.world.remove_body(*handle);
+                false
+            }
+        });
         self.joints.retain(|id, handle| {
             if active.contains_key(id) && self.world.impulse_joints.get(*handle).is_some() {
                 true
@@ -399,21 +448,47 @@ impl PhysicsWorld {
             }
         });
         for (id, joint) in active {
-            let Some(parent) = self.bodies.get(&joint.parent).map(|entry| entry.handle) else {
+            let Some(mut parent) = self.bodies.get(&joint.parent).map(|entry| entry.handle) else {
                 continue;
             };
             let Some(child) = self.bodies.get(&id).map(|entry| entry.handle) else {
                 continue;
             };
-            let mut builder = GenericJointBuilder::new(JointAxesMask::LOCKED_SPHERICAL_AXES)
-                .local_frame1(rapier_pose(joint.binding.frame1))
+            let soft_tissue = matches!(
+                joint.binding.joint.motion,
+                RigJointMotion::SoftTissue { .. }
+            );
+            let frame1 = if soft_tissue {
+                // Dominance groups only isolate contacts, not joint forces.
+                let pose = *self
+                    .world
+                    .bodies
+                    .get(parent)
+                    .expect("synchronized parent")
+                    .position()
+                    * rapier_pose(joint.binding.frame1);
+                parent = *self.tissue_anchors.entry(id).or_insert_with(|| {
+                    self.world
+                        .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
+                });
+                Mat4::IDENTITY
+            } else {
+                joint.binding.frame1
+            };
+            let axes = if soft_tissue {
+                JointAxesMask::ANG_AXES
+            } else {
+                JointAxesMask::LOCKED_SPHERICAL_AXES
+            };
+            let mut builder = GenericJointBuilder::new(axes)
+                .local_frame1(rapier_pose(frame1))
                 .local_frame2(rapier_pose(joint.binding.frame2))
                 .contacts_enabled(false);
             for (index, axis) in [JointAxis::AngX, JointAxis::AngY, JointAxis::AngZ]
                 .into_iter()
                 .enumerate()
             {
-                if let Some(limits) = joint.binding.joint.angular_limits {
+                if !soft_tissue && let Some(limits) = joint.binding.joint.angular_limits {
                     if limits[index] == 0.0 {
                         builder.0.locked_axes |= axis.into();
                     } else {
@@ -422,6 +497,25 @@ impl PhysicsWorld {
                 }
                 if let RigJointMotion::Jiggle { stiffness, damping } = joint.binding.joint.motion {
                     builder = builder.motor_position(axis, 0.0, stiffness, damping);
+                }
+            }
+            if let RigJointMotion::SoftTissue {
+                stiffness,
+                damping,
+                max_displacement,
+            } = joint.binding.joint.motion
+            {
+                for (index, axis) in [JointAxis::LinX, JointAxis::LinY, JointAxis::LinZ]
+                    .into_iter()
+                    .enumerate()
+                {
+                    if max_displacement[index] == 0.0 {
+                        builder.0.locked_axes |= axis.into();
+                    } else {
+                        builder = builder
+                            .limits(axis, [-max_displacement[index], max_displacement[index]])
+                            .motor_position(axis, 0.0, stiffness, damping);
+                    }
                 }
             }
             if let Some(handle) = self.joints.get(&id).copied() {
@@ -455,6 +549,33 @@ impl PhysicsWorld {
         }
     }
 
+    fn update_tissue_anchors(&mut self, instances: &[PhysicsInstance], dt: f32) {
+        for instance in instances {
+            let Some(joint) = &instance.joint else {
+                continue;
+            };
+            let Some(handle) = self.tissue_anchors.get(&instance.id) else {
+                continue;
+            };
+            let Some(parent) = self
+                .bodies
+                .get(&joint.parent)
+                .and_then(|entry| self.world.bodies.get(entry.handle))
+            else {
+                continue;
+            };
+            let pose =
+                parent.predict_position_using_velocity(dt) * rapier_pose(joint.binding.frame1);
+            let Some(anchor) = self.world.bodies.get_mut(*handle) else {
+                continue;
+            };
+            if dt == 0.0 {
+                anchor.set_position(pose, true);
+            }
+            anchor.set_next_kinematic_position(pose);
+        }
+    }
+
     fn update_instance(&mut self, instance: &PhysicsInstance, entry: &mut BodyEntry) {
         let body = self
             .world
@@ -462,6 +583,21 @@ impl PhysicsWorld {
             .get_mut(entry.handle)
             .expect("synchronized body");
         let pose = PVInstance::pose_from_transform(instance.transform);
+        let soft_tissue = instance.joint.as_ref().is_some_and(|joint| {
+            matches!(
+                joint.binding.joint.motion,
+                RigJointMotion::SoftTissue { .. }
+            )
+        });
+        if entry.soft_tissue != soft_tissue {
+            body.set_gravity_scale(if soft_tissue { 0.0 } else { 1.0 }, true);
+            entry.soft_tissue = soft_tissue;
+        }
+        if instance.ragdolled && !entry.ragdolled {
+            body.lock_rotations(false, true);
+            body.enable_ccd(true);
+        }
+        entry.ragdolled = instance.ragdolled;
         if entry.anchored != instance.anchored {
             body.set_body_type(body_type(instance.anchored), true);
         }
@@ -586,6 +722,7 @@ impl PhysicsInstance {
                 assembly: rig.id(),
                 joint: None,
                 articulated: !rig.physics_joints().is_empty(),
+                ragdolled: rig.ragdoll_enabled(),
             });
             let bindings: HashMap<_, _> = rig
                 .rig()
@@ -623,6 +760,7 @@ impl PhysicsInstance {
                 assembly: part.id,
                 joint: None,
                 articulated: false,
+                ragdolled: false,
             });
         }
         for child in instance.children() {
@@ -637,6 +775,7 @@ impl PhysicsInstance {
         bindings: &HashMap<InstanceId, PhysicsJoint>,
         instances: &mut Vec<Self>,
     ) {
+        let ragdolled = instances[owner].ragdolled;
         if let Some(joint) = bindings.get(&instance.id()) {
             owner = instances.len();
             instances.push(Self {
@@ -654,6 +793,7 @@ impl PhysicsInstance {
                     binding: joint.binding.clone(),
                 }),
                 articulated: true,
+                ragdolled,
             });
         }
         instances[owner].members.push(instance.id());

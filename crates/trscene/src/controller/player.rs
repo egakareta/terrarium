@@ -147,6 +147,10 @@ impl PlayerController {
         actions: ControllerActions,
         delta_seconds: f32,
     ) {
+        #[cfg(feature = "physics")]
+        if rig.ragdoll_enabled() {
+            return;
+        }
         let (movement, rotation) = self.motion(actions, Quat::IDENTITY, rig.pose(), delta_seconds);
         Self::apply_pose(rig, movement, rotation);
     }
@@ -179,6 +183,13 @@ impl PlayerController {
             reference.look = self.camera_rig.queued_look();
         }
         let movement_rotation = reference.yaw_rotation(workspace.camera().pose(), 1.0);
+        #[cfg(feature = "physics")]
+        if workspace
+            .get::<Rig>(id)
+            .is_some_and(|rig| rig.ragdoll_enabled())
+        {
+            return;
+        }
         let delta_seconds = super::frame_delta(delta_seconds);
         let (movement, rotation) = self.motion(actions, movement_rotation, pose, delta_seconds);
         let mut horizontal = actions;
@@ -227,6 +238,10 @@ impl PlayerController {
         let Some(rig) = workspace.get::<Rig>(id) else {
             return;
         };
+        #[cfg(feature = "physics")]
+        if rig.ragdoll_enabled() {
+            return;
+        }
         let state = self.locomotion;
         #[cfg(feature = "physics")]
         let state = if !rig.anchored()

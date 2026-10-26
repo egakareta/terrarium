@@ -174,6 +174,7 @@ fn jiggle_follows_completed_animation_while_ragdoll_is_not_animation_driven() {
         let expected = match motion {
             RigJointMotion::Ragdoll => Mat4::IDENTITY,
             RigJointMotion::Jiggle { .. } => target,
+            RigJointMotion::SoftTissue { .. } => unreachable!(),
         };
         assert!(
             workspace

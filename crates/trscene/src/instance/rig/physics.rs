@@ -14,9 +14,22 @@ pub enum RigJointMotion {
         /// Angular spring damping; must be finite and nonnegative.
         damping: f32,
     },
+    /// Gravity-compensated translation springs for weighted soft-tissue bones.
+    ///
+    /// Rotation follows the animation. These bodies do not push their parent bodies.
+    SoftTissue {
+        /// Translation spring stiffness; must be finite and nonnegative.
+        stiffness: f32,
+        /// Translation spring damping; must be finite and nonnegative.
+        damping: f32,
+        /// Maximum joint-frame XYZ displacement from the animated pose, in world units.
+        ///
+        /// Values must be finite and nonnegative. Zero locks that axis.
+        max_displacement: Vec3,
+    },
 }
 
-/// A spherical physics joint targeting a named spatial subtree within a rig.
+/// Physics constraints targeting a named spatial subtree within a rig.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RigJoint {
     target: Vec<String>,
@@ -27,6 +40,7 @@ pub struct RigJoint {
     /// Optional symmetric XYZ angular limits in radians, each in `0..=PI`.
     ///
     /// Limits are relative to the bound rest pose, or the animated pose for jiggle.
+    /// Soft-tissue joints ignore these limits and lock rotation instead.
     pub angular_limits: Option<Vec3>,
 }
 
@@ -68,6 +82,9 @@ impl RigJoint {
 /// A rejected rig physics configuration.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum RigPhysicsError {
+    /// The rig has no built-in ragdoll preset.
+    #[error("this rig has no ragdoll preset")]
+    RagdollUnavailable,
     /// A path is empty, missing, ambiguous, or does not resolve to a spatial node.
     #[error("invalid rig joint target: {0:?}")]
     InvalidTarget(Vec<String>),
@@ -98,6 +115,73 @@ pub(crate) struct JointBinding {
     local_target: Mat4,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct RagdollPreset {
+    pub(crate) animated: Vec<RigJoint>,
+    pub(crate) simulated: Vec<RigJoint>,
+    pub(crate) colliders: Vec<Vec<String>>,
+    pub(crate) root_collider: Vec<String>,
+    pub(crate) pelvis: Vec<String>,
+    pub(crate) enabled: bool,
+    pub(crate) anchored: bool,
+    pub(crate) heading: f32,
+}
+
+pub(super) fn set_ragdoll<T: RigExt + ?Sized>(
+    rig: &mut T,
+    enabled: bool,
+) -> Result<(), RigPhysicsError> {
+    let Some(mut preset) = rig.rig().ragdoll.clone() else {
+        return Err(RigPhysicsError::RagdollUnavailable);
+    };
+    if preset.enabled == enabled {
+        return Ok(());
+    }
+    let joints = if enabled {
+        &preset.simulated
+    } else {
+        &preset.animated
+    };
+    // Validate before changing the pose or collision flags.
+    let previous = rig.rig().joint_physics.clone();
+    configure(rig, joints.clone())?;
+    rig.rig_mut().joint_physics = previous;
+    if enabled {
+        preset.anchored = rig.anchored();
+        let forward = rig.forward();
+        preset.heading = (-forward.x).atan2(-forward.z);
+        rig.set_anchored(false);
+    } else {
+        let position = resolve(rig.as_instance(), &preset.pelvis)
+            .and_then(|(node, _)| node.spatial())
+            .map_or(rig.position(), |spatial| spatial.world_position());
+        restore_targets(rig);
+        let scale = rig.size();
+        rig.set_pivot(Mat4::from_scale_rotation_translation(
+            scale,
+            Quat::from_rotation_y(preset.heading),
+            position + Vec3::Y * 0.05,
+        ));
+        rig.set_anchored(preset.anchored);
+    }
+    configure(rig, joints.clone())?;
+    for path in &preset.colliders {
+        if let Some(node) = resolve_mut(rig.as_instance_mut(), path)
+            && let Some(part) = node.view_mut::<BasePart>(node.id())
+        {
+            part.set_can_collide(enabled);
+        }
+    }
+    if let Some(node) = resolve_mut(rig.as_instance_mut(), &preset.root_collider)
+        && let Some(part) = node.view_mut::<BasePart>(node.id())
+    {
+        part.set_can_collide(!enabled);
+    }
+    preset.enabled = enabled;
+    rig.rig_mut().ragdoll = Some(preset);
+    Ok(())
+}
+
 pub(super) fn configure<T: RigExt + ?Sized>(
     rig: &mut T,
     joints: Vec<RigJoint>,
@@ -113,8 +197,10 @@ pub(super) fn configure<T: RigExt + ?Sized>(
                     || limits.min_element() < 0.0
                     || limits.max_element() > std::f32::consts::PI
             })
-            || matches!(joint.motion, RigJointMotion::Jiggle { stiffness, damping }
+            || matches!(joint.motion, RigJointMotion::Jiggle { stiffness, damping } | RigJointMotion::SoftTissue { stiffness, damping, .. }
                 if !stiffness.is_finite() || stiffness < 0.0 || !damping.is_finite() || damping < 0.0)
+            || matches!(joint.motion, RigJointMotion::SoftTissue { max_displacement, .. }
+                if !max_displacement.is_finite() || max_displacement.min_element() < 0.0)
         {
             return Err(RigPhysicsError::InvalidParameters(joint.target.clone()));
         }
@@ -196,6 +282,22 @@ pub(crate) fn resolve<'a>(
     Some((node, parent_pivot))
 }
 
+pub(crate) fn resolve_mut<'a>(
+    root: &'a mut dyn Instance,
+    path: &[String],
+) -> Option<&'a mut dyn Instance> {
+    let Some((name, rest)) = path.split_first() else {
+        return Some(root);
+    };
+    let mut matches = root.children().iter().filter(|node| node.name() == name);
+    let id = matches.next()?.id();
+    if matches.next().is_some() {
+        return None;
+    }
+    let child = root.children_mut().find(|node| node.id() == id)?;
+    resolve_mut(child, rest)
+}
+
 pub(super) fn restore_targets<T: RigExt + ?Sized>(rig: &mut T) {
     fn restore(node: &mut dyn Instance, parent: Mat4, targets: &HashMap<InstanceId, Mat4>) {
         if node
@@ -251,7 +353,7 @@ pub(super) fn capture_targets<T: RigExt + ?Sized>(rig: &mut T) {
             continue;
         }
         binding.local_target = local;
-        if matches!(binding.joint.motion, RigJointMotion::Jiggle { .. })
+        if !matches!(binding.joint.motion, RigJointMotion::Ragdoll)
             && let Some(parent) =
                 resolve(rig.as_instance(), &binding.parent).and_then(|(node, _)| node.spatial())
         {

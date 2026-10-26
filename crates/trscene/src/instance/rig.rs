@@ -4,6 +4,12 @@ use crate::{glam::*, *};
 
 #[cfg(feature = "meshpart")]
 mod gltf;
+#[cfg(all(
+    feature = "meshpart",
+    feature = "physics",
+    feature = "default-player-rig"
+))]
+pub(crate) use gltf::add_soft_tissue;
 #[cfg(feature = "physics")]
 pub(crate) mod physics;
 #[cfg(feature = "physics")]
@@ -40,6 +46,8 @@ instance!({
         clips: BTreeMap<String, AnimationClip>,
         #[cfg(feature = "physics")]
         pub(crate) joint_physics: physics::RigPhysics,
+        #[cfg(feature = "physics")]
+        pub(crate) ragdoll: Option<physics::RagdollPreset>,
         #[cfg(feature = "meshpart")]
         skins: std::sync::Arc<[gltf::SkinBinding]>,
     }
@@ -76,6 +84,7 @@ instance!({
         /// An empty collection restores single-body physics on the next physics step.
         ///
         /// Jiggle follows the rest pose or animation; ragdoll ignores animation forces.
+        /// Soft-tissue joints use translation springs without pushing the skeleton.
         ///
         /// Collision shapes come from descendant parts and their collision flags.
         /// Colliderless joint bodies use unit mass and principal inertia.
@@ -91,6 +100,22 @@ instance!({
         #[cfg(feature = "physics")]
         pub fn physics_joints(&self) -> &[RigJoint] {
             &self.joint_physics.joints
+        }
+
+        /// Reports whether this rig's built-in ragdoll preset is active.
+        #[cfg(feature = "physics")]
+        pub fn ragdoll_enabled(&self) -> bool {
+            self.ragdoll.as_ref().is_some_and(|preset| preset.enabled)
+        }
+
+        /// Toggles a built-in player's ragdoll, retaining soft-tissue simulation.
+        ///
+        /// Animation playback is held while ragdolled. Disabling restores an upright
+        /// pose at the pelvis position and resumes playback. Custom rigs without a
+        /// preset return [`RigPhysicsError::RagdollUnavailable`].
+        #[cfg(feature = "physics")]
+        pub fn set_ragdoll_enabled(&mut self, enabled: bool) -> Result<(), RigPhysicsError> {
+            physics::set_ragdoll(self, enabled)
         }
 
         /// Starts an animation and immediately applies its current pose.
@@ -190,6 +215,10 @@ instance!({
         ///
         /// [`Workspace::step_animations`] advances every rig in a workspace.
         pub fn step_animation(&mut self, delta_seconds: f32) {
+            #[cfg(feature = "physics")]
+            if self.ragdoll_enabled() {
+                return;
+            }
             #[cfg(feature = "physics")]
             physics::restore_targets(self);
             let Some(mut player) = self.animation.take() else {

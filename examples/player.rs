@@ -9,6 +9,8 @@ struct PlayerApp {
 impl PlayerApp {
     fn respawn(&self, engine: &mut Engine) {
         if let Some(rig) = engine.get_mut::<Rig>(self.rig) {
+            rig.set_ragdoll_enabled(false)
+                .expect("built-in ragdoll preset");
             rig.with_position(SPAWN);
         }
     }
@@ -48,6 +50,27 @@ impl App for PlayerApp {
                 .downcast_ref::<PlayerController>()
             {
                 ui.label(format!("Animation: {:?}", player.animation_state()));
+            }
+            if let Some(rig) = engine.get_mut::<Rig>(self.rig) {
+                let mut ragdoll = rig.ragdoll_enabled();
+                if ui.checkbox(&mut ragdoll, "Ragdoll").changed() {
+                    rig.set_ragdoll_enabled(ragdoll)
+                        .expect("built-in ragdoll preset");
+                }
+            }
+            if ui.button("Nudge soft tissue").clicked() {
+                let tissues: Vec<_> = engine
+                    .get::<Rig>(self.rig)
+                    .unwrap()
+                    .descendants()
+                    .filter(|node| node.name().starts_with("Soft"))
+                    .map(Instance::id)
+                    .collect();
+                for id in tissues {
+                    if let Some(body) = engine.physics_mut().body_mut(id) {
+                        body.apply_impulse(rapier3d::math::Vector::new(0.0, 0.0, 0.2), true);
+                    }
+                }
             }
             if ui.button("Respawn").clicked() {
                 self.respawn(engine);
