@@ -64,7 +64,9 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           WGPU_BACKEND: vulkan
       - run: mise run test:native
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
+      - run: mise run test:native --config 'profile.dev.package."*".opt-level=3'
+        if: runner.os == 'Windows'
   test-wasm:
     runs-on: ubuntu-latest
     steps:
