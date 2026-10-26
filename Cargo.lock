@@ -3790,9 +3790,9 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renfs"
-version = "0.2.2"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "496c3275a5238701d8baa13f81fd323b3f36c3cd0a9b99d136e5bad39455d2ae"
+checksum = "2e515a2571554c97ae1ea42581f431ac796e8f4025b8912d288b7fc83df817b6"
 dependencies = [
  "async-fs",
  "dirs",
