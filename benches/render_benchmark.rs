@@ -15,7 +15,7 @@ mod native {
         env,
         fmt::Display,
         str::FromStr,
-        sync::mpsc,
+        sync::{OnceLock, mpsc},
         time::{Duration, Instant},
     };
 
@@ -158,8 +158,11 @@ mod native {
     pub fn run(mut ctx: BenchmarkContext) -> Result<Vec<SubBenchResult>> {
         let config = Config::from_env()?;
         let size = config.size;
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
+        // Renderer caches retain device resources, so their native instance must stay alive too.
+        static INSTANCE: OnceLock<wgpu::Instance> = OnceLock::new();
+        let instance = INSTANCE.get_or_init(|| {
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env())
+        });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
