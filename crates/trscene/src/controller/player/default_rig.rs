@@ -2,12 +2,18 @@ use crate::{glam::*, *};
 
 const DEFAULT_PLAYER_RIG: &[u8] = include_bytes!("../../../assets/UAL1_Lite.glb");
 
+#[cfg(feature = "physics")]
+mod physics;
+
 impl PlayerController {
     /// Spawns the built-in player rig and returns its controller.
     ///
     /// The rig starts at the origin, facing `-Z`, with an invisible collider and
     /// idle, walk, sprint, and airborne animations. It is dynamic when physics is
     /// enabled. The camera is left unchanged.
+    ///
+    /// Physics builds include weighted chest, belly, and hip/glute jiggle bones.
+    /// `Rig::set_ragdoll_enabled` switches to a colliding ragdoll while retaining jiggle.
     pub fn spawn(workspace: &mut Workspace) -> Self {
         let mut rig = Rig::from_gltf(DEFAULT_PLAYER_RIG, workspace)
             .unwrap()
@@ -24,6 +30,8 @@ impl PlayerController {
                 .with_position(Vec3::Y * 0.9)
                 .with_transparency(1.0),
         );
+        #[cfg(feature = "physics")]
+        physics::install(&mut rig);
 
         let mut animations = PlayerAnimations::default();
         for (state, name) in [

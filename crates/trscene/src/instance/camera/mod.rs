@@ -1,6 +1,8 @@
 use crate::{glam::*, *};
+mod rig;
+pub use rig::*;
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// A perspective camera capability with a world-space pivot and subject framing.
     #[derive(Clone, Debug)]
@@ -33,7 +35,7 @@ instance! {
         #[property]
         zfar: f32,
     }
-}
+});
 
 impl Default for Camera {
     fn default() -> Self {
@@ -87,56 +89,38 @@ impl Camera {
     }
 }
 
-/// Physical keyboard keys assigned to camera movement and orbit actions.
-pub type CameraKeyBindings = ControllerKeyBindings;
-
-instance! {
+instance!({
     #[instance(default = false)]
     /// Free-flight movement and third-person orbit for a [`Camera`].
     ///
-    /// Device state is stored in [`Self::input`]. Free flight follows the camera's
-    /// look direction. With a subject, look and horizontal movement orbit, vertical
-    /// movement changes pitch, and forward/backward movement adjusts the camera's
-    /// subject distance. The camera owns the subject offset used to calculate focus.
-    /// [`Self::step_camera_with_actions`] also accepts actions directly.
+    /// It inherits device state from [`Controller`] and delegates camera motion to
+    /// [`CameraRig`]. Free flight follows the camera's look direction. With a subject,
+    /// look and horizontal movement orbit, vertical movement changes pitch, and
+    /// forward/backward movement adjusts subject distance.
     #[derive(Clone, Debug)]
     pub struct CameraController {
-        #[data]
-        data: InstanceData,
-        /// Keyboard, mouse, and touch state used by this controller.
+        #[extends]
+        controller: Controller,
         #[compose]
-        input: ControllerInput,
-        #[property]
-        /// Movement and zoom speed in world units per second.
-        pub speed: f32,
-        #[property]
-        /// Movement scale applied while sprint is held. Defaults to `2.5`.
-        pub sprint_scale: f32,
+        camera_rig: CameraRig,
         #[property]
         /// Look sensitivity in radians per raw mouse unit or physical touch pixel.
-        pub sensitivity: f32,
-        #[property]
-        /// Minimum camera distance from the subject's focus point.
-        pub min_subject_distance: f32,
-        #[property]
-        /// Maximum camera distance from the subject's focus point.
-        pub max_subject_distance: f32,
-        #[property]
-        /// Orbit speed in radians per second for keyboard and joystick controls.
-        pub orbit_speed: f32,
-        #[property]
-        /// Minimum vertical orbit angle in radians.
-        pub min_subject_pitch: f32,
-        #[property]
-        /// Maximum vertical orbit angle in radians.
-        pub max_subject_pitch: f32,
-        orbit_subject: Option<InstanceId>,
-        orbit_yaw: f32,
-        orbit_pitch: f32,
-        queued_look: Vec2,
-        queued_subject_zoom: f32,
+        sensitivity: f32,
     }
-}
+
+    impl CameraController {
+        #[r#override(Controller::post_physics)]
+        fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let camera_controller = self.camera_controller_mut();
+            let subject = workspace.subject().and_then(|id| {
+                workspace.view::<dyn Instance>(id).and_then(|instance| {
+                    instance.spatial().map(|spatial| (id, spatial.rigid_pose()))
+                })
+            });
+            camera_controller.step_camera(workspace.camera_mut(), subject, delta_seconds);
+        }
+    }
+});
 
 impl Default for CameraController {
     fn default() -> Self {
@@ -149,48 +133,22 @@ impl CameraController {
     ///
     /// Default bindings are WASD, Space/Ctrl, and Shift. All three devices start enabled.
     pub fn new(speed: f32, sensitivity: f32) -> Self {
-        Self::new_with_key_bindings(speed, sensitivity, CameraKeyBindings::default())
+        Self::new_with_key_bindings(speed, sensitivity, ControllerKeyBindings::default())
     }
 
     /// Creates a controller with custom physical movement-key bindings.
     pub fn new_with_key_bindings(
         speed: f32,
         sensitivity: f32,
-        key_bindings: CameraKeyBindings,
+        key_bindings: ControllerKeyBindings,
     ) -> Self {
-        let mut input = ControllerInput::default();
-        input.set_key_bindings(key_bindings);
+        let mut controller = Controller::default().with_name("CameraController");
+        controller.set_key_bindings(key_bindings);
         Self {
-            data: InstanceData::new("CameraController"),
-            input,
-            speed,
-            sprint_scale: 2.5,
+            controller,
+            camera_rig: CameraRig::default().with_speed(speed),
             sensitivity,
-            min_subject_distance: 0.5,
-            max_subject_distance: 100.0,
-            orbit_speed: 1.5,
-            min_subject_pitch: -89.0_f32.to_radians(),
-            max_subject_pitch: 89.0_f32.to_radians(),
-            orbit_subject: None,
-            orbit_yaw: 0.0,
-            orbit_pitch: 0.0,
-            queued_look: Vec2::ZERO,
-            queued_subject_zoom: 0.0,
         }
-    }
-
-    /// Sets the bounds used to clamp orbit distance during zoom.
-    pub fn with_subject_distance_limits(mut self, min: f32, max: f32) -> Self {
-        self.min_subject_distance = min;
-        self.max_subject_distance = max;
-        self
-    }
-
-    /// Sets the pitch bounds for third-person orbit, in radians.
-    pub fn with_subject_pitch_limits(mut self, min: f32, max: f32) -> Self {
-        self.min_subject_pitch = min;
-        self.max_subject_pitch = max;
-        self
     }
 
     /// Applies pending device input and queued subject zoom to `camera`.
@@ -205,41 +163,15 @@ impl CameraController {
         subject: Option<(InstanceId, Mat4)>,
         delta_seconds: f32,
     ) {
-        let actions = self.input.take_actions_and_scroll(self.sprint_scale).0;
+        let actions = self.controller_input_mut().take_actions_inner().0;
         self.step_camera_with_actions(camera, subject, actions, delta_seconds);
-    }
-
-    /// Adds a look rotation in radians to the next camera update.
-    ///
-    /// Use this when another controller owns look input but the camera owns the
-    /// orbit. The queued rotation is consumed on the next update even if camera
-    /// input devices are disabled. Non-finite values are ignored.
-    pub fn queue_look(&mut self, radians: Vec2) {
-        let queued = self.queued_look + radians;
-        if radians.is_finite() && queued.is_finite() {
-            self.queued_look = queued;
-        }
-    }
-
-    /// Queues a subject zoom distance change for the next camera update.
-    ///
-    /// Positive values move the camera closer; non-finite values are ignored.
-    pub fn queue_subject_zoom(&mut self, amount: f32) {
-        let queued = self.queued_subject_zoom + amount;
-        if amount.is_finite() && queued.is_finite() {
-            self.queued_subject_zoom = queued;
-        }
-    }
-
-    pub(crate) fn queued_look(&self) -> Vec2 {
-        self.queued_look
     }
 
     /// Applies actions, queued look rotation, and queued subject zoom to `camera`.
     ///
     /// Does not read device state. Look in `actions` is scaled by `sensitivity`;
-    /// look queued with [`Self::queue_look`] is already in radians. Queued look
-    /// and zoom are consumed by this call.
+    /// look queued with [`CameraRig::queue_look`] is already in radians. Queued
+    /// look and zoom are consumed by this call.
     pub fn step_camera_with_actions(
         &mut self,
         camera: &mut Camera,
@@ -247,106 +179,8 @@ impl CameraController {
         actions: ControllerActions,
         delta_seconds: f32,
     ) {
-        let delta_seconds = crate::controller::frame_delta(delta_seconds);
-        let queued_subject_zoom = std::mem::take(&mut self.queued_subject_zoom);
-        let look = actions.look * self.sensitivity + std::mem::take(&mut self.queued_look);
-        let look = if look.is_finite() { look } else { Vec2::ZERO };
-        let Some((subject_id, subject_pose)) = subject else {
-            self.orbit_subject = None;
-            let rotation = ControllerActions { look, ..actions }.look_rotation(camera.pose(), 1.0);
-            let position =
-                camera.position() + actions.translation(rotation, self.speed, delta_seconds);
-            camera.with_pose(Mat4::from_rotation_translation(rotation, position));
-            return;
-        };
-        let offset = if camera.subject_offset.is_finite() {
-            camera.subject_offset
-        } else {
-            Vec3::ZERO
-        };
-        let focus = subject_pose.transform_point3(offset);
-        if self.orbit_subject != Some(subject_id) {
-            let camera_offset = camera.position() - focus;
-            let direction = if camera_offset.length_squared() > 1e-10 {
-                camera_offset.normalize()
-            } else {
-                -camera.forward()
-            };
-            self.orbit_yaw = direction.x.atan2(direction.z);
-            self.orbit_pitch = direction.y.clamp(-1.0, 1.0).asin();
-            self.orbit_subject = Some(subject_id);
-        }
-        self.orbit_yaw -= look.x;
-        let (min_pitch, max_pitch) = self.subject_pitch_limits();
-        self.orbit_pitch = (self.orbit_pitch + look.y).clamp(min_pitch, max_pitch);
-        let axes = actions.scaled_movement();
-        let movement = self.speed * delta_seconds;
-        camera.subject_distance -= queued_subject_zoom + axes.z * movement;
-        let orbit_step = self.orbit_speed * delta_seconds;
-        self.orbit_yaw -= axes.x * orbit_step;
-        self.orbit_pitch += axes.y * orbit_step;
-        self.orbit_pitch = self.orbit_pitch.clamp(min_pitch, max_pitch);
-        let min_distance = if self.min_subject_distance.is_finite() {
-            self.min_subject_distance.max(0.01)
-        } else {
-            0.5
-        };
-        let max_distance = if self.max_subject_distance.is_finite() {
-            self.max_subject_distance.max(min_distance)
-        } else {
-            min_distance.max(100.0)
-        };
-        camera.subject_distance = if camera.subject_distance.is_finite() {
-            camera.subject_distance
-        } else {
-            min_distance
-        }
-        .clamp(min_distance, max_distance);
-        let horizontal_distance = self.orbit_pitch.cos() * camera.subject_distance;
-        let camera_position = focus
-            + Vec3::new(
-                self.orbit_yaw.sin() * horizontal_distance,
-                self.orbit_pitch.sin() * camera.subject_distance,
-                self.orbit_yaw.cos() * horizontal_distance,
-            );
-        let pose = glam::camera::rh::view::look_at_mat4(camera_position, focus, Vec3::Y).inverse();
-        camera.with_pose(pose);
-    }
-
-    fn subject_pitch_limits(&self) -> (f32, f32) {
-        let limit = 89.0_f32.to_radians();
-        let min = if self.min_subject_pitch.is_finite() {
-            self.min_subject_pitch.clamp(-limit, limit)
-        } else {
-            -limit
-        };
-        let max = if self.max_subject_pitch.is_finite() {
-            self.max_subject_pitch.clamp(-limit, limit)
-        } else {
-            limit
-        };
-        if min <= max { (min, max) } else { (max, min) }
-    }
-}
-
-impl Controller for CameraController {
-    fn input(&self) -> Option<&ControllerInput> {
-        Some(&self.input)
-    }
-
-    fn input_mut(&mut self) -> Option<&mut ControllerInput> {
-        Some(&mut self.input)
-    }
-
-    fn step(&mut self, _workspace: &mut Workspace, _delta_seconds: f32) {}
-
-    fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let subject = workspace.subject().and_then(|id| {
-            workspace
-                .view::<dyn Instance>(id)
-                .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
-        });
-        self.step_camera(workspace.camera_mut(), subject, delta_seconds);
+        self.camera_rig
+            .update_camera(camera, subject, actions, self.sensitivity(), delta_seconds);
     }
 }
 
@@ -385,27 +219,85 @@ mod tests {
 
     #[test]
     fn egui_keyboard_capture_clears_camera_movement() {
+        let context = crate::egui::Context::default();
+        let mut text = String::new();
         let mut controller = CameraController::default();
         controller.set_forward(true);
         controller.set_sprint(true);
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-        controller
-            .input
-            .process_eframe_input_inner(&input, false, false, true, |_| false);
+        let screen_rect = crate::egui::Rect::from_min_size(
+            crate::egui::Pos2::ZERO,
+            crate::egui::vec2(800.0, 600.0),
+        );
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                ..Default::default()
+            },
+            |ui| {
+                ui.text_edit_singleline(&mut text).request_focus();
+            },
+        );
+        output.textures_delta.clear();
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                events: vec![crate::egui::Event::Key {
+                    key: crate::egui::Key::W,
+                    physical_key: Some(crate::egui::Key::W),
+                    pressed: true,
+                    repeat: false,
+                    modifiers: crate::egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                ui.text_edit_singleline(&mut text);
+                controller.process_input(ui.ctx());
+            },
+        );
+        output.textures_delta.clear();
         assert!(!controller.forward());
         assert!(!controller.sprint());
     }
 
     #[test]
     fn egui_pointer_capture_clears_camera_look_delta() {
+        let context = crate::egui::Context::default();
         let mut controller = CameraController::default();
         controller.set_mouse_look_delta((4.0, -2.0));
-        let mut input = crate::egui::InputState::default();
-        input.focused = true;
-        controller
-            .input
-            .process_eframe_input_inner(&input, true, true, false, |_| false);
+        let screen_rect = crate::egui::Rect::from_min_size(
+            crate::egui::Pos2::ZERO,
+            crate::egui::vec2(800.0, 600.0),
+        );
+        let mut pointer_position = crate::egui::Pos2::ZERO;
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                ..Default::default()
+            },
+            |ui| pointer_position = ui.button("capture").rect.center(),
+        );
+        output.textures_delta.clear();
+        let mut output = context.run_ui(
+            crate::egui::RawInput {
+                screen_rect: Some(screen_rect),
+                events: vec![
+                    crate::egui::Event::PointerMoved(pointer_position),
+                    crate::egui::Event::PointerButton {
+                        pos: pointer_position,
+                        button: crate::egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: crate::egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ui| {
+                let _ = ui.button("capture");
+                controller.process_input(ui.ctx());
+            },
+        );
+        output.textures_delta.clear();
         assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
     }
 
@@ -427,12 +319,9 @@ mod tests {
         let mut controller = CameraController::default();
         controller.set_mouse_enabled(false);
         assert!(!controller.mouse_enabled());
-        Controller::process_device_event(
-            &mut controller,
-            &DeviceEvent::MouseMotion {
-                delta: (10.0, -5.0),
-            },
-        );
+        controller.process_device_event(&DeviceEvent::MouseMotion {
+            delta: (10.0, -5.0),
+        });
         assert_eq!(controller.mouse_look_delta(), (0.0, 0.0));
         let mut camera = Camera::default();
         let initial_forward = camera.forward();

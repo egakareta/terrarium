@@ -1,6 +1,6 @@
 use trscene::{glam::*, *};
 
-instance! {
+instance!({
     /// A primitive with an additional authored spring property.
     #[derive(Clone, Debug)]
     pub struct SpringPart {
@@ -10,16 +10,16 @@ instance! {
         #[property(default = 20.0)]
         stiffness: f32,
     }
-}
+});
 
-instance! {
+instance!({
     /// An assembly that retains the built-in rig's hierarchy-aware setters.
     #[derive(Clone, Debug)]
     pub struct SpringAssembly {
         #[extends]
         rig: Rig,
     }
-}
+});
 
 fn paint<T: BasePartExt + ?Sized>(part: &mut T) {
     part.set_color(Color3::new(0.2, 0.6, 1.0));

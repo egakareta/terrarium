@@ -14,7 +14,7 @@ impl Finger {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct TouchControls {
+pub(crate) struct TouchControls {
     pub detected: bool,
     pub movement: Vec2,
     pub look_delta: Vec2,

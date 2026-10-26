@@ -9,6 +9,8 @@ struct PlayerApp {
 impl PlayerApp {
     fn respawn(&self, engine: &mut Engine) {
         if let Some(rig) = engine.get_mut::<Rig>(self.rig) {
+            rig.set_ragdoll_enabled(false)
+                .expect("built-in ragdoll preset");
             rig.with_position(SPAWN);
         }
     }
@@ -42,8 +44,33 @@ impl App for PlayerApp {
             ui.label("Drag: orbit camera · Touch: joystick and drag");
             ui.separator();
             ui.label("Explore the buildings and take the ramp to the lookout.");
-            if let Some(player) = engine.controller().downcast_ref::<PlayerController>() {
+            if let Some(player) = engine
+                .controller()
+                .as_instance()
+                .downcast_ref::<PlayerController>()
+            {
                 ui.label(format!("Animation: {:?}", player.animation_state()));
+            }
+            if let Some(rig) = engine.get_mut::<Rig>(self.rig) {
+                let mut ragdoll = rig.ragdoll_enabled();
+                if ui.checkbox(&mut ragdoll, "Ragdoll").changed() {
+                    rig.set_ragdoll_enabled(ragdoll)
+                        .expect("built-in ragdoll preset");
+                }
+            }
+            if ui.button("Nudge soft tissue").clicked() {
+                let tissues: Vec<_> = engine
+                    .get::<Rig>(self.rig)
+                    .unwrap()
+                    .descendants()
+                    .filter(|node| node.name().starts_with("Soft"))
+                    .map(Instance::id)
+                    .collect();
+                for id in tissues {
+                    if let Some(body) = engine.physics_mut().body_mut(id) {
+                        body.apply_impulse(rapier3d::math::Vector::new(0.0, 0.0, 0.2), true);
+                    }
+                }
             }
             if ui.button("Respawn").clicked() {
                 self.respawn(engine);
@@ -116,11 +143,12 @@ fn add_map(workspace: &mut Workspace) {
     ));
     let rise = 3.0_f32;
     let run = 12.0_f32;
+    // Overlap both landings so the upright player collider clears their vertical faces.
     workspace.add_child(
         map_part(
             "Ramp",
-            Vec3::new(15.0, 1.35, 13.0),
-            Vec3::new(5.0, 0.3, rise.hypot(run)),
+            Vec3::new(15.0, 1.4, 13.0),
+            Vec3::new(5.0, 0.3, rise.hypot(run) + 2.0),
             stone,
         )
         .with_orientation(Vec3::new((rise / run).atan().to_degrees(), 0.0, 0.0)),
@@ -175,7 +203,7 @@ fn create_scene(workspace: &mut Workspace) -> PlayerController {
     add_map(workspace);
     workspace.lighting.with_clock_time(15.0);
     let player = PlayerController::spawn(workspace);
-    let rig = player.rig.unwrap();
+    let rig = player.rig().unwrap();
     workspace.get_mut::<Rig>(rig).unwrap().with_position(SPAWN);
     *workspace.camera_mut() = Camera::new(
         SPAWN + Vec3::new(0.0, 4.0, 7.0),
@@ -189,7 +217,7 @@ fn create_scene(workspace: &mut Workspace) -> PlayerController {
 
 fn initialize(engine: &mut Engine) -> Result<PlayerApp, AppCreationError> {
     let player = create_scene(engine.workspace_mut());
-    let rig = player.rig.unwrap();
+    let rig = player.rig().unwrap();
     let _ = engine
         .workspace_mut()
         .camera_mut()
@@ -236,7 +264,7 @@ mod tests {
     fn input_frame(
         context: &egui::Context,
         _workspace: &mut Workspace,
-        controller: &mut dyn Controller,
+        controller: &mut dyn ControllerView,
         events: Vec<egui::Event>,
     ) {
         let input = egui::RawInput {
@@ -253,7 +281,7 @@ mod tests {
         output.textures_delta.clear();
     }
 
-    fn walk_forward(workspace: &mut Workspace, controller: &mut dyn Controller) {
+    fn walk_forward(workspace: &mut Workspace, controller: &mut dyn ControllerView) {
         input_frame(
             &egui::Context::default(),
             workspace,
@@ -262,13 +290,13 @@ mod tests {
         );
     }
 
-    fn advance(workspace: &mut Workspace, controller: &mut dyn Controller, frames: usize) {
+    fn advance(workspace: &mut Workspace, controller: &mut dyn ControllerView, frames: usize) {
         for _ in 0..frames {
             step(workspace, controller, 1.0 / 60.0);
         }
     }
 
-    fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_seconds: f32) {
+    fn step(workspace: &mut Workspace, controller: &mut dyn ControllerView, delta_seconds: f32) {
         workspace.step_tweens(delta_seconds);
         workspace.step_animations(delta_seconds);
         controller.step(workspace, delta_seconds);
@@ -281,7 +309,7 @@ mod tests {
 
     fn process_device_event(
         _workspace: &mut Workspace,
-        controller: &mut dyn Controller,
+        controller: &mut dyn ControllerView,
         event: &terrarium::winit::event::DeviceEvent,
     ) {
         controller.process_device_event(event);
@@ -289,7 +317,7 @@ mod tests {
 
     fn create_test_scene(workspace: &mut Workspace) -> (InstanceId, PlayerController) {
         let mut controller = create_scene(workspace);
-        let rig = controller.rig.unwrap();
+        let rig = controller.rig().unwrap();
         workspace.camera_mut().set_subject_offset(Vec3::Y);
         workspace.camera_mut().set_subject_distance(7.6);
         controller.post_physics(workspace, 0.0);
@@ -312,14 +340,14 @@ mod tests {
         let falling = workspace.get::<Rig>(rig).unwrap();
         assert!(falling.position().y < SPAWN.y - 0.8);
         assert!(falling.position().y > 0.5);
-        assert!(falling.position().z < SPAWN.z - 2.5);
+        assert!(falling.position().z < SPAWN.z - controller.speed() * 30.0 / 60.0 * 0.8);
         assert!(falling.forward().x > 0.1);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
 
         advance(&mut workspace, &mut controller, 150);
         let landed = workspace.get::<Rig>(rig).unwrap();
         assert!(landed.position().y.abs() < 0.05, "{:?}", landed.position());
-        assert!(landed.position().z < SPAWN.z - 14.0);
+        assert!(landed.position().z < SPAWN.z - controller.speed() * 180.0 / 60.0 * 0.8);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Walk);
         assert!(
             landed
@@ -394,7 +422,12 @@ mod tests {
             .unwrap()
             .process_key(winit::keyboard::KeyCode::Space, false);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Jump);
-        advance(&mut workspace, &mut controller, 50);
+        for _ in 0..120 {
+            if controller.animation_state() == PlayerAnimationState::Fall {
+                break;
+            }
+            advance(&mut workspace, &mut controller, 1);
+        }
         assert_eq!(controller.animation_state(), PlayerAnimationState::Fall);
         advance(&mut workspace, &mut controller, 80);
         assert_eq!(controller.animation_state(), PlayerAnimationState::Idle);
@@ -406,7 +439,8 @@ mod tests {
         let mut workspace = Workspace::new();
         let (rig, mut controller) = create_test_scene(&mut workspace);
         walk_forward(&mut workspace, &mut controller);
-        advance(&mut workspace, &mut controller, 720);
+        let frames = ((SPAWN.z + 32.0) / controller.speed() * 60.0 * 1.5).ceil() as usize;
+        advance(&mut workspace, &mut controller, frames);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.z > -31.2 && position.z < -30.8, "{position:?}");
         assert!(position.y.abs() < 0.05, "{position:?}");
@@ -421,7 +455,8 @@ mod tests {
             .unwrap()
             .with_position(Vec3::new(15.0, 0.05, 22.0));
         walk_forward(&mut workspace, &mut controller);
-        advance(&mut workspace, &mut controller, 180);
+        let frames = (18.0 / controller.speed() * 60.0 * 1.5).ceil() as usize;
+        advance(&mut workspace, &mut controller, frames);
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.y > 2.9 && position.y < 3.1, "{position:?}");
         assert!(position.z < 6.5, "{position:?}");
@@ -442,7 +477,7 @@ mod tests {
         );
         advance(&mut workspace, &mut controller, 2);
         let player = workspace.get::<Rig>(rig).unwrap();
-        assert!(player.position().x > initial.x + 0.1);
+        assert!(player.position().x > initial.x + controller.speed() * 2.0 / 60.0 * 0.8);
         let partial_facing = player.forward();
         assert!(
             partial_facing.x > 0.0 && partial_facing.x < 0.9,
@@ -513,7 +548,7 @@ mod tests {
         advance(&mut workspace, &mut controller, 120);
         let initial = workspace.get::<Rig>(rig).unwrap().position();
         walk_forward(&mut workspace, &mut controller);
-        let sensitivity = controller.camera_controller.sensitivity;
+        let sensitivity = controller.sensitivity();
         process_device_event(
             &mut workspace,
             &mut controller,
@@ -525,7 +560,10 @@ mod tests {
 
         let player = workspace.get::<Rig>(rig).unwrap();
         let displacement = player.position() - initial;
-        assert!(displacement.x > 0.09, "{displacement:?}");
+        assert!(
+            displacement.x > controller.speed() / 60.0 * 0.8,
+            "{displacement:?}"
+        );
         assert!(displacement.z.abs() < 1e-4, "{displacement:?}");
         let facing = player.forward();
         assert!(facing.x > 0.0 && facing.x < 0.9, "{facing:?}");
@@ -562,7 +600,7 @@ mod tests {
         step(&mut workspace, &mut controller, 1.0 / 60.0);
         let player = workspace.get::<Rig>(rig).unwrap();
         let orbit = workspace.camera().position() - (player.position() + Vec3::Y);
-        let angle = -60.0 * controller.camera_controller.sensitivity;
+        let angle = -60.0 * controller.sensitivity();
         let expected = terrarium::glam::Quat::from_rotation_y(angle) * offset;
         assert!(orbit.abs_diff_eq(expected, 1e-4), "{orbit:?}");
         assert!(player.forward().abs_diff_eq(facing, 1e-5));
@@ -580,7 +618,7 @@ mod tests {
         step(&mut workspace, &mut controller, 0.0);
         let initial_facing = workspace.get::<Rig>(rig).unwrap().forward();
         walk_forward(&mut workspace, &mut controller);
-        let sensitivity = controller.camera_controller.sensitivity;
+        let sensitivity = controller.sensitivity();
         process_device_event(
             &mut workspace,
             &mut controller,

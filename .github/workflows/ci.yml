@@ -28,17 +28,20 @@ jobs:
           done
       - run: mise run check
   test-native:
-    runs-on: ubuntu-latest
-    env:
-      LIBGL_ALWAYS_SOFTWARE: "1"
-      WGPU_BACKEND: vulkan
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: awalsh128/cache-apt-pkgs-action@v1
+        if: runner.os == 'Linux'
         with:
           packages: libssl-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libgl1-mesa-dri libvulkan-dev mesa-vulkan-drivers vulkan-tools xvfb
           version: 1.0
       - name: Select lavapipe software Vulkan ICD
+        if: runner.os == 'Linux'
         run: |
           icd="$(ls /usr/share/vulkan/icd.d/*.json /etc/vulkan/icd.d/*.json 2>/dev/null | grep -iE '(lvp|lavapipe)' | head -1)"
           if [ -z "$icd" ]; then
@@ -49,12 +52,21 @@ jobs:
           echo "Using lavapipe ICD: $icd"
           echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
       - run: vulkaninfo --summary || true
+        if: runner.os == 'Linux'
       - uses: jdx/mise-action@v4
         with:
           bootstrap: true
           bootstrap_args: "--update"
       - uses: Swatinem/rust-cache@v2
       - run: xvfb-run -a mise run test:native
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          WGPU_BACKEND: vulkan
+      - run: mise run test:native
+        if: runner.os == 'macOS'
+      - run: mise run test:native --config 'profile.dev.package."*".opt-level=3'
+        if: runner.os == 'Windows'
   test-wasm:
     runs-on: ubuntu-latest
     steps:

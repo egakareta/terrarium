@@ -353,6 +353,58 @@ fn resolve_mut<'a>(root: &'a mut dyn Instance, path: &[String]) -> Option<&'a mu
     resolve_mut(child, rest)
 }
 
+#[cfg(all(feature = "physics", feature = "default-player-rig"))]
+pub(crate) fn add_soft_tissue(
+    rig: &mut Rig,
+    parent: &[String],
+    name: &str,
+    center: Vec3,
+    radius: Vec3,
+    strength: f32,
+) -> Vec<String> {
+    let parent_pose = resolve(rig, parent)
+        .unwrap()
+        .spatial()
+        .unwrap()
+        .world_pivot();
+    let mesh_pose = resolve(rig, &rig.skins[0].mesh)
+        .unwrap()
+        .spatial()
+        .unwrap()
+        .world_pivot();
+    let pose = mesh_pose * Mat4::from_translation(center);
+    let mut path = parent.to_vec();
+    path.push(name.to_owned());
+    resolve_mut(rig, parent)
+        .unwrap()
+        .add_child_box(Box::new(Rig::new().with_name(name).with_pivot(pose)));
+    for skin in Arc::make_mut(&mut rig.skins) {
+        let Some(source) = skin.joints.iter().position(|joint| joint == parent) else {
+            continue;
+        };
+        let joint = skin.joints.len();
+        skin.joints.push(path.clone());
+        // Splitting only the source bone's weight preserves its exact animation when at rest.
+        skin.inverse_bind
+            .push(pose.inverse() * parent_pose * skin.inverse_bind[source]);
+        for (vertex, influences) in skin.source.mesh().vertices.iter().zip(&mut skin.influences) {
+            let distance = ((Vec3::from_array(vertex.position) - center) / radius).length_squared();
+            let falloff = (1.0 - distance).max(0.0).powi(2) * strength;
+            if falloff == 0.0 {
+                continue;
+            }
+            if let Some((_, weight)) = influences.iter_mut().find(|(index, _)| *index == source) {
+                let transferred = *weight * falloff;
+                *weight -= transferred;
+                if transferred > 0.0 {
+                    influences.push((joint, transferred));
+                }
+            }
+        }
+    }
+    path
+}
+
 pub(super) fn update_skins<T: RigExt + ?Sized>(rig: &mut T) {
     let root = rig.as_instance();
     let updates: Vec<_> = rig

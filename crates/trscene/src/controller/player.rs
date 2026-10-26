@@ -1,58 +1,54 @@
 use crate::{glam::*, *};
 
-#[cfg(feature = "meshpart")]
+#[cfg(feature = "default-player-rig")]
 mod default_rig;
 
-instance! {
+instance!({
     #[instance(default = false)]
     /// Moves a [`Rig`] with keyboard or touch input and turns it toward travel.
     ///
     /// The rig turns toward horizontal travel using [`Self::turn_factor`], stopping
     /// mid-turn when movement stops. Mouse and touch look orbit the active camera
-    /// when it follows this rig; the mouse wheel changes its orbit distance. Orbit
-    /// input never turns an idle rig.
+    /// when it follows this rig; the mouse wheel changes its orbit distance through
+    /// the controller's [`CameraRig`]. Orbit input never turns an idle rig.
     ///
     /// With the `physics` feature, unanchored rigs move through their physics bodies,
     /// preserving gravity and collisions; the up action jumps grounded dynamic rigs.
     /// Anchored rigs, and builds without physics, move their poses directly. Descendants
     /// and scale are preserved in both cases.
-    /// Movement uses the active camera's horizontal heading. Player look input orbits
-    /// the camera when its subject is this rig.
+    /// Movement uses the active camera's horizontal heading. The composed camera rig
+    /// handles look and orbit when the camera's subject is this rig.
     #[derive(Clone, Debug)]
     pub struct PlayerController {
-        #[data]
-        data: InstanceData,
+        #[extends]
+        controller: Controller,
         #[property]
         /// ID of the rig to move. Missing or removed IDs leave the scene unchanged.
-        pub rig: Option<InstanceId>,
-        /// Device state and bindings used to generate controller actions.
-        #[compose]
-        input: ControllerInput,
+        rig: Option<InstanceId>,
+        /// Camera motion used when the workspace camera follows this rig.
         #[property(borrow)]
-        /// Camera behavior used when the workspace camera follows this rig.
-        pub camera_controller: CameraController,
+        camera_rig: CameraRig,
         #[property]
         /// Movement speed in world units per second.
-        pub speed: f32,
-        #[property]
-        /// Movement scale applied while sprint is held. Defaults to `2.25`.
-        pub sprint_scale: f32,
+        speed: f32,
         #[property]
         /// Upward jump velocity in world units per second. Non-positive or non-finite
         /// values disable jumping.
-        pub jump_speed: f32,
+        jump_speed: f32,
         #[property]
         /// Camera orbit sensitivity in radians per physical pixel.
-        pub sensitivity: f32,
+        sensitivity: f32,
         #[property]
         /// Controls how quickly the rig turns toward its movement direction.
         ///
         /// Each moving frame uses `(turn_factor * delta_seconds).clamp(0.0, 1.0)`
         /// along the shortest yaw arc. Zero disables turning; idle frames retain yaw.
-        pub turn_factor: f32,
+        turn_factor: f32,
         /// Animation players selected automatically from movement and physics state.
         pub animations: PlayerAnimations,
         locomotion: PlayerAnimationState,
+        #[property]
+        /// The most recently selected locomotion animation state.
         animation_state: PlayerAnimationState,
         animated_state: Option<(InstanceId, PlayerAnimationState)>,
     }
@@ -69,28 +65,63 @@ instance! {
             self.animations = animations;
             self.animated_state = None;
         }
+
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let (actions, scroll_delta) = self.controller_input_mut().take_actions_inner();
+            self.player_controller_mut().step_workspace_with_actions(
+                workspace,
+                actions,
+                delta_seconds,
+            );
+            if scroll_delta != 0.0 {
+                let follows_rig = self
+                    .rig()
+                    .is_some_and(|id| workspace.camera().subject() == Some(id));
+                if follows_rig {
+                    self.camera_rig.queue_subject_zoom(scroll_delta);
+                }
+            }
+        }
+
+        #[r#override(Controller::post_physics)]
+        fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let player = self.player_controller_mut();
+            player.update_animation(workspace);
+            let subject = workspace.subject().and_then(|id| {
+                workspace.view::<dyn Instance>(id).and_then(|instance| {
+                    instance.spatial().map(|spatial| (id, spatial.rigid_pose()))
+                })
+            });
+            player.camera_rig.update_camera(
+                workspace.camera_mut(),
+                subject,
+                ControllerActions::default(),
+                1.0,
+                delta_seconds,
+            );
+        }
     }
-}
+});
 
 impl PlayerController {
     /// Creates a controller for a custom rig with WASD/Space/Shift and drag-look bindings.
     ///
     /// Space uses the up action to jump a grounded dynamic rig. The down action is
-    /// unbound. Shift scales movement by `2.25` by default. Mouse and touch look orbit
+    /// unbound. Shift scales movement by `3.0` by default. Mouse and touch look orbit
     /// the active camera when it follows the rig.
     pub fn new(rig: InstanceId) -> Self {
-        let mut input = ControllerInput::default();
-        let mut key_bindings = input.key_bindings().clone();
+        let controller = Controller::default().with_name("PlayerController");
+        let mut key_bindings = controller.key_bindings().clone();
         key_bindings.down.clear();
-        input.set_key_bindings(key_bindings);
         Self {
-            data: InstanceData::new("PlayerController"),
+            controller: controller
+                .with_key_bindings(key_bindings)
+                .with_sprint_scale(3.0),
             rig: Some(rig),
-            input,
-            camera_controller: CameraController::default(),
-            speed: 6.0,
-            sprint_scale: 2.25,
-            jump_speed: 7.0,
+            camera_rig: CameraRig::default(),
+            speed: 1.3,
+            jump_speed: 3.0,
             sensitivity: 0.0025,
             turn_factor: 10.0,
             animations: PlayerAnimations::default(),
@@ -100,31 +131,26 @@ impl PlayerController {
         }
     }
 
-    /// Returns the most recently selected locomotion animation state.
-    pub fn animation_state(&self) -> PlayerAnimationState {
-        self.animation_state
-    }
-
     /// Applies accumulated input directly to a rig without a workspace.
     ///
     /// Horizontal movement is world-aligned, look and jumping are discarded, and
-    /// no physics step is performed. Use this controller as the engine's custom
-    /// controller for camera-relative movement, camera orbit, and physics integration.
+    /// no physics step is performed. Use [`Self::step_workspace_with_actions`] for
+    /// camera-relative movement and physics integration.
     pub fn step_rig(&mut self, rig: &mut Rig, delta_seconds: f32) {
-        let actions = self.input.take_actions_and_scroll(self.sprint_scale).0;
+        let actions = self.controller_input_mut().take_actions_inner().0;
         self.step_rig_with_actions(rig, actions, delta_seconds);
     }
 
-    /// Applies scripted actions as world-aligned, non-physics pose updates.
-    ///
-    /// Look and the up action are ignored; pass movement on `x` and `z`. The rig
-    /// turns only while moving. This method neither reads device input nor advances physics.
-    pub fn step_rig_with_actions(
+    pub(crate) fn step_rig_with_actions(
         &self,
         rig: &mut Rig,
         actions: ControllerActions,
         delta_seconds: f32,
     ) {
+        #[cfg(feature = "physics")]
+        if rig.ragdoll_enabled() {
+            return;
+        }
         let (movement, rotation) = self.motion(actions, Quat::IDENTITY, rig.pose(), delta_seconds);
         Self::apply_pose(rig, movement, rotation);
     }
@@ -153,11 +179,17 @@ impl PlayerController {
 
         let mut reference = ControllerActions::default();
         if workspace.camera().subject() == Some(id) {
-            self.camera_controller
-                .queue_look(actions.look * self.sensitivity);
-            reference.look = self.camera_controller.queued_look();
+            self.camera_rig.queue_look(actions.look * self.sensitivity);
+            reference.look = self.camera_rig.queued_look();
         }
         let movement_rotation = reference.yaw_rotation(workspace.camera().pose(), 1.0);
+        #[cfg(feature = "physics")]
+        if workspace
+            .get::<Rig>(id)
+            .is_some_and(|rig| rig.ragdoll_enabled())
+        {
+            return;
+        }
         let delta_seconds = super::frame_delta(delta_seconds);
         let (movement, rotation) = self.motion(actions, movement_rotation, pose, delta_seconds);
         let mut horizontal = actions;
@@ -206,6 +238,10 @@ impl PlayerController {
         let Some(rig) = workspace.get::<Rig>(id) else {
             return;
         };
+        #[cfg(feature = "physics")]
+        if rig.ragdoll_enabled() {
+            return;
+        }
         let state = self.locomotion;
         #[cfg(feature = "physics")]
         let state = if !rig.anchored()
@@ -289,40 +325,31 @@ impl PlayerController {
     }
 }
 
-impl Controller for PlayerController {
-    fn input(&self) -> Option<&ControllerInput> {
-        Some(&self.input)
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn input_mut(&mut self) -> Option<&mut ControllerInput> {
-        Some(&mut self.input)
-    }
-
-    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let (actions, scroll_delta) = self.input.take_actions_and_scroll(self.sprint_scale);
-        self.step_workspace_with_actions(workspace, actions, delta_seconds);
-        if scroll_delta != 0.0 {
-            let follows_rig = self
-                .rig
-                .is_some_and(|id| workspace.camera().subject() == Some(id));
-            if follows_rig {
-                self.camera_controller.queue_subject_zoom(scroll_delta);
-            }
-        }
-    }
-
-    fn post_physics(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        self.update_animation(workspace);
-        let subject = workspace.subject().and_then(|id| {
-            workspace
-                .view::<dyn Instance>(id)
-                .and_then(|instance| instance.spatial().map(|spatial| (id, spatial.rigid_pose())))
-        });
-        self.camera_controller.step_camera_with_actions(
-            workspace.camera_mut(),
-            subject,
-            ControllerActions::default(),
-            delta_seconds,
-        );
+    #[test]
+    fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
+        let actions = ControllerActions {
+            movement: Vec3::new(0.3, 0.0, 0.4),
+            look: Vec2::ZERO,
+            movement_scale: Vec3::splat(2.5),
+        };
+        let mut rig = Rig::new();
+        let mut player = PlayerController::new(rig.id());
+        player.set_keyboard_enabled(false);
+        player.set_mouse_enabled(false);
+        player.set_touch_enabled(false);
+        let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
+        let mut camera_controller = CameraController::default().with_speed(player.speed);
+        camera_controller.set_keyboard_enabled(false);
+        camera_controller.set_mouse_enabled(false);
+        camera_controller.set_touch_enabled(false);
+        player.step_rig_with_actions(&mut rig, actions, 0.1);
+        camera_controller.step_camera_with_actions(&mut camera, None, actions, 0.1);
+        assert!(rig.position().abs_diff_eq(camera.position(), 1e-5));
+        assert!((rig.position().length() - player.speed * 2.5 * 0.5 * 0.1).abs() < 1e-5);
+        assert!(rig.forward().abs_diff_eq(Vec3::new(0.6, 0.0, -0.8), 1e-5));
     }
 }

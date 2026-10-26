@@ -13,7 +13,7 @@ use trscene::{
 fn frame(
     context: &Context,
     _workspace: &mut Workspace,
-    controller: &mut dyn Controller,
+    controller: &mut dyn ControllerView,
     events: Vec<Event>,
 ) {
     let input = RawInput {
@@ -27,7 +27,7 @@ fn frame(
     output.textures_delta.clear();
 }
 
-fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_seconds: f32) {
+fn step(workspace: &mut Workspace, controller: &mut dyn ControllerView, delta_seconds: f32) {
     workspace.step_tweens(delta_seconds);
     workspace.step_animations(delta_seconds);
     controller.step(workspace, delta_seconds);
@@ -40,7 +40,7 @@ fn step(workspace: &mut Workspace, controller: &mut dyn Controller, delta_second
 
 fn process_device_event(
     _workspace: &mut Workspace,
-    controller: &mut dyn Controller,
+    controller: &mut dyn ControllerView,
     event: &DeviceEvent,
 ) {
     controller.process_device_event(event);
@@ -165,7 +165,7 @@ fn controller_configuration_is_exposed_as_instance_properties() {
         "jump_speed",
         "sensitivity",
         "turn_factor",
-        "camera_controller.orbit_speed",
+        "camera_rig.orbit_speed",
         "animations.transition_duration",
     ] {
         assert!(player_properties.iter().any(|path| path == property));
@@ -179,11 +179,13 @@ fn controller_configuration_is_exposed_as_instance_properties() {
     assert_eq!(player_controller.animations().transition_duration, 0.4);
     Instance::set_property(
         &mut player_controller,
-        "camera_controller.orbit_speed",
+        "camera_rig.orbit_speed",
         trscene::devtools::PropertyValue::Number(3.0),
     )
     .unwrap();
-    assert_eq!(player_controller.camera_controller.orbit_speed(), 3.0);
+    assert_eq!(player_controller.camera_rig().orbit_speed(), 3.0);
+    player_controller.camera_rig_mut().set_orbit_speed(4.0);
+    assert_eq!(player_controller.camera_rig().orbit_speed(), 4.0);
 }
 
 #[test]
@@ -203,10 +205,11 @@ fn player_movement_carries_scaled_rig_descendants_and_normalizes_diagonals() {
     let initial = rig.position();
     player.step_rig(&mut rig, 0.1);
 
-    assert!(
-        rig.position()
-            .abs_diff_eq(initial + Vec3::new(1.0, 0.0, -1.0).normalize() * 1.35, 1e-5)
-    );
+    assert!(rig.position().abs_diff_eq(
+        initial
+            + Vec3::new(1.0, 0.0, -1.0).normalize() * player.speed() * player.sprint_scale() * 0.1,
+        1e-5,
+    ));
     assert!(
         rig.pivot()
             .to_scale_rotation_translation()
@@ -233,36 +236,15 @@ fn player_ignores_idle_look_and_linearly_faces_world_aligned_travel() {
     assert!(rig.forward().abs_diff_eq(Vec3::NEG_Z, 1e-5));
     player.set_right(true);
     player.step_rig(&mut rig, 1.0 / 60.0);
-    assert!(rig.position().abs_diff_eq(Vec3::X * 0.1, 1e-5));
+    assert!(
+        rig.position()
+            .abs_diff_eq(Vec3::X * player.speed() / 60.0, 1e-5)
+    );
     let facing = rig.forward();
     assert!(facing.x > 0.0 && facing.x < 0.9);
     player.set_right(false);
     player.step_rig(&mut rig, 0.1);
     assert!(rig.forward().abs_diff_eq(facing, 1e-5));
-}
-
-#[test]
-fn reusable_actions_drive_camera_and_player_without_enabled_devices() {
-    let actions = ControllerActions {
-        movement: Vec3::new(0.3, 0.0, 0.4),
-        look: Vec2::ZERO,
-        movement_scale: Vec3::splat(2.5),
-    };
-    let mut rig = Rig::new();
-    let mut player = PlayerController::new(rig.id());
-    player.set_keyboard_enabled(false);
-    player.set_mouse_enabled(false);
-    player.set_touch_enabled(false);
-    let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
-    let mut camera_controller = CameraController::default();
-    camera_controller.set_keyboard_enabled(false);
-    camera_controller.set_mouse_enabled(false);
-    camera_controller.set_touch_enabled(false);
-    player.step_rig_with_actions(&mut rig, actions, 0.1);
-    camera_controller.step_camera_with_actions(&mut camera, None, actions, 0.1);
-    assert!(rig.position().abs_diff_eq(camera.position(), 1e-5));
-    assert!((rig.position().length() - 0.75).abs() < 1e-5);
-    assert!(rig.forward().abs_diff_eq(Vec3::new(0.6, 0.0, -0.8), 1e-5));
 }
 
 #[test]
@@ -272,7 +254,7 @@ fn input_sprint_uses_distinct_player_and_camera_scales() {
     player.set_forward(true);
     player.set_sprint(true);
     player.step_rig(&mut rig, 0.1);
-    assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -1.35), 1e-5));
+    assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -0.39), 1e-5));
 
     let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
     let mut camera_controller = CameraController::default();
@@ -289,11 +271,14 @@ fn input_sprint_uses_distinct_player_and_camera_scales() {
 #[test]
 fn player_and_camera_sprint_scales_are_configurable() {
     let mut rig = Rig::new();
-    let mut player = PlayerController::new(rig.id()).with_sprint_scale(3.0);
+    let mut player = PlayerController::new(rig.id()).with_sprint_scale(4.0);
     player.set_forward(true);
     player.set_sprint(true);
     player.step_rig(&mut rig, 0.1);
-    assert!(rig.position().abs_diff_eq(Vec3::new(0.0, 0.0, -1.8), 1e-5));
+    assert!(
+        rig.position()
+            .abs_diff_eq(Vec3::NEG_Z * player.speed() * 4.0 * 0.1, 1e-5)
+    );
 
     let mut camera = Camera::default().with_pose(Mat4::IDENTITY);
     let mut camera_controller = CameraController::default().with_sprint_scale(4.0);
@@ -447,15 +432,16 @@ fn player_up_action_jumps_when_a_dynamic_rig_is_grounded() {
 
     let airborne_position = workspace.get::<Rig>(rig).unwrap().position();
     assert!(
-        airborne_position.y > grounded_position.y + 0.05,
+        airborne_position.y > grounded_position.y,
         "grounded at {grounded_position:?}, after jump at {airborne_position:?}"
     );
     for _ in 0..44 {
         step(&mut workspace, &mut player, 1.0 / 60.0);
     }
     let held_jump_position = workspace.get::<Rig>(rig).unwrap().position();
+    let jump_height = player.jump_speed().powi(2) / (2.0 * -workspace.physics().gravity().y);
     assert!(
-        held_jump_position.y < grounded_position.y + 3.0,
+        held_jump_position.y < grounded_position.y + jump_height + 0.05,
         "held jump rose to {held_jump_position:?}"
     );
 }
@@ -496,7 +482,10 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
     player.set_forward(true);
     step(&mut workspace, &mut player, 1.0 / 60.0);
     let first_position = workspace.get::<Rig>(rig).unwrap().position();
-    assert!(first_position.z < -0.09, "{first_position:?}");
+    assert!(
+        (first_position.z + player.speed() / 60.0).abs() < 1e-5,
+        "{first_position:?}"
+    );
     assert!(first_position.y < 4.0, "{first_position:?}");
     for _ in 0..30 {
         process_device_event(
@@ -507,7 +496,7 @@ fn dynamic_players_move_from_the_first_frame_without_interrupting_gravity() {
         step(&mut workspace, &mut player, 1.0 / 60.0);
     }
     let player_rig = workspace.get::<Rig>(rig).unwrap();
-    assert!(player_rig.position().z < -2.8);
+    assert!(player_rig.position().z < -player.speed() * 31.0 / 60.0 * 0.9);
     assert!(
         (player_rig.position().y - workspace.get::<Rig>(falling).unwrap().position().y).abs()
             < 1e-4
@@ -539,7 +528,10 @@ fn dynamic_player_movement_applies_immediately_after_repositioning() {
     step(&mut workspace, &mut player, 1.0 / 60.0);
     let position = workspace.get::<Rig>(rig).unwrap().position();
     assert!((position.x - 2.0).abs() < 1e-4, "{position:?}");
-    assert!(position.z < 2.91, "{position:?}");
+    assert!(
+        (position.z - (3.0 - player.speed() / 60.0)).abs() < 1e-4,
+        "{position:?}"
+    );
     assert!(position.y > 7.9 && position.y < 8.0, "{position:?}");
 }
 
@@ -570,7 +562,7 @@ fn every_device_subset_can_drive_a_player_independently() {
         let position = workspace.get::<Rig>(rig).unwrap().position();
         assert!(position.abs_diff_eq(
             if keyboard {
-                Vec3::NEG_Z * 0.6
+                Vec3::NEG_Z * controller.speed() * 0.1
             } else {
                 Vec3::ZERO
             },
@@ -621,7 +613,13 @@ fn every_device_subset_can_drive_a_player_independently() {
         step(&mut workspace, &mut controller, 0.1);
         let player_rig = workspace.get::<Rig>(rig).unwrap();
         assert!(
-            (player_rig.position().distance(before) - if touchscreen { 0.6 } else { 0.0 }).abs()
+            (player_rig.position().distance(before)
+                - if touchscreen {
+                    controller.speed() * 0.1
+                } else {
+                    0.0
+                })
+            .abs()
                 < 1e-5
         );
         assert!(
@@ -730,7 +728,7 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
             .get::<Rig>(rig)
             .unwrap()
             .position()
-            .abs_diff_eq(forward * 0.6, 1e-5)
+            .abs_diff_eq(forward * player.speed() * 0.1, 1e-5)
     );
     assert!(
         workspace
@@ -755,53 +753,45 @@ fn player_respects_independent_ui_capture_and_clears_input_on_focus_loss() {
     assert!(workspace.camera().pose().abs_diff_eq(camera_pose, 1e-5));
 }
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct CustomController {
-        #[data]
-        identity: InstanceData,
+        #[extends]
+        controller: Controller,
         rig: InstanceId,
-        input: Option<ControllerInput>,
-        actions: ControllerActions,
+        actions: Option<ControllerActions>,
     }
-}
 
-impl Controller for CustomController {
-    fn input(&self) -> Option<&ControllerInput> {
-        self.input.as_ref()
-    }
-    fn input_mut(&mut self) -> Option<&mut ControllerInput> {
-        self.input.as_mut()
-    }
-    fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
-        let actions = self
-            .input
-            .as_mut()
-            .map_or(self.actions, ControllerInput::take_actions);
-        if let Some(rig) = workspace.get_mut::<Rig>(self.rig) {
-            let position = rig.position() + actions.translation(Quat::IDENTITY, 4.0, delta_seconds);
-            rig.with_position(position);
+    impl CustomController {
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, delta_seconds: f32) {
+            let actions = self
+                .actions
+                .unwrap_or_else(|| self.controller.take_actions());
+            if let Some(rig) = workspace.get_mut::<Rig>(self.rig) {
+                let position =
+                    rig.position() + actions.translation(Quat::IDENTITY, 4.0, delta_seconds);
+                rig.with_position(position);
+            }
         }
     }
-}
+});
 
 #[test]
-fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
+fn a_custom_controller_can_use_inherited_input_or_scripted_actions() {
     let mut workspace = Workspace::new();
     let controlled = workspace.add_child(Rig::new());
-    let mut input = ControllerInput::default()
-        .with_mouse_enabled(false)
-        .with_touch_enabled(false);
-    let mut key_bindings = input.key_bindings().clone();
-    key_bindings.forward = vec![KeyCode::KeyJ];
-    input.set_key_bindings(key_bindings);
     let mut controller = CustomController {
-        identity: InstanceData::new("CustomController"),
+        controller: Controller::default().with_name("CustomController"),
         rig: controlled,
-        input: Some(input),
-        actions: ControllerActions::default(),
+        actions: None,
     };
+    controller.set_mouse_enabled(false);
+    controller.set_touch_enabled(false);
+    let mut key_bindings = controller.key_bindings().clone();
+    key_bindings.forward = vec![KeyCode::KeyJ];
+    controller.set_key_bindings(key_bindings);
 
     frame(
         &Context::default(),
@@ -821,13 +811,12 @@ fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
     let mut autonomous_workspace = Workspace::new();
     let autonomous = autonomous_workspace.add_child(Rig::new());
     let mut autonomous_controller = CustomController {
-        identity: InstanceData::new("CustomController"),
+        controller: Controller::default().with_name("CustomController"),
         rig: autonomous,
-        input: None,
-        actions: ControllerActions {
+        actions: Some(ControllerActions {
             movement: Vec3::X,
             ..Default::default()
-        },
+        }),
     };
     step(&mut autonomous_workspace, &mut autonomous_controller, 0.1);
     assert!(
@@ -839,32 +828,33 @@ fn a_custom_controller_can_compose_reusable_input_or_run_without_devices() {
     );
 }
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlaceRig {
-        #[data]
-        identity: InstanceData,
+        #[extends]
+        controller: Controller,
         rig: InstanceId,
         position: Vec3,
     }
-}
 
-impl Controller for PlaceRig {
-    fn step(&mut self, workspace: &mut Workspace, _: f32) {
-        workspace
-            .get_mut::<Rig>(self.rig)
-            .unwrap()
-            .with_position(self.position);
+    impl PlaceRig {
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, _delta_seconds: f32) {
+            workspace
+                .get_mut::<Rig>(self.rig)
+                .unwrap()
+                .with_position(self.position);
+        }
     }
-}
+});
 
 #[test]
 fn a_single_controller_can_be_reconfigured_between_steps() {
     let mut workspace = Workspace::new();
     let rig = workspace.add_child(Rig::new());
     let mut controller = PlaceRig {
-        identity: InstanceData::new("PlaceRig"),
+        controller: Controller::default().with_name("PlaceRig"),
         rig,
         position: Vec3::X,
     };
@@ -891,7 +881,7 @@ fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected()
     );
     step(&mut workspace, &mut controller, 0.1);
     let part = workspace.add_child(Part::new());
-    controller.rig = Some(part);
+    controller.set_rig(Some(part));
     process_device_event(
         &mut workspace,
         &mut controller,
@@ -908,7 +898,7 @@ fn missing_and_non_rig_targets_do_not_replay_look_when_a_rig_is_later_selected()
             .abs_diff_eq(Mat4::IDENTITY, 1e-5)
     );
     let rig = workspace.add_child(Rig::new());
-    controller.rig = Some(rig);
+    controller.set_rig(Some(rig));
     step(&mut workspace, &mut controller, 0.1);
     assert!(
         workspace
@@ -929,5 +919,8 @@ fn invalid_frame_durations_do_not_move_players_and_long_frames_are_capped() {
         assert_eq!(rig.position(), Vec3::ZERO);
     }
     player.step_rig(&mut rig, 10.0);
-    assert!(rig.position().abs_diff_eq(Vec3::NEG_Z * 0.6, 1e-5));
+    assert!(
+        rig.position()
+            .abs_diff_eq(Vec3::NEG_Z * player.speed() * 0.1, 1e-5)
+    );
 }

@@ -145,7 +145,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// The instance-tree root and owner of a [`Workspace`], [`Controller`], and renderer integrated
     /// with [`eframe`]. The default controller is a [`CameraController`].
@@ -157,7 +157,7 @@ instance! {
         instance: Box<InstanceData>,
         /// The controller driven by this engine. Defaults to a camera controller.
         #[property(borrow)]
-        pub controller: Box<dyn Controller>,
+        controller: Box<dyn ControllerView>,
         renderer: RendererHandle,
         /// The docked workspace inspector.
         #[cfg(feature = "devtools")]
@@ -175,7 +175,7 @@ instance! {
         #[cfg(feature = "bevy")]
         bevy_app: Option<bevy_app::App>,
     }
-}
+});
 
 trscene::__instance_inspection_items! {
     impl trscene::devtools::Inspect for Engine {
@@ -234,7 +234,7 @@ fn controller_delta(delta_seconds: f32) -> f32 {
 
 pub(crate) fn step_engine(
     workspace: &mut Workspace,
-    controller: &mut dyn Controller,
+    controller: &mut dyn ControllerView,
     delta_seconds: f32,
 ) {
     workspace.step_tweens(delta_seconds);
@@ -282,9 +282,7 @@ impl Engine {
 
     /// Reports whether a bound movement key is down for the controller.
     pub fn has_movement_input(&self, input: &egui::InputState) -> bool {
-        self.controller
-            .input()
-            .is_some_and(|controls| controls.has_movement_input(input))
+        self.controller.has_movement_input(input)
     }
 
     /// Advances tweens, animations, the controller, physics, and audio.
@@ -333,7 +331,9 @@ impl Engine {
         let controller = {
             let mut controller = controller;
             if web_sys::window().is_some_and(|window| window.navigator().max_touch_points() > 0) {
-                controller.set_touchscreen_detected(true);
+                controller
+                    .controller_input_mut()
+                    .set_touchscreen_detected(true);
             }
             controller
         };
@@ -498,6 +498,7 @@ impl Engine {
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
         let _ = config.env_logger;
 
+        #[cfg(not(all(target_family = "wasm", not(target_os = "wasi"))))]
         let wgpu_options_customized = config.wgpu_options.is_some();
         let mut wgpu_options = egui_wgpu::WgpuConfiguration::default();
         if let Some(configure) = config.wgpu_options {
@@ -607,7 +608,7 @@ impl Engine {
     }
 }
 
-fn process_engine_input(controller: &mut dyn Controller, context: &egui::Context) -> f32 {
+fn process_engine_input(controller: &mut dyn ControllerView, context: &egui::Context) -> f32 {
     let delta = context.input(|input| input.stable_dt);
     let delta = if delta.is_finite() {
         delta.clamp(0.0, 0.1)
@@ -787,20 +788,24 @@ mod tests {
     fn native_window_defaults_to_maximized_unless_sized() {
         let default = Terrarium::default();
         let default_viewport = native_viewport(
-            &default.title,
+            default.title(),
             default.size.unwrap_or(DEFAULT_WINDOW_SIZE),
             default.size.is_some(),
         );
+        assert_eq!(default_viewport.title.as_deref(), Some("App"));
         assert_eq!(default_viewport.maximized, Some(true));
         assert_eq!(default_viewport.fullscreen, None);
         assert_eq!(default_viewport.inner_size, None);
 
-        let sized = Terrarium::default().with_size([960, 540]);
+        let sized = Terrarium::default()
+            .with_title("Terrarium")
+            .with_size([960, 540]);
         let sized_viewport = native_viewport(
-            &sized.title,
+            sized.title(),
             sized.size.unwrap_or(DEFAULT_WINDOW_SIZE),
             sized.size.is_some(),
         );
+        assert_eq!(sized_viewport.title.as_deref(), Some("Terrarium"));
         assert_eq!(sized_viewport.fullscreen, None);
         assert_eq!(sized_viewport.inner_size, Some(egui::vec2(960.0, 540.0)));
     }
@@ -1055,7 +1060,7 @@ impl DerefMut for Engine {
     }
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// The primary entry point for configuring and running a Terrarium application.
     pub struct Terrarium {
@@ -1069,13 +1074,13 @@ instance! {
         #[property(borrow)]
         bevy_app: Option<bevy_app::App>,
         /// The application title on native platforms.
-        #[property(default = "App".to_owned(), into)]
+        #[property(default = "App".to_owned(), borrow, into)]
         title: String,
         /// Explicit window size. An unset size uses a maximized native window and the default fallback size.
         #[property(default = None, into)]
         size: Option<[u32; 2]>,
         #[cfg(all(target_family = "wasm", not(target_os = "wasi")))]
-        #[property(default = "app".to_owned(), into)]
+        #[property(default = "app".to_owned(), borrow, into)]
         canvas_id: String,
         /// Optional one-shot wgpu configuration callback.
         #[property(borrow, default = None)]
@@ -1095,7 +1100,7 @@ instance! {
         #[property(default = cfg!(feature = "default-fonts"))]
         bundled_fonts: bool,
     }
-}
+});
 
 impl Terrarium {
     /// Creates a Terrarium application launcher with an empty workspace and default settings.

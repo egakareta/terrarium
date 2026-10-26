@@ -15,24 +15,25 @@ use terrarium::{
 #[derive(Resource)]
 struct Subject(InstanceId);
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlacePartController {
-        #[data]
-        identity: InstanceData,
+        #[extends]
+        controller: Controller,
         part: InstanceId,
     }
-}
 
-impl Controller for PlacePartController {
-    fn step(&mut self, workspace: &mut Workspace, _: f32) {
-        workspace
-            .get_mut::<Part>(self.part)
-            .unwrap()
-            .with_position(Vec3::X);
+    impl PlacePartController {
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, _delta_seconds: f32) {
+            workspace
+                .get_mut::<Part>(self.part)
+                .unwrap()
+                .with_position(Vec3::X);
+        }
     }
-}
+});
 
 #[test]
 fn workspace_tweens_follow_bevy_virtual_time() {
@@ -223,7 +224,7 @@ fn attached_app_runs_until_exit_and_returns_the_edited_scene() -> Result<(), App
                     .unwrap()
                     .insert_resource(Subject(subject));
                 engine.set_controller(Box::new(PlacePartController {
-                    identity: InstanceData::new("PlacePartController"),
+                    controller: Controller::default().with_name("PlacePartController"),
                     part: subject,
                 }));
                 Ok::<_, AppCreationError>(SceneCallbacks { subject })

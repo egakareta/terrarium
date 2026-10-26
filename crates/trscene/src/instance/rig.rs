@@ -4,6 +4,16 @@ use crate::{glam::*, *};
 
 #[cfg(feature = "meshpart")]
 mod gltf;
+#[cfg(all(
+    feature = "meshpart",
+    feature = "physics",
+    feature = "default-player-rig"
+))]
+pub(crate) use gltf::add_soft_tissue;
+#[cfg(feature = "physics")]
+pub(crate) mod physics;
+#[cfg(feature = "physics")]
+pub use physics::{RigJoint, RigJointMotion, RigPhysicsError};
 
 #[derive(Clone, Debug)]
 struct AnimationTransition {
@@ -12,15 +22,16 @@ struct AnimationTransition {
     elapsed: f32,
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// A spatial assembly whose descendants move together when its pivot changes.
     ///
     /// Children retain world-space pivots, as elsewhere in the scene tree. All
     /// [`PVInstanceExt`] setters on a rig carry its spatial descendants with it.
-    /// With physics enabled, the outermost rig owns a single body with colliders
-    /// from its descendant parts. The rig's anchored state controls that body;
-    /// descendant parts retain their individual collision flags and shapes.
+    /// With physics enabled, the outermost rig owns its descendants' colliders.
+    /// By default they share one body. `Rig::set_physics_joints` splits selected
+    /// subtrees into ragdoll or spring-driven bodies. The rig's anchored state
+    /// controls the root body, not its joints.
     #[derive(Clone, Debug)]
     pub struct Rig {
         #[data]
@@ -33,6 +44,10 @@ instance! {
         animation: Option<AnimationPlayer>,
         transition: Option<AnimationTransition>,
         clips: BTreeMap<String, AnimationClip>,
+        #[cfg(feature = "physics")]
+        pub(crate) joint_physics: physics::RigPhysics,
+        #[cfg(feature = "physics")]
+        pub(crate) ragdoll: Option<physics::RagdollPreset>,
         #[cfg(feature = "meshpart")]
         skins: std::sync::Arc<[gltf::SkinBinding]>,
     }
@@ -59,6 +74,48 @@ instance! {
         /// Creates an anchored rig at the identity transform.
         pub fn new() -> Self {
             Self::default()
+        }
+
+        /// Replaces the outermost rig's simulated joints, binding their current rest pose.
+        ///
+        /// Each target owns its subtree up to the next configured joint, and connects
+        /// to its nearest configured ancestor or the rig root. Targets must be unique,
+        /// unambiguous spatial paths. Invalid configuration leaves the rig unchanged.
+        /// An empty collection restores single-body physics on the next physics step.
+        ///
+        /// Jiggle follows the rest pose or animation; ragdoll ignores animation forces.
+        /// Soft-tissue joints use translation springs without pushing the skeleton.
+        ///
+        /// Collision shapes come from descendant parts and their collision flags.
+        /// Colliderless joint bodies use unit mass and principal inertia.
+        ///
+        /// Root pivot edits teleport the assembly; use body velocities or forces for inertia.
+        /// Rebind joints after changing the rig's scale.
+        #[cfg(feature = "physics")]
+        pub fn set_physics_joints(&mut self, joints: Vec<RigJoint>) -> Result<(), RigPhysicsError> {
+            physics::configure(self, joints)
+        }
+
+        /// Returns this rig's joint configuration.
+        #[cfg(feature = "physics")]
+        pub fn physics_joints(&self) -> &[RigJoint] {
+            &self.joint_physics.joints
+        }
+
+        /// Reports whether this rig's built-in ragdoll preset is active.
+        #[cfg(feature = "physics")]
+        pub fn ragdoll_enabled(&self) -> bool {
+            self.ragdoll.as_ref().is_some_and(|preset| preset.enabled)
+        }
+
+        /// Toggles a built-in player's ragdoll, retaining soft-tissue simulation.
+        ///
+        /// Animation playback is held while ragdolled. Disabling restores an upright
+        /// pose at the pelvis position and resumes playback. Custom rigs without a
+        /// preset return [`RigPhysicsError::RagdollUnavailable`].
+        #[cfg(feature = "physics")]
+        pub fn set_ragdoll_enabled(&mut self, enabled: bool) -> Result<(), RigPhysicsError> {
+            physics::set_ragdoll(self, enabled)
         }
 
         /// Starts an animation and immediately applies its current pose.
@@ -104,7 +161,9 @@ instance! {
                     if matches.next().is_some() {
                         return Err(AnimationError::AmbiguousTarget(track.target().to_vec()));
                     }
-                    parent_pivot = instance.spatial().map_or(parent_pivot, |spatial| spatial.world_pivot());
+                    parent_pivot = instance
+                        .spatial()
+                        .map_or(parent_pivot, |spatial| spatial.world_pivot());
                     instance = child.as_ref();
                 }
                 let Some(pivot) = instance.spatial().map(|spatial| spatial.world_pivot()) else {
@@ -124,6 +183,8 @@ instance! {
                 duration: duration_seconds,
                 elapsed: 0.0,
             });
+            #[cfg(feature = "physics")]
+            physics::restore_targets(self);
             apply_animation(self, &player);
             self.animation = Some(player);
             Ok(())
@@ -154,6 +215,12 @@ instance! {
         ///
         /// [`Workspace::step_animations`] advances every rig in a workspace.
         pub fn step_animation(&mut self, delta_seconds: f32) {
+            #[cfg(feature = "physics")]
+            if self.ragdoll_enabled() {
+                return;
+            }
+            #[cfg(feature = "physics")]
+            physics::restore_targets(self);
             let Some(mut player) = self.animation.take() else {
                 return;
             };
@@ -161,7 +228,8 @@ instance! {
                 player.update(delta_seconds);
                 if let Some(transition) = &mut self.transition {
                     if !player.is_paused() && delta_seconds.is_finite() && delta_seconds > 0.0 {
-                        transition.elapsed = (transition.elapsed + delta_seconds).min(transition.duration);
+                        transition.elapsed =
+                            (transition.elapsed + delta_seconds).min(transition.duration);
                     }
                     if transition.elapsed >= transition.duration {
                         self.transition = None;
@@ -172,7 +240,7 @@ instance! {
             self.animation = Some(player);
         }
     }
-}
+});
 
 fn apply_animation<T: RigExt + ?Sized>(rig: &mut T, player: &AnimationPlayer) {
     let pivot = rig.pivot();
@@ -181,8 +249,23 @@ fn apply_animation<T: RigExt + ?Sized>(rig: &mut T, player: &AnimationPlayer) {
     for child in rig.as_instance_mut().children_mut() {
         apply_tracks(child, pivot, &mut path, player, transition.as_ref());
     }
+    #[cfg(feature = "physics")]
+    physics::capture_targets(rig);
     #[cfg(feature = "meshpart")]
     gltf::update_skins(rig);
+}
+
+#[cfg(all(feature = "physics", feature = "meshpart"))]
+pub(crate) fn update_physics_skins(instance: &mut dyn Instance, mut articulated: bool) {
+    if let Some(rig) = instance.view_mut::<Rig>(instance.id()) {
+        articulated |= !rig.physics_joints().is_empty();
+        if articulated {
+            gltf::update_skins(rig);
+        }
+    }
+    for child in instance.children_mut() {
+        update_physics_skins(child, articulated);
+    }
 }
 
 fn apply_tracks(

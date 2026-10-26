@@ -4,7 +4,7 @@ use euphorium::*;
 
 use crate::{glam::Vec3, scene::audio::velocity, *};
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// Authored audio properties shared by sound instances.
     #[doc(hidden)]
@@ -36,7 +36,7 @@ instance! {
         #[cfg_attr(feature = "devtools", inspect(readonly))]
         spatial_settings: SpatialSound,
     }
-}
+});
 
 #[derive(Debug)]
 enum PlaybackCommand {
@@ -63,7 +63,7 @@ impl Drop for SoundPlayback {
     }
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// A scene-tree sound backed by Euphorium.
     ///
@@ -163,7 +163,8 @@ instance! {
             if self.playback.is_none() {
                 self.playback = Some(SoundPlayback {
                     // Instance display names need not be unique or valid mixer paths.
-                    sound: soundscape.create_sound(format!("{:?}", self.id()), SoundSource::empty())?,
+                    sound: soundscape
+                        .create_sound(format!("{:?}", self.id()), SoundSource::empty())?,
                     applied: None,
                     parent: None,
                     previous_position: None,
@@ -229,7 +230,7 @@ instance! {
             Ok(())
         }
     }
-}
+});
 
 impl Clone for Sound {
     fn clone(&self) -> Self {

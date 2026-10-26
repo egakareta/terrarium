@@ -1,6 +1,6 @@
 use crate::*;
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// A render-only instance that outlines its parent and the parent's siblings.
     ///
@@ -58,7 +58,7 @@ instance! {
             Self::new(OutlineMode::Stencil)
         }
     }
-}
+});
 
 #[cfg(test)]
 mod tests {

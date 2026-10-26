@@ -1,30 +1,25 @@
 use crate::*;
 
-instance! {
-    #[instance(inspect = false)]
+instance!({
     /// A named, transformable scene node with optional collision metadata.
     ///
     /// `BasePart` is useful as a parent for custom instance hierarchies. A visible
     /// [`Part`] builds on it with primitive geometry.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct BasePart {
-        #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[data]
         pub(crate) instance: InstanceData,
-        #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[compose]
         pub(crate) pv_instance: PVInstance,
         /// Directional materials used when rendering this part.
         #[property(borrow)]
-        pub(crate) material_slots: MeshMaterialSlots,
+        material_slots: MeshMaterialSlots,
         /// Tint applied when rendering this part.
         #[property(default = Color3::WHITE)]
         color: Color3,
         /// Transparency, where `0.0` is opaque and `1.0` is invisible. Values
         /// are clamped to `0.0..=1.0`; non-finite values become `0.0`.
         #[property(default = 0.0, sanitize = sanitize_transparency)]
-        #[cfg_attr(feature = "devtools", inspect(setter = with_transparency))]
         transparency: f32,
         /// Whether a physics system should treat this part as immovable. The
         /// default physics integration creates a fixed body when this is `true`
@@ -40,11 +35,6 @@ instance! {
     }
 
     impl BasePart {
-        /// Returns mutable directional material storage.
-        pub fn material_slots_mut(&mut self) -> &mut MeshMaterialSlots {
-            &mut self.material_slots
-        }
-
         /// Returns a material when all directional slots have the same effective value.
         /// Unassigned slots use [`Material::default()`].
         pub fn material(&self) -> Option<&Material> {
@@ -78,7 +68,7 @@ instance! {
             Self::default()
         }
     }
-}
+});
 
 fn sanitize_transparency(value: f32) -> f32 {
     if value.is_finite() {
@@ -88,13 +78,10 @@ fn sanitize_transparency(value: f32) -> f32 {
     }
 }
 
-instance! {
-    #[instance(inspect = false)]
+instance!({
     /// A visible scene object rendered with one of the built-in primitive shapes.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Part {
-        #[cfg_attr(feature = "devtools", inspect(flatten))]
         #[extends]
         basepart: BasePart,
         /// Primitive geometry used when the part is rendered.
@@ -108,7 +95,7 @@ instance! {
             Self::default()
         }
     }
-}
+});
 
 #[cfg(test)]
 mod tests {

@@ -19,7 +19,7 @@ struct CustomInstance {
 
 struct TestDevtoolsHost {
     workspace: Workspace,
-    controller: Box<dyn Controller>,
+    controller: Box<dyn ControllerView>,
 }
 
 impl TestDevtoolsHost {
@@ -41,9 +41,7 @@ impl DevtoolsHost for TestDevtoolsHost {
     }
 
     fn has_movement_input(&mut self, input: &egui::InputState) -> bool {
-        self.controller
-            .input()
-            .is_some_and(|controls| controls.has_movement_input(input))
+        self.controller.has_movement_input(input)
     }
 
     fn render_scene(&mut self, ui: &mut egui::Ui, _selected: &[InstanceId]) {
@@ -247,7 +245,11 @@ fn controller_focus_uses_custom_movement_bindings() {
             host.controller = Box::new(player);
             Some(rig)
         } else {
-            let controller = host.controller.downcast_mut::<CameraController>().unwrap();
+            let controller = host
+                .controller
+                .as_instance_mut()
+                .downcast_mut::<CameraController>()
+                .unwrap();
             let mut key_bindings = controller.key_bindings().clone();
             key_bindings.forward = vec![KeyCode::ArrowUp];
             controller.set_key_bindings(key_bindings);
@@ -286,6 +288,7 @@ fn disabled_camera_input_and_sprint_alone_preserve_explorer_focus() {
         devtools.set_visible(true);
         let mut host = TestDevtoolsHost::new(Workspace::new());
         host.controller
+            .as_instance_mut()
             .downcast_mut::<CameraController>()
             .unwrap()
             .set_keyboard_enabled(keyboard_enabled);

@@ -3,11 +3,12 @@
 use trscene::{glam::*, *};
 
 #[test]
+#[cfg(feature = "default-player-rig")]
 fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
     let mut workspace = Workspace::new();
     let camera = workspace.camera().pivot();
     let mut player = PlayerController::spawn(&mut workspace);
-    let id = player.rig.unwrap();
+    let id = player.rig().unwrap();
     let rig = workspace.get_mut::<Rig>(id).unwrap();
     assert!(!rig.anchored());
     assert!(rig.position().abs_diff_eq(Vec3::ZERO, 1e-5));
@@ -21,6 +22,7 @@ fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
         movement: Vec3::Z,
         ..Default::default()
     };
+    let walking_distance = player.speed() * 0.1;
     player.step_workspace_with_actions(&mut workspace, walking, 0.1);
     workspace.step_animations(0.3);
     assert_eq!(player.animation_state(), PlayerAnimationState::Walk);
@@ -29,7 +31,7 @@ fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
             .get::<Rig>(id)
             .unwrap()
             .position()
-            .abs_diff_eq(Vec3::new(3.0, 4.0, 4.4), 1e-5)
+            .abs_diff_eq(Vec3::new(3.0, 4.0, 5.0 - walking_distance), 1e-5)
     );
     assert!(
         idle.vertices
@@ -56,7 +58,7 @@ fn default_players_move_and_animate_without_custom_assets_or_state_bindings() {
             .get::<Rig>(id)
             .unwrap()
             .position()
-            .abs_diff_eq(Vec3::new(3.0, 4.0, 2.9), 1e-5)
+            .abs_diff_eq(Vec3::new(3.0, 4.0, 5.0 - walking_distance * 3.5), 1e-5)
     );
     player.step_workspace_with_actions(&mut workspace, ControllerActions::default(), 0.1);
     workspace.step_animations(0.3);
@@ -133,10 +135,11 @@ fn imported_skins_follow_joint_poses_without_changing_the_source_or_clones() {
 }
 
 #[test]
+#[cfg(feature = "default-player-rig")]
 fn every_default_animation_produces_finite_skinned_geometry() {
     let mut workspace = Workspace::new();
     let player = PlayerController::spawn(&mut workspace);
-    let rig = workspace.get_mut::<Rig>(player.rig.unwrap()).unwrap();
+    let rig = workspace.get_mut::<Rig>(player.rig().unwrap()).unwrap();
     let mesh = rig.find_first_child::<MeshPart>("Mannequin").unwrap().0;
     let clips: Vec<_> = rig.animation_clips().values().cloned().collect();
     for clip in clips {

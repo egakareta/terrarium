@@ -7,7 +7,7 @@ and expose stored or computed properties to the devtools inspector.
 ```rust,no_run
 use terrarium::*;
 
-instance! {
+instance!({
     /// A primitive with a spring.
     #[derive(Clone, Debug)]
     pub struct SpringPart {
@@ -17,7 +17,7 @@ instance! {
         #[property(default = 20.0)]
         stiffness: f32,
     }
-}
+});
 
 fn main() {
     let spring_part = SpringPart::default().with_stiffness(30.0);
@@ -47,15 +47,15 @@ capability without an instance identity.
 ```rust,no_run
 use terrarium::*;
 
-instance! {
+instance!({
     #[derive(Clone, Debug)]
     pub struct Motor {
         #[property(default = 2.0)]
         speed: f32,
     }
-}
+});
 
-instance! {
+instance!({
     #[derive(Clone, Debug)]
     pub struct MotorPart {
         #[extends]
@@ -63,9 +63,9 @@ instance! {
         #[compose]
         motor: Motor,
     }
-}
+});
 
-instance! {
+instance!({
     #[derive(Clone, Debug)]
     pub struct Group {
         #[data]
@@ -73,7 +73,7 @@ instance! {
         #[property(default = String::new(), borrow, into)]
         label: String,
     }
-}
+});
 
 fn main() {
     let motor = Motor::default().with_speed(0.0);
@@ -99,7 +99,7 @@ property attribute accepts these options:
 | `default = expression`  | Uses the expression to initialize the field. Without an explicit initializer, fields use `Default::default()`. |
 |                         |
 | `sanitize = expression` | Calls the expression as a function on values passed to the setter.                                             |
-| `borrow`                | Makes the getter return `&T` instead of cloning and returning `T`.                                             |
+| `borrow`                | Returns `&T` from the getter and generates `<field>_mut(&mut self) -> &mut T`.                                 |
 | `into`                  | Makes the builder accept `impl Into<T>` and convert its argument. The setter still accepts `T`.                |
 
 For example:
@@ -122,7 +122,7 @@ arguments. Its signature must match the inherited method.
 ```rust,no_run
 use terrarium::*;
 
-instance! {
+instance!({
     #[derive(Clone, Debug)]
     pub struct PlanarPart {
         #[extends]
@@ -136,7 +136,7 @@ instance! {
             self.pv_instance_mut().set_pivot(pivot);
         }
     }
-}
+});
 
 fn main() {
     let planar_part = PlanarPart::default()
@@ -168,7 +168,7 @@ method. Add options to control how it is presented or validated:
 ```rust,no_run
 use terrarium::*;
 
-instance! {
+instance!({
     #[derive(Clone, Debug)]
     pub struct TransformData {
         #[data]
@@ -191,7 +191,7 @@ instance! {
             pivot.is_finite()
         }
     }
-}
+});
 
 fn main() {
     let accepts_pivot = TransformData::default().accepts_pivot(glam::Mat4::IDENTITY);
@@ -216,7 +216,7 @@ use terrarium::*;
 mod models {
     use super::*;
 
-    instance! {
+    instance!({
         #[instance(path = crate::models)]
         #[derive(Clone, Debug)]
         pub struct SpringPart {
@@ -225,10 +225,10 @@ mod models {
             #[property(default = 20.0)]
             stiffness: f32,
         }
-    }
+    });
 }
 
-instance! {
+instance!({
     #[derive(Clone, Debug)]
     pub struct WeightedSpring {
         #[extends]
@@ -236,7 +236,7 @@ instance! {
         #[property(default = 2.0)]
         mass: f32,
     }
-}
+});
 
 fn main() {
     let spring = WeightedSpring::default().with_mass(1.0);

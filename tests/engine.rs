@@ -2,24 +2,25 @@
 
 use terrarium::*;
 
-instance! {
+instance!({
     #[instance(default = false)]
     #[derive(Clone, Debug)]
     struct PlacePart {
-        #[data]
-        identity: InstanceData,
+        #[extends]
+        controller: Controller,
         part: InstanceId,
     }
-}
 
-impl Controller for PlacePart {
-    fn step(&mut self, workspace: &mut Workspace, _: f32) {
-        workspace
-            .get_mut::<Part>(self.part)
-            .unwrap()
-            .with_position(glam::Vec3::X);
+    impl PlacePart {
+        #[r#override(Controller::step)]
+        fn step(&mut self, workspace: &mut Workspace, _delta_seconds: f32) {
+            workspace
+                .get_mut::<Part>(self.part)
+                .unwrap()
+                .with_position(glam::Vec3::X);
+        }
     }
-}
+});
 
 #[test]
 fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), AppCreationError> {
@@ -37,6 +38,7 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
             assert!(
                 engine
                     .controller()
+                    .as_instance()
                     .downcast_ref::<CameraController>()
                     .is_some()
             );
@@ -48,7 +50,7 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
                 parent.id()
             };
             engine.set_controller(Box::new(PlacePart {
-                identity: InstanceData::new("PlacePart"),
+                controller: Controller::default().with_name("PlacePart"),
                 part: parent_id,
             }));
             Ok::<(), AppCreationError>(())
@@ -65,7 +67,7 @@ fn engine_owns_the_instance_tree_and_scopes_workspace_access() -> Result<(), App
     assert_eq!(controller.parent(), None);
     assert!(controller.children().is_empty());
     assert!(root.view::<dyn Instance>(controller_id).is_none());
-    let cloned_controller = controller.clone_box();
+    let cloned_controller = controller.as_instance().clone_box();
     assert_ne!(cloned_controller.id(), controller_id);
     assert!(root.is_a::<Engine>());
     assert_eq!(root.class_name(), "Engine");

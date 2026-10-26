@@ -3,8 +3,29 @@ opt-level = 1
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
-opt-level = 3
+opt-level = 0
 debug = 0
+
+[profile.dev.package.egui]
+opt-level = 3
+
+[profile.dev.package.epaint]
+opt-level = 3
+
+[profile.dev.package.parry3d]
+opt-level = 3
+
+[profile.dev.package.rapier3d]
+opt-level = 3
+
+[profile.dev.package.wgpu]
+opt-level = 3
+
+[profile.dev.package.wgpu-core]
+opt-level = 3
+
+[profile.dev.package.wgpu-hal]
+opt-level = 3
 
 [target.wasm32-unknown-unknown]
 rustflags = [
@@ -28,5 +49,5 @@ rustflags = [
   "link-arg=--export=__tls_base",
 ]
 
-[unstable]
-build-std = ["std", "panic_abort"]
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld.exe"

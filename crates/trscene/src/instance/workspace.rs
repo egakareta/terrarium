@@ -50,7 +50,7 @@ pub enum WorkspacePreset {
     Baseplate,
 }
 
-instance! {
+instance!({
     #[instance(default = false, inspect = false)]
     /// The 3D root that owns its child [`Instance`] values, mesh assets, CPU textures, and active camera.
     #[derive(Debug)]
@@ -85,7 +85,7 @@ instance! {
         /// Scene-wide lighting configuration.
         pub lighting: Lighting,
     }
-}
+});
 
 impl Workspace {
     /// Updates the indexed address after transferring this workspace between runtime owners.
@@ -324,10 +324,14 @@ impl Workspace {
             PhysicsInstance::collect(child.as_ref(), &mut instances);
         }
         let transforms = self.physics.step(&instances, delta_seconds);
-        for (id, transform) in transforms {
+        for (id, transform, articulated) in transforms {
             if let Some(instance) = self.view_mut::<dyn Instance>(id) {
-                apply_transform(instance, transform);
+                apply_transform(instance, transform, articulated);
             }
+        }
+        #[cfg(feature = "meshpart")]
+        for child in self.children_mut() {
+            crate::instance::rig::update_physics_skins(child, false);
         }
     }
 

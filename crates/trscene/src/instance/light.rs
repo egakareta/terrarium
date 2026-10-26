@@ -1,6 +1,6 @@
 use crate::*;
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// Properties shared by all local light types.
     ///
@@ -25,9 +25,9 @@ instance! {
         #[property]
         shadows: bool,
     }
-}
+});
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// An omnidirectional light positioned at the center of its nearest physical
     /// ancestor.
@@ -45,7 +45,7 @@ instance! {
         #[property(default = 8.0)]
         range: f32,
     }
-}
+});
 
 impl PointLight {
     /// Creates a white point light with brightness `1`, range `8`, and shadows
@@ -55,7 +55,7 @@ impl PointLight {
     }
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// A cone light emitted from one face of its nearest physical ancestor.
     ///
@@ -74,7 +74,7 @@ instance! {
         #[property(default = 90.0)]
         angle: f32,
     }
-}
+});
 
 impl SpotLight {
     /// Creates a white front-facing spot light with brightness `1`, a
@@ -87,7 +87,7 @@ impl SpotLight {
     }
 }
 
-instance! {
+instance!({
     #[instance(inspect = false)]
     /// An area light emitted across one face of its nearest physical ancestor.
     ///
@@ -106,7 +106,7 @@ instance! {
         #[property(default = 90.0)]
         angle: f32,
     }
-}
+});
 
 impl SurfaceLight {
     /// Creates a white front-facing surface light with brightness `1`, a

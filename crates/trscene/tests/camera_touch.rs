@@ -1,9 +1,9 @@
 use trscene::{
-    Camera, CameraController, Controller, ControllerInputExt, Instance, PVInstanceExt, Part,
     egui::{
         self, Context, Event, Pos2, RawInput, Rect, TouchDeviceId, TouchId, TouchPhase, pos2, vec2,
     },
-    glam::Mat4,
+    glam::*,
+    *,
 };
 
 fn touch(device: u64, id: u64, phase: TouchPhase, position: Pos2) -> Event {
@@ -68,8 +68,11 @@ fn joystick_matches_keyboard_movement_in_free_and_subject_modes() {
             keyboard_controller.set_left(direction.x < 0.0);
             keyboard_controller.set_right(direction.x > 0.0);
             if subject.is_some() && direction.x != 0.0 && direction.y != 0.0 {
-                keyboard_controller.speed *= std::f32::consts::FRAC_1_SQRT_2;
-                keyboard_controller.orbit_speed *= std::f32::consts::FRAC_1_SQRT_2;
+                keyboard_controller
+                    .set_speed(keyboard_controller.speed() * std::f32::consts::FRAC_1_SQRT_2);
+                keyboard_controller.set_orbit_speed(
+                    keyboard_controller.orbit_speed() * std::f32::consts::FRAC_1_SQRT_2,
+                );
             }
             let mut touch_camera = Camera::default();
             let mut keyboard_camera = touch_camera.clone();
