@@ -8,6 +8,7 @@ pub use trdevtools;
 pub use tregui::egui_phosphor;
 pub use trfont;
 pub use trmacros::with_workspace;
+pub use trnetwork::{self, Client, ClientError, ClientStatus, Server, TICK_DURATION};
 pub use trrender;
 pub use trscene;
 pub use winit;

@@ -21,6 +21,7 @@ log = "0.4"
 slotmap = "1"
 trdevtools = { workspace = true, optional = true }
 trmacros = { workspace = true, features = ["engine"] }
+trnetwork = { workspace = true }
 tregui = { workspace = true, features = ["phosphor"], optional = true }
 trfont = { workspace = true }
 trrender = { workspace = true }
@@ -52,6 +53,7 @@ default-materials = ["trrender/default-materials", "trscene/default-materials"]
 default-skybox = ["trrender/default-skybox", "trscene/default-skybox"]
 devtools = ["dep:trdevtools", "phosphor", "trscene/devtools"]
 eframe-default-fonts = ["eframe/default_fonts"]
+network = ["trnetwork/websocket"]
 phosphor = ["dep:tregui"]
 x11 = ["eframe/x11", "winit/x11"]
 
