@@ -62,8 +62,6 @@ def main():
                 "--release",
                 "--locked",
                 "--all-features",
-                "--package",
-                package["name"],
                 "--target",
                 "wasm32-unknown-unknown",
                 "--example",
