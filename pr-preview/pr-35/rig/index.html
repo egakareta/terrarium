@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>this is terrarium</title>
+    <link rel="icon" href="/terrarium/pr-preview/pr-35/rig/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
+    
+<script type="module">
+import init, * as bindings from '/terrarium/pr-preview/pr-35/rig/terrarium-1cc54c46a0a2d5b7.js';
+const wasm = await init({ module_or_path: '/terrarium/pr-preview/pr-35/rig/terrarium-a126f3963e045316_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #101014;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  <link rel="modulepreload" href="/terrarium/pr-preview/pr-35/rig/terrarium-1cc54c46a0a2d5b7.js" crossorigin="anonymous" integrity="sha384-OxhQPbV9RpkHeVFSu9Ahj6r8jsXCQpcX2hjkVELUeWO4T7H1/E8Iev0oyE1ezUjS"><link rel="modulepreload" href="/terrarium/pr-preview/pr-35/rig/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/pr-preview/pr-35/rig/terrarium-a126f3963e045316_bg.wasm" crossorigin="anonymous" integrity="sha384-3+NJqKtX6Yd1jpX3apqt/JAEl7M5Zec3lCadyhWqz5d0BkB0d+SV1ak18/5T5V20" as="fetch" type="application/wasm"></head>
+  <body>
+    <canvas id="app"></canvas>
+  </body>
+</html>
