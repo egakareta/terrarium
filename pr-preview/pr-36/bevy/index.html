@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>this is terrarium</title>
+    <link rel="icon" href="/terrarium/pr-preview/pr-36/bevy/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
+    
+<script type="module">
+import init, * as bindings from '/terrarium/pr-preview/pr-36/bevy/terrarium-624a01af3b701bf1.js';
+const wasm = await init({ module_or_path: '/terrarium/pr-preview/pr-36/bevy/terrarium-874fd54dd4e914c8_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #101014;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+    </style>
+  <link rel="modulepreload" href="/terrarium/pr-preview/pr-36/bevy/terrarium-624a01af3b701bf1.js" crossorigin="anonymous" integrity="sha384-Jj4OR2d5ugizcvpP+ae4/NG5PfzJQ0drS2gDKykOR+pd9wn9HfXr1AeTlvqu0Euy"><link rel="modulepreload" href="/terrarium/pr-preview/pr-36/bevy/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/pr-preview/pr-36/bevy/terrarium-874fd54dd4e914c8_bg.wasm" crossorigin="anonymous" integrity="sha384-N6Rt6ypiSRjV76mSNoa6lwfpBcVn+5Tbwah70JdqZuLtmeJWFTATQYYduR0aIlTm" as="fetch" type="application/wasm"></head>
+  <body>
+    <canvas id="app"></canvas>
+  </body>
+</html>
