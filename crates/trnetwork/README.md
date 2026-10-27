@@ -1,7 +1,7 @@
 # trnetwork
 
-A tick-only prototype of Terrarium's client/server boundary. Scenes and physics
-still run locally; only the server tick crosses the connection.
+A prototype of Terrarium's client/server boundary. The server currently publishes
+a tick counter; scenes and physics still run locally.
 
 `Client::default()` owns an integrated `Server` and works on native and browser
 targets without sockets or background threads. Call `Client::step(elapsed)` each

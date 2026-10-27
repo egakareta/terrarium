@@ -9,7 +9,7 @@ mod server;
 /// The fixed interval between server ticks, approximately 60 Hz.
 pub const TICK_DURATION: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
-/// A clock that advances independently of rendering and owns the authoritative tick.
+/// An authoritative server with a fixed update interval.
 #[derive(Debug, Default)]
 pub struct Server {
     tick: u64,
@@ -52,7 +52,7 @@ pub enum ClientStatus {
     Disconnected,
 }
 
-/// A failure to connect to a server or receive its ticks.
+/// A failure to connect to or communicate with a server.
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     /// The WebSocket transport failed.
@@ -76,7 +76,7 @@ enum Connection {
     },
 }
 
-/// A client's copy of the most recently received server tick.
+/// A client connected to an integrated or remote server.
 ///
 /// The default connection owns an integrated server. With `websocket` enabled,
 /// `Client::connect` creates a remote connection instead.

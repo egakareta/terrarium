@@ -77,16 +77,16 @@ jobs:
           bootstrap_args: "--update"
       - uses: Swatinem/rust-cache@v2
       - run: mise run test:wasm
-      - name: Check tick networking feature combinations on web
+      - name: Check server connection feature combinations on web
         run: |
           cargo check -p trnetwork --target wasm32-unknown-unknown --locked
           cargo check -p trnetwork --all-features --target wasm32-unknown-unknown --locked
           cargo check --example network --features network --target wasm32-unknown-unknown --locked
         env:
           CARGO_UNSTABLE_BUILD_STD: std,panic_abort
-      - name: Build standalone tick server
+      - name: Build standalone server
         run: cargo build -p trnetwork --features server --example server --locked
-      - name: Test integrated and remote ticks in browser
+      - name: Test integrated and remote server connections in browser
         run: |
           target/debug/examples/server &
           server_pid=$!

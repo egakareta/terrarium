@@ -158,7 +158,7 @@ instance!({
         /// The controller driven by this engine. Defaults to a camera controller.
         #[property(borrow)]
         controller: Box<dyn ControllerView>,
-        /// The tick connection. An integrated server is created by default.
+        /// The server connection. An integrated server is created by default.
         #[property(borrow)]
         client: Client,
         renderer: RendererHandle,
@@ -288,7 +288,7 @@ impl Engine {
         self.controller.has_movement_input(input)
     }
 
-    /// Updates the tick connection, tweens, animations, controller, physics, and audio.
+    /// Updates the server connection, tweens, animations, controller, physics, and audio.
     ///
     /// The controller runs after animation and before physics, with a post-physics
     /// phase for behavior such as following a dynamic camera subject. Its frame

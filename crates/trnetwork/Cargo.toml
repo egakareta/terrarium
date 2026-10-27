@@ -2,7 +2,7 @@
 name = "trnetwork"
 version.workspace = true
 edition.workspace = true
-description = "Integrated and WebSocket tick servers for Terrarium."
+description = "Integrated and remote server connections for Terrarium."
 documentation.workspace = true
 repository.workspace = true
 license.workspace = true
