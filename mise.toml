@@ -8,6 +8,7 @@ clang = "latest"
 "github:wasm-bindgen/wasm-pack" = "latest"
 lefthook = "latest"
 oxfmt = "latest"
+python = "3"
 rust = { version = "nightly-2026-03-12", components = ["clippy", "rustfmt", "rust-src"] }
 
 [hooks]
@@ -55,22 +56,7 @@ run = "cargo bench --workspace --benches"
 description = "Build the web examples gallery for GitHub Pages"
 dir = "{{config_root}}"
 env = { CARGO_UNSTABLE_BUILD_STD = "std,panic_abort", RUSTFLAGS = "" }
-run = """
-set -eu
-mkdir -p examples/dist
-for example in app gltf outlines physics simple viewport; do
-  cargo build --release --locked --all-features \\
-    --target wasm32-unknown-unknown --example "$example" --timings
-  mkdir -p "examples/dist/.timings/$example"
-  cp "${CARGO_TARGET_DIR:-target}/cargo-timings/cargo-timing.html" \\
-    "examples/dist/.timings/$example/index.html"
-  trunk build --release --locked --all-features --example "$example" \\
-    --dist "examples/dist/$example" \\
-    --public-url "${PAGES_BASE_PATH:-}/$example/"
-done
-cp assets/web/examples.html examples/dist/index.html
-cp assets/favicon.svg examples/dist/favicon.svg
-"""
+run = "python3 scripts/build-examples-web.py"
 
 # this lets you run the cli with `terrarium ...`
 [env]
