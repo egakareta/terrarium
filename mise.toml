@@ -8,7 +8,6 @@ clang = "latest"
 "github:wasm-bindgen/wasm-pack" = "latest"
 lefthook = "latest"
 oxfmt = "latest"
-python = "3"
 rust = { version = "nightly-2026-03-12", components = ["clippy", "rustfmt", "rust-src"] }
 
 [hooks]
@@ -55,8 +54,8 @@ run = "cargo bench --workspace --benches"
 [tasks."build:examples:web"]
 description = "Build the web examples gallery for GitHub Pages"
 dir = "{{config_root}}"
-env = { CARGO_UNSTABLE_BUILD_STD = "std,panic_abort", RUSTFLAGS = "" }
-run = "python3 scripts/build-examples-web.py"
+env = { RUSTFLAGS = "" }
+run = "cargo -Zscript scripts/build-examples-web.rs"
 
 # this lets you run the cli with `terrarium ...`
 [env]
