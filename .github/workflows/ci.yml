@@ -77,3 +77,21 @@ jobs:
           bootstrap_args: "--update"
       - uses: Swatinem/rust-cache@v2
       - run: mise run test:wasm
+      - name: Check tick networking feature combinations on web
+        run: |
+          cargo check -p trnetwork --target wasm32-unknown-unknown --locked
+          cargo check -p trnetwork --all-features --target wasm32-unknown-unknown --locked
+          cargo check --example network --features network --target wasm32-unknown-unknown --locked
+        env:
+          CARGO_UNSTABLE_BUILD_STD: std,panic_abort
+      - name: Build standalone tick server
+        run: cargo build -p trnetwork --features server --example server --locked
+      - name: Test integrated and remote ticks in browser
+        run: |
+          target/debug/examples/server &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          wasm-pack test --headless --chrome crates/trnetwork --all-features
+        env:
+          CARGO_UNSTABLE_BUILD_STD: std,panic_abort
+          WASM_BINDGEN_TEST_WEBDRIVER_JSON: ${{ github.workspace }}/tests/webdriver.json

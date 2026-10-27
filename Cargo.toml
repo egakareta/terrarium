@@ -20,6 +20,7 @@ members = [
   "crates/trfont/",
   "crates/trinternal/",
   "crates/trmacros/",
+  "crates/trnetwork/",
   "crates/trpersistence/",
   "crates/trrender/",
   "crates/trrendert/",
@@ -37,6 +38,7 @@ default-members = [
   "crates/trfont/",
   "crates/trinternal/",
   "crates/trmacros/",
+  "crates/trnetwork/",
   "crates/trpersistence/",
   "crates/trrender/",
   "crates/trrendert/",
@@ -62,6 +64,7 @@ trengine = { path = "crates/trengine/", version = "0.1", default-features = fals
 trfont = { path = "crates/trfont/", version = "0.1", default-features = false }
 trinternal = { path = "crates/trinternal/", version = "0.1" }
 trmacros = { path = "crates/trmacros/", version = "0.1", default-features = false }
+trnetwork = { path = "crates/trnetwork/", version = "0.1" }
 trpersistence = { path = "crates/trpersistence/", version = "0.1" }
 trrender = { path = "crates/trrender/", version = "0.1" }
 trrendert = { path = "crates/trrendert/", version = "0.1" }
@@ -189,6 +192,7 @@ meshpart = ["trinternal?/meshpart"]
 metal = ["trinternal?/metal"]
 mp3 = ["trinternal?/mp3"]
 mp4 = ["trinternal?/mp4"]
+network = ["trinternal?/network"]
 nightly = ["trinternal?/nightly"]
 persistence = ["trinternal?/persistence"]
 phosphor = ["trinternal?/phosphor"]

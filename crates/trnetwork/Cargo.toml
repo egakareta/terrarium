@@ -1,0 +1,31 @@
+[package]
+name = "trnetwork"
+version.workspace = true
+edition.workspace = true
+description = "Integrated and WebSocket tick servers for Terrarium."
+documentation.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+ewebsock = { version = "0.8", features = ["tls"], optional = true }
+thiserror = "2"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+futures-util = { version = "0.3", features = ["sink"], optional = true }
+tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"], optional = true }
+tokio-tungstenite = { version = "0.24", optional = true }
+
+[target.'cfg(all(target_family = "wasm", not(target_os = "wasi")))'.dev-dependencies]
+js-sys = "0.3"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = ["Window"] }
+
+[features]
+websocket = ["dep:ewebsock"]
+server = ["dep:futures-util", "dep:tokio", "dep:tokio-tungstenite"]
+
+[[example]]
+name = "server"
+required-features = ["server"]

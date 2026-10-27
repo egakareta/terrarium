@@ -158,6 +158,9 @@ instance!({
         /// The controller driven by this engine. Defaults to a camera controller.
         #[property(borrow)]
         controller: Box<dyn ControllerView>,
+        /// The tick connection. An integrated server is created by default.
+        #[property(borrow)]
+        client: Client,
         renderer: RendererHandle,
         /// The docked workspace inspector.
         #[cfg(feature = "devtools")]
@@ -285,17 +288,25 @@ impl Engine {
         self.controller.has_movement_input(input)
     }
 
-    /// Advances tweens, animations, the controller, physics, and audio.
+    /// Updates the tick connection, tweens, animations, controller, physics, and audio.
     ///
     /// The controller runs after animation and before physics, with a post-physics
     /// phase for behavior such as following a dynamic camera subject. Its frame
     /// delta is clamped to `0..=0.1` seconds.
     pub fn step(&mut self, delta_seconds: f32) {
+        self.step_client(delta_seconds);
         step_engine(
             engine_workspace(&mut self.instance),
             self.controller.as_mut(),
             delta_seconds,
         );
+    }
+
+    fn step_client(&mut self, delta_seconds: f32) {
+        let elapsed = std::time::Duration::try_from_secs_f32(delta_seconds).unwrap_or_default();
+        if let Err(error) = self.client.step(elapsed) {
+            log::error!("{error}");
+        }
     }
 
     #[cfg(feature = "devtools")]
@@ -357,6 +368,7 @@ impl Engine {
         Ok(Self {
             instance,
             controller: Box::new(controller),
+            client: Client::default(),
             renderer,
             #[cfg(feature = "devtools")]
             devtools: {
@@ -440,6 +452,7 @@ impl Engine {
                     context,
                     delta,
                 );
+                self.step_client(delta);
                 context.request_repaint();
                 return;
             }
