@@ -2,3 +2,9 @@
 title = "Terrarium"
 authors = ["evilbocchi"]
 language = "en"
+
+[output.html]
+default-theme = "light"
+preferred-dark-theme = "navy"
+additional-css = ["theme/terrarium.css"]
+git-repository-url = "https://github.com/egakareta/terrarium"
