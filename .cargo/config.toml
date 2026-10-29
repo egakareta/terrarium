@@ -5,6 +5,7 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 0
 debug = 0
+hint-mostly-unused = true
 
 [profile.dev.package.egui]
 opt-level = 3
@@ -20,12 +21,15 @@ opt-level = 3
 
 [profile.dev.package.wgpu]
 opt-level = 3
+hint-mostly-unused = false
 
 [profile.dev.package.wgpu-core]
 opt-level = 3
+hint-mostly-unused = false
 
 [profile.dev.package.wgpu-hal]
 opt-level = 3
+hint-mostly-unused = false
 
 [target.wasm32-unknown-unknown]
 rustflags = [
@@ -51,3 +55,6 @@ rustflags = [
 
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld.exe"
+
+[unstable]
+profile-hint-mostly-unused = true
