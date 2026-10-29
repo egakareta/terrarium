@@ -1,0 +1,7 @@
+[env]
+CC_x86_64_pc_windows_msvc = "clang-cl"
+CXX_x86_64_pc_windows_msvc = "clang-cl"
+AR_x86_64_pc_windows_msvc = "llvm-lib"
+CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = "lld-link"
+CPAL_ASIO_DIR = "/tmp/asio_sdk"
+VCINSTALLDIR = "/nonexistent"

@@ -1,5 +1,5 @@
 [tools]
-clang = "latest"
+clang = "18"
 "github:egakareta/cargo-forward-flags" = "0.3.0"
 "github:Unreal-Works/cmdshim" = "latest"
 "github:rust-cross/cargo-xwin" = "latest"
