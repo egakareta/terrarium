@@ -193,10 +193,10 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <td>Max concurrency:</td><td>1 (jobs=4 ncpu=4)</td>
 </tr>
 <tr>
-<td>Build start:</td><td>2026-10-29T15:09:07.979612213Z</td>
+<td>Build start:</td><td>2026-10-29T15:49:16.426900726Z</td>
 </tr>
 <tr>
-<td>Total time:</td><td>2.1s</td>
+<td>Total time:</td><td>2.9s</td>
 </tr>
 <tr>
 <td>rustc:</td><td>rustc 1.96.0-nightly (3b1b0ef4d 2026-03-11)<br>Host: x86_64-unknown-linux-gnu<br>Target: wasm32-unknown-unknown, x86_64-unknown-linux-gnu</td>
@@ -245,7 +245,7 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <tr>
 <td>1.</td>
 <td>terrarium v0.1.0 bevy "example"</td>
-<td>1.8s</td>
+<td>2.6s</td>
 
 <td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, no_dynamic_linking, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
 </tr>
@@ -10403,8 +10403,8 @@ const UNIT_DATA = [
       "webgpu",
       "x11"
     ],
-    "start": 0.24,
-    "duration": 1.83,
+    "start": 0.34,
+    "duration": 2.56,
     "unblocked_units": [],
     "unblocked_rmeta_units": [],
     "sections": null
@@ -10418,13 +10418,13 @@ const CONCURRENCY_DATA = [
     "inactive": 1
   },
   {
-    "t": 0.24,
+    "t": 0.34,
     "active": 1,
     "waiting": 0,
     "inactive": 0
   },
   {
-    "t": 2.0700000000000003,
+    "t": 2.9,
     "active": 0,
     "waiting": 0,
     "inactive": 0
@@ -10432,16 +10432,24 @@ const CONCURRENCY_DATA = [
 ];
 const CPU_USAGE = [
   [
-    0.740611316,
-    40.0
+    0.845648047,
+    35.15981735159818
   ],
   [
-    1.240826011,
-    93.0
+    1.345871561,
+    99.0
   ],
   [
-    1.741019526,
-    97.48743718592965
+    1.846060281,
+    91.0
+  ],
+  [
+    2.346234042,
+    99.0
+  ],
+  [
+    2.846431868,
+    46.0
   ]
 ];
 // Position of the vertical axis.
