@@ -5,10 +5,7 @@ mod gltf;
 #[cfg(feature = "meshpart")]
 pub(crate) use gltf::*;
 
-use crate::{
-    Easing,
-    glam::{Mat4, Vec3},
-};
+use crate::{glam::*, *};
 
 /// Invalid keyframe data or an unresolved animation target.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -210,12 +207,18 @@ pub(crate) fn interpolate_transform(from: Mat4, to: Mat4, amount: f32) -> Mat4 {
     )
 }
 
-/// A reusable set of local transform tracks played on a [`crate::Rig`].
-#[derive(Clone, Debug)]
-pub struct AnimationClip {
-    tracks: Arc<[AnimationTrack]>,
-    duration: f32,
-}
+instance!({
+    /// A reusable set of local transform tracks played on a [`crate::Rig`].
+    #[derive(Clone, Debug)]
+    pub struct AnimationClip {
+        /// All tracks in this clip.
+        #[property(borrow, into)]
+        tracks: Arc<[AnimationTrack]>,
+        /// The length of the longest track in seconds.
+        #[property]
+        duration: f32,
+    }
+});
 
 impl AnimationClip {
     /// Creates a clip, panicking if it is empty or repeats a target path.
@@ -247,34 +250,38 @@ impl AnimationClip {
         })
     }
 
-    /// Returns all tracks in this clip.
-    pub fn tracks(&self) -> &[AnimationTrack] {
-        &self.tracks
-    }
-
-    /// Returns the length of the longest track in seconds.
-    pub fn duration(&self) -> f32 {
-        self.duration
-    }
-
     pub(crate) fn same_clip(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.tracks, &other.tracks)
     }
 }
 
-/// Playback state for a keyframed [`AnimationClip`].
-///
-/// Attach it using [`crate::Rig::play_animation`]. [`crate::Workspace::update`]
-/// advances rig animations automatically.
-#[derive(Clone, Debug)]
-pub struct AnimationPlayer {
-    clip: AnimationClip,
-    time: f64,
-    speed: f32,
-    looping: bool,
-    paused: bool,
-    finished: bool,
-}
+instance!({
+    /// Playback state for a keyframed [`AnimationClip`].
+    ///
+    /// Attach it using [`crate::Rig::play_animation`]. [`crate::Workspace::update`]
+    /// advances rig animations automatically.
+    #[derive(Clone, Debug)]
+    pub struct AnimationPlayer {
+        /// The clip being played.
+        #[property(getter, borrow)]
+        clip: AnimationClip,
+        /// The playback position in seconds.
+        #[property]
+        time: f64,
+        /// The playback multiplier, rejecting negative or nonfinite speeds.
+        #[property(setter = apply_valid_speed)]
+        speed: f32,
+        /// Whether playback wraps at the clip's end.
+        #[property]
+        looping: bool,
+        /// Whether playback is paused at its current time.
+        #[property]
+        paused: bool,
+        /// Whether a one-shot clip has reached its final pose.
+        #[property(getter)]
+        finished: bool,
+    }
+});
 
 impl AnimationPlayer {
     /// Creates a player at time zero, playing once at normal speed.
@@ -289,66 +296,12 @@ impl AnimationPlayer {
         }
     }
 
-    /// Sets whether playback wraps at the clip's end.
-    ///
-    /// A zero-duration clip finishes even when looping is enabled.
-    pub fn with_looping(mut self, looping: bool) -> Self {
-        self.set_looping(looping);
-        self
-    }
-
-    /// Sets whether playback wraps at the clip's end.
-    pub fn set_looping(&mut self, looping: bool) {
-        self.looping = looping;
-    }
-
-    /// Sets the playback multiplier; zero freezes the timeline.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the speed is negative or nonfinite.
-    pub fn with_speed(mut self, speed: f32) -> Self {
-        self.set_speed(speed).expect("invalid animation speed");
-        self
-    }
-
-    /// Changes the playback multiplier, rejecting negative or nonfinite speeds.
-    pub fn set_speed(&mut self, speed: f32) -> Result<(), AnimationError> {
+    fn apply_valid_speed(&mut self, speed: f32) {
         if !speed.is_finite() || speed < 0.0 {
-            return Err(AnimationError::InvalidSpeed);
+            self.speed = 1.0;
+            return;
         }
         self.speed = speed;
-        Ok(())
-    }
-
-    /// Returns the clip being played.
-    pub fn clip(&self) -> &AnimationClip {
-        &self.clip
-    }
-
-    /// Returns the playback position in seconds.
-    pub fn time(&self) -> f32 {
-        self.time as f32
-    }
-
-    /// Returns whether playback is paused.
-    pub fn is_paused(&self) -> bool {
-        self.paused
-    }
-
-    /// Returns whether a one-shot clip has reached its final pose.
-    pub fn is_finished(&self) -> bool {
-        self.finished
-    }
-
-    /// Pauses playback at its current time.
-    pub fn pause(&mut self) {
-        self.paused = true;
-    }
-
-    /// Resumes paused playback.
-    pub fn resume(&mut self) {
-        self.paused = false;
     }
 
     /// Restarts playback at time zero.

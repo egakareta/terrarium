@@ -108,7 +108,7 @@ fn chest_belly_and_glute_impulses_deform_only_their_local_skin_regions() {
         let mut player = PlayerController::spawn(&mut workspace);
         let rig = workspace.get_mut::<Rig>(player.rig().unwrap()).unwrap();
         rig.with_anchored(true);
-        rig.animation_mut().unwrap().pause();
+        rig.animation_mut().unwrap().set_paused(true);
         let mesh = rig.find_first_child::<MeshPart>("Mannequin").unwrap().0;
         let tissues: Vec<_> = rig
             .descendants()

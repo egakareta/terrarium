@@ -18,18 +18,10 @@ impl App for RigApp {
             let player = rig.animation_mut().unwrap();
             ui.label(format!("Animation time: {:.2}s", player.time()));
             if ui
-                .button(if player.is_paused() {
-                    "Resume"
-                } else {
-                    "Pause"
-                })
+                .button(if player.paused() { "Resume" } else { "Pause" })
                 .clicked()
             {
-                if player.is_paused() {
-                    player.resume();
-                } else {
-                    player.pause();
-                }
+                player.set_paused(!player.paused());
             }
             if ui.button("Restart").clicked() {
                 player.restart();

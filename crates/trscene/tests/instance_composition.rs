@@ -431,6 +431,55 @@ instance!({
 });
 
 instance!({
+    /// A capability with explicitly selected field accessors.
+    #[derive(Clone, Debug)]
+    pub struct SelectedPropertyAccessors {
+        #[property(getter = true, setter = false, builder = false, default = 1.0)]
+        getter_only: f32,
+        #[property(setter, default = 2)]
+        setter_only: u32,
+        #[property(builder, default = 3)]
+        builder_only: u32,
+    }
+
+    impl SelectedPropertyAccessors {
+        fn values(&self) -> (f32, u32, u32) {
+            (self.getter_only, self.setter_only, self.builder_only)
+        }
+    }
+});
+
+#[test]
+fn explicit_property_accessor_flags_generate_the_selected_accessors() {
+    let mut values = SelectedPropertyAccessors::default();
+    assert_eq!(values.getter_only(), 1.0);
+    values.set_setter_only(20);
+    let values = values.with_builder_only(30);
+    assert_eq!(values.values(), (1.0, 20, 30));
+}
+
+#[cfg(feature = "devtools")]
+#[test]
+fn getter_only_property_is_readonly_in_the_inspector() {
+    let mut values = SelectedPropertyAccessors::default();
+    let properties = devtools::Inspect::properties(&values);
+    let getter = properties
+        .iter()
+        .find(|property| property.path == "getter_only")
+        .unwrap();
+    assert!(!getter.editable);
+    assert!(
+        devtools::Inspect::set_property(
+            &mut values,
+            "getter_only",
+            devtools::PropertyValue::Number(9.0),
+        )
+        .is_err()
+    );
+    assert_eq!(values.getter_only(), 1.0);
+}
+
+instance!({
     /// A primitive composed with an independent motor capability.
     #[derive(Clone, Debug)]
     pub struct MotorPart {

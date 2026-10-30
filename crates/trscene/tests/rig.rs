@@ -1,8 +1,4 @@
-use trscene::{
-    AnimationClip, AnimationError, AnimationPlayer, AnimationTrack, BasePart, Easing, Instance,
-    InstanceExt, Keyframe, PVInstanceExt, Part, PointLight, Rig, RigExt, Tween, Workspace,
-    glam::{Mat4, Quat, Vec3},
-};
+use trscene::{glam::*, *};
 
 fn translation(x: f32) -> Mat4 {
     Mat4::from_translation(Vec3::new(x, 0.0, 0.0))
@@ -30,10 +26,10 @@ fn crossfades_preserve_the_displayed_pose_when_interrupted_or_moved() {
     };
     rig.transition_animation(pose(10.0), 1.0).unwrap();
     assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 1.0);
-    rig.animation_mut().unwrap().pause();
+    rig.animation_mut().unwrap().set_paused(true);
     rig.step_animation(1.0);
     assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 1.0);
-    rig.animation_mut().unwrap().resume();
+    rig.animation_mut().unwrap().set_paused(false);
     rig.step_animation(0.5);
     assert_eq!(rig.view::<Part>(arm).unwrap().position().x, 5.5);
 
@@ -261,7 +257,7 @@ fn zero_duration_clips_and_large_or_invalid_deltas_have_finite_playback() {
     )]);
     let mut player = AnimationPlayer::new(clip).with_looping(true);
     player.update(0.0);
-    assert!(player.is_finished());
+    assert!(player.finished());
     assert_eq!(player.time(), 0.0);
     let mut player = AnimationPlayer::new(moving_arm())
         .with_looping(true)
@@ -272,11 +268,9 @@ fn zero_duration_clips_and_large_or_invalid_deltas_have_finite_playback() {
     assert_eq!(player.time(), 0.0);
     player.update(f32::MAX);
     assert!(player.time().is_finite() && player.time() < 1.0);
-    assert!(matches!(
-        player.set_speed(-1.0),
-        Err(AnimationError::InvalidSpeed)
-    ));
-    player.set_speed(0.0).unwrap();
+    player.set_speed(-1.0);
+    assert!(player.speed() >= 0.0);
+    player.set_speed(0.0);
     player.update(1.0);
     assert_eq!(player.time(), 0.0);
 }
@@ -379,7 +373,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
             .position(),
         Vec3::new(2.0, 0.0, 0.0)
     );
-    rig.animation_mut().unwrap().pause();
+    rig.animation_mut().unwrap().set_paused(true);
     rig.step_animation(10.0);
     assert_eq!(rig.animation().unwrap().time(), 0.5);
     rig.animation_mut().unwrap().seek(0.75).unwrap();
@@ -392,13 +386,13 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
             .position(),
         Vec3::new(2.5, 0.0, 0.0)
     );
-    rig.animation_mut().unwrap().resume();
+    rig.animation_mut().unwrap().set_paused(false);
     rig.step_animation(0.125);
     assert_eq!(rig.animation().unwrap().time(), 0.0);
     rig.play_animation(AnimationPlayer::new(moving_arm()))
         .unwrap();
     rig.step_animation(5.0);
-    assert!(rig.animation().unwrap().is_finished());
+    assert!(rig.animation().unwrap().finished());
     assert_eq!(
         rig.view::<dyn Instance>(arm_id)
             .unwrap()
@@ -410,7 +404,7 @@ fn playback_supports_pause_seek_speed_loop_restart_and_completion() {
     rig.animation_mut().unwrap().restart();
     rig.step_animation(0.25);
     assert_eq!(rig.animation().unwrap().time(), 0.25);
-    assert!(!rig.animation().unwrap().is_finished());
+    assert!(!rig.animation().unwrap().finished());
     assert!(rig.stop_animation().is_some());
     let held = rig
         .view::<dyn Instance>(arm_id)

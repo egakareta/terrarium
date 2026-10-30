@@ -91,16 +91,27 @@ identity storage with `InstanceData`.
 ## Field properties and defaults
 
 Mark a stored field with `#[property]` to generate a getter named after the
-field, a `set_<field>` setter, and a consuming `with_<field>` builder. The
-property attribute accepts these options:
+field, a `set_<field>` setter, and a consuming `with_<field>` builder. To select
+accessors explicitly, list `getter`, `setter`, and/or `builder`; when any are
+listed, unlisted accessors are omitted. Each flag also accepts `= true` or
+`= false`. With no accessor flags, all three are generated for compatibility.
+The property attribute accepts these options:
 
 | Option                  | Effect                                                                                                         |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `default = expression`  | Uses the expression to initialize the field. Without an explicit initializer, fields use `Default::default()`. |
 |                         |
+| `getter`                | Generates the getter. With `borrow`, also generates `<field>_mut`.                                             |
+| `setter`                | Generates `set_<field>`; `setter = method` routes it through that field method.                                |
+| `builder`               | Generates the consuming `with_<field>` builder.                                                                |
 | `sanitize = expression` | Calls the expression as a function on values passed to the setter.                                             |
-| `borrow`                | Returns `&T` from the getter and generates `<field>_mut(&mut self) -> &mut T`.                                 |
+| `borrow`                | Returns `&T` from the getter; with `setter` enabled, also generates `<field>_mut(&mut self) -> &mut T`.        |
 | `into`                  | Makes the builder accept `impl Into<T>` and convert its argument. The setter still accepts `T`.                |
+
+For example, `#[property(getter)]` or
+`#[property(getter = true, setter = false, builder = false)]` generates only
+the getter. A getter without a setter is shown as read-only in the devtools
+inspector.
 
 For example:
 

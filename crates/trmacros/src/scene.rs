@@ -273,7 +273,7 @@ fn export_crate_paths(tokens: Tokens) -> Tokens {
 
 struct PropertyApi {
     getter: Ident,
-    setter: Ident,
+    setter: Option<Ident>,
     ty: Type,
     cfg: Vec<Attribute>,
     flatten: bool,
@@ -627,6 +627,9 @@ fn expand(
         })?;
         let mut sanitize: Option<Expr> = None;
         let mut setter_hook: Option<Ident> = None;
+        let mut getter_access: Option<bool> = None;
+        let mut setter_access: Option<bool> = None;
+        let mut builder_access: Option<bool> = None;
         let mut borrow = false;
         let mut into = false;
         take_attrs(&mut field.attrs, "property", |attr| {
@@ -639,18 +642,50 @@ fn expand(
                     default = Some(meta.value()?.parse()?);
                 } else if meta.path.is_ident("sanitize") {
                     sanitize = Some(meta.value()?.parse()?);
+                } else if meta.path.is_ident("getter") {
+                    getter_access = Some(if !meta.input.peek(syn::Token![=]) {
+                        true
+                    } else {
+                        meta.value()?.parse::<syn::LitBool>()?.value
+                    });
                 } else if meta.path.is_ident("setter") {
-                    setter_hook = Some(meta.value()?.parse()?);
+                    if !meta.input.peek(syn::Token![=]) {
+                        setter_access = Some(true);
+                    } else {
+                        let value = meta.value()?;
+                        if value.peek(syn::LitBool) {
+                            setter_access = Some(value.parse::<syn::LitBool>()?.value);
+                        } else {
+                            setter_hook = Some(value.parse()?);
+                        }
+                    }
+                } else if meta.path.is_ident("builder") {
+                    builder_access = Some(if !meta.input.peek(syn::Token![=]) {
+                        true
+                    } else {
+                        meta.value()?.parse::<syn::LitBool>()?.value
+                    });
                 } else if meta.path.is_ident("into") {
                     into = true;
                 } else if meta.path.is_ident("borrow") {
                     borrow = true;
                 } else {
-                    return Err(meta.error("expected default, sanitize, setter, borrow, or into"));
+                    return Err(meta.error(
+                        "expected default, sanitize, getter, setter, builder, borrow, or into",
+                    ));
                 }
                 Ok(())
             })
         })?;
+        let explicit_accessors =
+            getter_access.is_some() || setter_access.is_some() || builder_access.is_some();
+        let getter_enabled = getter_access.unwrap_or(!explicit_accessors);
+        let setter_enabled = setter_access.unwrap_or(if explicit_accessors {
+            setter_hook.is_some()
+        } else {
+            true
+        });
+        let builder_enabled = builder_access.unwrap_or(!explicit_accessors);
         let cfg: Vec<_> = field
             .attrs
             .iter()
@@ -671,94 +706,124 @@ fn expand(
                 .filter(|attr| attr.path().is_ident("doc"))
                 .cloned()
                 .collect();
-            let (return_type, read) = if borrow {
-                (
-                    quote!(&#ty),
-                    quote!(&#runtime::Project::<#class>::project(self).#field_name),
-                )
-            } else {
-                (
-                    quote!(#ty),
-                    quote!(::core::clone::Clone::clone(&#runtime::Project::<#class>::project(self).#field_name)),
-                )
-            };
-            let getter_mode = if borrow {
-                quote!(borrow)
-            } else {
-                quote!(clone)
-            };
-            property_method_names.insert(field_name.to_string());
-            property_method_tokens.push(quote! {
-                #runtime::__property_api::__property_api_instance_getter! {
-                    [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) #getter_mode
+            if getter_enabled {
+                let (return_type, read) = if borrow {
+                    (
+                        quote!(&#ty),
+                        quote!(&#runtime::Project::<#class>::project(self).#field_name),
+                    )
+                } else {
+                    (
+                        quote!(#ty),
+                        quote!(::core::clone::Clone::clone(&#runtime::Project::<#class>::project(self).#field_name)),
+                    )
+                };
+                let getter_mode = if borrow {
+                    quote!(borrow)
+                } else {
+                    quote!(clone)
+                };
+                property_method_names.insert(field_name.to_string());
+                property_method_tokens.push(quote! {
+                    #runtime::__property_api::__property_api_instance_getter! {
+                        [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) #getter_mode
+                    }
+                });
+                methods.push(parse_quote! {
+                    #(#cfg)*
+                    fn #field_name(&self) -> #return_type { #read }
+                });
+                if borrow && setter_enabled {
+                    let getter_mut = format_ident!("{field_name}_mut");
+                    property_method_names.insert(getter_mut.to_string());
+                    property_method_tokens.push(quote! {
+                        #runtime::__property_api::__property_api_instance_getter! {
+                            [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) borrow_mut(#getter_mut)
+                        }
+                    });
+                    methods.push(parse_quote! {
+                        #(#cfg)*
+                        fn #getter_mut(&mut self) -> &mut #ty {
+                            &mut #runtime::Project::<#class>::project_mut(self).#field_name
+                        }
+                    });
                 }
-            });
+            }
             let setter_mode = match (sanitize.as_ref(), setter_hook.as_ref()) {
                 (None, None) => quote!(direct),
                 (Some(sanitize), None) => quote!(sanitize(#sanitize)),
                 (None, Some(hook)) => quote!(hook(#hook)),
                 (Some(sanitize), Some(hook)) => quote!(sanitize(#sanitize) hook(#hook)),
             };
-            let value =
-                sanitize.map_or_else(|| quote!(value), |sanitize| quote!((#sanitize)(value)));
-            let write = setter_hook.map_or_else(
-                || quote!(#runtime::Project::<#class>::project_mut(self).#field_name = #value;),
-                |setter| quote!(#runtime::Project::<#class>::project_mut(self).#setter(#value);),
-            );
-            methods.push(parse_quote! {
-                #(#cfg)*
-                fn #field_name(&self) -> #return_type { #read }
-            });
-            if borrow {
-                let getter_mut = format_ident!("{field_name}_mut");
-                property_method_names.insert(getter_mut.to_string());
+            let value = sanitize
+                .as_ref()
+                .map_or_else(|| quote!(value), |sanitize| quote!((#sanitize)(value)));
+            let write = if let Some(setter_hook) = setter_hook.as_ref() {
+                quote!(#runtime::Project::<#class>::project_mut(self).#setter_hook(#value);)
+            } else {
+                quote!(#runtime::Project::<#class>::project_mut(self).#field_name = #value;)
+            };
+            if setter_enabled {
+                property_method_names.insert(setter.to_string());
                 property_method_tokens.push(quote! {
-                    #runtime::__property_api::__property_api_instance_getter! {
-                        [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) borrow_mut(#getter_mut)
+                    #runtime::__property_api::__property_api_instance_setter! {
+                        [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) setter(#setter) #setter_mode
                     }
                 });
                 methods.push(parse_quote! {
                     #(#cfg)*
-                    fn #getter_mut(&mut self) -> &mut #ty {
-                        &mut #runtime::Project::<#class>::project_mut(self).#field_name
+                    fn #setter(&mut self, value: #ty) { #write }
+                });
+            }
+            if builder_enabled {
+                let builder_ty = if into {
+                    quote!(impl Into<#ty>)
+                } else {
+                    quote!(#ty)
+                };
+                let builder_value = if into {
+                    quote!(value.into())
+                } else {
+                    quote!(value)
+                };
+                let builder_write = if setter_enabled {
+                    quote!(self.#setter(#builder_value);)
+                } else {
+                    let builder_value = sanitize.as_ref().map_or_else(
+                        || builder_value.clone(),
+                        |sanitize| quote!((#sanitize)(#builder_value)),
+                    );
+                    if let Some(hook) = setter_hook.as_ref() {
+                        quote!(#runtime::Project::<#class>::project_mut(&mut self).#hook(#builder_value);)
+                    } else {
+                        quote!(#runtime::Project::<#class>::project_mut(&mut self).#field_name = #builder_value;)
+                    }
+                };
+                property_method_names.insert(builder.to_string());
+                property_method_tokens.push(quote! {
+                    #runtime::__property_api::__property_api_doc! {
+                        @builder #field_name {
+                            #(#cfg)*
+                            #(#docs)*
+                            fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized {
+                                #builder_write
+                                self
+                            }
+                        }
+                    }
+                });
+                methods.push(parse_quote! {
+                    #(#cfg)*
+                    fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized {
+                        #builder_write
+                        self
                     }
                 });
             }
-            property_method_names.insert(setter.to_string());
-            property_method_tokens.push(quote! {
-                #runtime::__property_api::__property_api_instance_setter! {
-                    [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) setter(#setter) #setter_mode
-                }
-            });
-            methods.push(parse_quote! {
-                #(#cfg)*
-                fn #setter(&mut self, value: #ty) { #write }
-            });
-            let builder_ty = if into {
-                quote!(impl Into<#ty>)
-            } else {
-                quote!(#ty)
-            };
-            let builder_value = if into {
-                quote!(value.into())
-            } else {
-                quote!(value)
-            };
-            property_method_names.insert(builder.to_string());
-            let builder_mode = if into { quote!(into) } else { quote!(value) };
-            property_method_tokens.push(quote! {
-                #runtime::__property_api::__property_api_instance_builder! {
-                    [#(#cfg)* #(#docs)*] field(#field_name) setter(#setter) builder(#builder) type(#ty) #builder_mode
-                }
-            });
-            methods.push(parse_quote! {
-                #(#cfg)*
-                fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized { self.#setter(#builder_value); self }
-            });
-            if definition.inspect {
+            if definition.inspect && getter_enabled {
                 property_inspect.push(PropertyApi {
                     getter: field_name.clone(),
-                    setter,
+                    setter: setter_enabled.then_some(setter),
                     ty: ty.clone(),
                     cfg,
                     flatten: false,
@@ -827,7 +892,7 @@ fn expand(
                             .collect();
                         property_inspect.push(PropertyApi {
                             getter,
-                            setter,
+                            setter: Some(setter),
                             ty,
                             cfg,
                             flatten,
@@ -1232,6 +1297,7 @@ fn expand(
             let PropertyApi {
                 getter,
                 ty,
+                setter,
                 cfg,
                 flatten,
                 ..
@@ -1239,23 +1305,33 @@ fn expand(
             let path = getter.to_string();
             let prefix =
                 (!flatten).then(|| quote!(.into_iter().map(|property| property.prefixed(#path))));
+            let readonly = setter.is_none().then(|| {
+                quote! {
+                    for property in &mut nested {
+                        property.editable = false;
+                    }
+                }
+            });
             quote! {
                 #(#cfg)* {
                     let value: #ty = #api::#getter(receiver).clone();
                     use #runtime::__InspectInstanceProperty as _;
                     let probe = &&#runtime::__InstancePropertyProbe::<#ty>(::core::marker::PhantomData);
-                    properties.extend(probe.properties(&value) #prefix);
+                    let mut nested = probe.properties(&value);
+                    #readonly
+                    properties.extend(nested #prefix);
                 }
             }
         });
-        let writes = property_inspect.iter().map(|property| {
+        let writes = property_inspect.iter().filter_map(|property| {
             let PropertyApi { getter, setter, ty, cfg, flatten, validate } = property;
+            let setter = setter.as_ref()?;
             let path = getter.to_string();
             let tail = if *flatten { quote!(Some(path)) } else { quote!(#runtime::devtools::property_tail(path, #path)) };
             let validation = validate.as_ref().map(|validate| quote! {
                 if !#api::#validate(receiver, updated.clone()) { return Err(#runtime::devtools::PropertyError::InvalidValue); }
             });
-            quote! {
+            Some(quote! {
                 #(#cfg)*
                 if let Some(tail) = #tail {
                     let mut updated: #ty = #api::#getter(receiver).clone();
@@ -1271,7 +1347,7 @@ fn expand(
                         }
                     }
                 }
-            }
+            })
         });
         let inspect_impl = definition.inspect.then(|| {
             let inherited = entries.iter().map(|entry| &entry.inspection).collect::<Vec<_>>();

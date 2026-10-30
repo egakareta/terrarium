@@ -141,7 +141,7 @@ instance!({
                 return Err(AnimationError::InvalidTime);
             }
             let mut poses = BTreeMap::new();
-            for track in player.clip().tracks() {
+            for track in player.clip().tracks().iter() {
                 let mut instance: &dyn Instance = self.as_instance();
                 let mut parent_pivot = self.pivot();
                 for name in track.target() {
@@ -224,10 +224,10 @@ instance!({
             let Some(mut player) = self.animation.take() else {
                 return;
             };
-            if !player.is_finished() || self.transition.is_some() {
+            if !player.finished() || self.transition.is_some() {
                 player.update(delta_seconds);
                 if let Some(transition) = &mut self.transition {
-                    if !player.is_paused() && delta_seconds.is_finite() && delta_seconds > 0.0 {
+                    if !player.paused() && delta_seconds.is_finite() && delta_seconds > 0.0 {
                         transition.elapsed =
                             (transition.elapsed + delta_seconds).min(transition.duration);
                     }
@@ -289,7 +289,7 @@ fn apply_tracks(
         .find(|track| track.target() == path)
         && let Some(spatial) = instance.spatial_mut()
     {
-        let target = track.sample(player.time());
+        let target = track.sample(player.time() as f32);
         let local = transition
             .and_then(|fade| {
                 fade.poses.get(path).map(|from| {
