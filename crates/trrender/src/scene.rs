@@ -68,6 +68,7 @@ fn append_outline_instance(
 
 impl Renderer {
     pub(super) fn prepare_scene(&mut self, scene: &RenderScene<'_>) -> Result<(), RendererError> {
+        self.prune_shader_registrations();
         self.prepared_batches.clear();
         let structural_rev = scene.structure_revision;
         let (outline_targets, specs) = collect_outline_targets(scene);
@@ -203,13 +204,14 @@ impl Renderer {
                 batch.sort_depth = f32::NEG_INFINITY;
             }
             batch_indices.insert(
-                (
-                    batch.mesh,
-                    batch.textures,
-                    batch.filters,
-                    batch.visibility_mask,
-                    batch.transparent,
-                ),
+                RenderBatchKey {
+                    mesh: batch.mesh,
+                    textures: batch.textures,
+                    filters: batch.filters,
+                    shaders: batch.shaders,
+                    visibility_mask: batch.visibility_mask,
+                    transparent: batch.transparent,
+                },
                 index,
             );
         }
@@ -283,7 +285,28 @@ impl Renderer {
                 Self::material_filters(object.materials)
             };
             let sort_depth = (center - camera_position).dot(camera_forward);
-            let key = (mesh, textures, filters, visibility_mask, transparent);
+            let mut shaders = [None; MATERIAL_SLOT_COUNT];
+            if visibility_mask & 1 != 0 {
+                for (index, face) in Face::ALL.into_iter().enumerate() {
+                    shaders[index] = object.materials.get(face).and_then(Material::shader);
+                    if let Some(handle) = shaders[index]
+                        && !self
+                            .material_shaders
+                            .get(&handle)
+                            .is_some_and(|shader| shader.registration.is_ready())
+                    {
+                        return Err(RendererError::InvalidMaterialShader(handle));
+                    }
+                }
+            }
+            let key = RenderBatchKey {
+                mesh,
+                textures,
+                filters,
+                shaders,
+                visibility_mask,
+                transparent,
+            };
             let batch_index = if let Some(&batch_index) = batch_indices.get(&key) {
                 if transparent && sort_depth > batches[batch_index].sort_depth {
                     batches[batch_index].sort_depth = sort_depth;
@@ -296,6 +319,7 @@ impl Renderer {
                     mesh,
                     textures,
                     filters,
+                    shaders,
                     visibility_mask,
                     transparent,
                     sort_depth: if transparent { sort_depth } else { 0.0 },
@@ -445,6 +469,7 @@ impl Renderer {
                 mesh: batch.mesh,
                 packed_textures: packed,
                 filters: batch.filters,
+                shaders: batch.shaders,
                 visibility_mask: batch.visibility_mask,
                 transparent: batch.transparent,
                 instance_start: batch.instance_start,

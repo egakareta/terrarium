@@ -38,8 +38,9 @@ fn surface_packing_preserves_normal_xy_and_material_channels() {
 
 #[test]
 fn material_shader_validates_with_explicit_texture_gradients() {
-    let module = wgpu::naga::front::wgsl::parse_str(include_str!("shader.wgsl"))
-        .expect("material shader should parse");
+    let module =
+        wgpu::naga::front::wgsl::parse_str(&shader::mesh_shader_source(shader::DEFAULT_SURFACE))
+            .expect("material shader should parse");
     let mut validator = wgpu::naga::valid::Validator::new(
         wgpu::naga::valid::ValidationFlags::all(),
         wgpu::naga::valid::Capabilities::empty(),
@@ -106,9 +107,9 @@ fn material_set_keys_resolve_unset_slots_to_the_default_material() {
     assert_eq!(vec4s[1], [0.0, 0.0, 0.0, 0.9]);
     assert_eq!(vec4s[2][0], 0.1);
     // Unset slots fall back to the default material.
-    assert_eq!(vec4s[3], [1.0, 1.0, 1.0, 1.0]);
-    assert_eq!(vec4s[4], [0.0, 0.0, 0.0, 0.5]);
-    assert_eq!(vec4s[5][0], 0.0);
+    assert_eq!(vec4s[4], [1.0, 1.0, 1.0, 1.0]);
+    assert_eq!(vec4s[5], [0.0, 0.0, 0.0, 0.5]);
+    assert_eq!(vec4s[6][0], 0.0);
 }
 
 #[test]

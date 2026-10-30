@@ -37,18 +37,27 @@ impl Renderer {
         self
     }
 
+    /// Sets the maximum elapsed time returned by [`Self::delta_secs`].
+    ///
+    /// The default cap is 100 milliseconds. Negative and NaN values are treated as zero.
+    pub fn with_delta_secs_cap(&mut self, cap_secs: f32) -> &mut Self {
+        self.delta_secs_cap = cap_secs.max(0.0);
+        self
+    }
+
     /// Returns the average number of successfully rendered frames per second over the last
     /// measurement interval.
     pub fn fps(&self) -> f32 {
         self.fps
     }
 
-    /// Returns the elapsed time in seconds since the previous call, capped at 100 milliseconds.
+    /// Returns the elapsed time in seconds since the previous call, capped by the configured
+    /// delta-seconds cap.
     pub fn delta_secs(&mut self) -> f32 {
         let now = Instant::now();
         let delta_seconds = now.duration_since(self.last_frame).as_secs_f32();
         self.last_frame = now;
-        delta_seconds.min(0.1)
+        delta_seconds.min(self.delta_secs_cap)
     }
 
     /// Blocks until all GPU work submitted before this call has completed.
@@ -369,6 +378,8 @@ impl Renderer {
             self.resize(width, height);
         }
         self.prepare_scene(scene)?;
+        self.post_processing
+            .ensure_targets(&self.device, self.output.format, [width, height]);
         self.encode_output(encoder);
         Ok(())
     }
@@ -395,13 +406,24 @@ impl Renderer {
             self.set_directional_shadow_map_size(shadow_map_size);
         }
         self.prepare_scene(scene)?;
+        self.post_processing.ensure_targets(
+            &self.device,
+            self.output.format,
+            [size[0].max(1), size[1].max(1)],
+        );
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("offscreen scene command encoder"),
             });
         self.encode_shadow_pass(&mut encoder);
-        self.encode_scene_pass(&mut encoder, color_view, depth_view, clear_color);
+        self.encode_scene_pass(
+            &mut encoder,
+            self.post_processing.scene_target().unwrap_or(color_view),
+            depth_view,
+            clear_color,
+        );
+        self.post_processing.encode(&mut encoder, color_view);
         self.queue.submit(Some(encoder.finish()));
         Ok(())
     }
@@ -597,11 +619,15 @@ impl Renderer {
         );
     }
 
-    pub(super) fn encode_outline_composite_pass(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub(super) fn encode_outline_composite_pass(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+    ) {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("outline composite pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &self.output.view,
+                view: target,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -625,6 +651,10 @@ impl Renderer {
         // scene directly to the output target preserves pixels while saving
         // two full-screen passes.
         let has_outlines = self.outline_batches.iter().any(|b| !b.is_empty());
+        let target = self
+            .post_processing
+            .scene_target()
+            .unwrap_or(&self.output.view);
         self.encode_shadow_pass(encoder);
         if has_outlines {
             self.encode_scene_pass(
@@ -635,15 +665,11 @@ impl Renderer {
             );
             self.encode_outline_mask_pass(encoder);
             self.encode_stencil_outline_passes(encoder);
-            self.encode_outline_composite_pass(encoder);
+            self.encode_outline_composite_pass(encoder, target);
         } else {
-            self.encode_scene_pass(
-                encoder,
-                &self.output.view,
-                &self.depth_view,
-                self.clear_color,
-            );
+            self.encode_scene_pass(encoder, target, &self.depth_view, self.clear_color);
         }
+        self.post_processing.encode(encoder, &self.output.view);
     }
 
     pub(super) fn record_frame(&mut self) {

@@ -14,6 +14,15 @@ pub struct TextureHandle(
     pub usize,
 );
 
+/// A material shader registered with a particular renderer.
+///
+/// Handles cannot be used with another renderer.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct MaterialShaderHandle(
+    /// Opaque registration identity.
+    pub usize,
+);
+
 /// Texture maps used by a PBR material.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TextureSet {
@@ -51,6 +60,9 @@ pub struct Material {
     textures: TextureSet,
     filter: TextureFilter,
     projection: TextureProjection,
+    #[cfg_attr(feature = "devtools", inspect(skip))]
+    shader: Option<MaterialShaderHandle>,
+    shader_parameters: [f32; 4],
     #[cfg(feature = "default-materials")]
     #[cfg_attr(feature = "devtools", inspect(readonly))]
     builtin: Option<BuiltinMaterial>,
@@ -79,11 +91,41 @@ pub const DEFAULT_MATERIAL: Material = Material {
     },
     filter: TextureFilter::Trilinear,
     projection: TextureProjection::Uv,
+    shader: None,
+    shader_parameters: [0.0; 4],
     #[cfg(feature = "default-materials")]
     builtin: None,
 };
 
 impl Material {
+    /// Returns the custom surface shader, or `None` for built-in PBR shading.
+    pub fn shader(&self) -> Option<MaterialShaderHandle> {
+        self.shader
+    }
+
+    /// Returns the values exposed as `SurfaceInput.parameters` in WGSL.
+    pub fn shader_parameters(&self) -> [f32; 4] {
+        self.shader_parameters
+    }
+
+    /// Selects a shader registered with the renderer that will draw this material.
+    pub fn with_shader(mut self, shader: MaterialShaderHandle) -> Self {
+        self.shader = Some(shader);
+        self
+    }
+
+    /// Restores built-in PBR shading without changing the material's properties.
+    pub fn without_shader(mut self) -> Self {
+        self.shader = None;
+        self
+    }
+
+    /// Sets the values exposed as `SurfaceInput.parameters` in WGSL.
+    pub fn with_shader_parameters(mut self, parameters: [f32; 4]) -> Self {
+        self.shader_parameters = parameters;
+        self
+    }
+
     /// Creates a material from a built-in PBR material.
     ///
     /// Its maps are decoded and uploaded lazily by the renderer, so this can be
@@ -1068,7 +1110,9 @@ mod tests {
             .with_textures(textures)
             .with_occlusion_texture(TextureHandle(5))
             .with_filter(TextureFilter::Nearest)
-            .with_projection(TextureProjection::Triplanar);
+            .with_projection(TextureProjection::Triplanar)
+            .with_shader(MaterialShaderHandle(6))
+            .with_shader_parameters([1.0, 2.0, 3.0, 4.0]);
 
         assert_eq!(material.base_color(), [0.1, 0.2, 0.3, 0.4]);
         assert_eq!(material.metallic(), 0.6);
@@ -1080,6 +1124,13 @@ mod tests {
         assert_eq!(material.textures(), textures);
         assert_eq!(material.filter(), TextureFilter::Nearest);
         assert_eq!(material.projection(), TextureProjection::Triplanar);
+        assert_eq!(material.shader(), Some(MaterialShaderHandle(6)));
+        assert_eq!(material.shader_parameters(), [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(material.without_shader().shader(), None);
+        assert_eq!(
+            material.without_shader().shader_parameters(),
+            [1.0, 2.0, 3.0, 4.0]
+        );
     }
 
     #[test]

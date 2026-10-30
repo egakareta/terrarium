@@ -131,7 +131,8 @@ impl Renderer {
                         || candidate.mesh != batch.mesh
                         || (options.use_materials
                             && (candidate.packed_textures != batch.packed_textures
-                                || candidate.filters != batch.filters))
+                                || candidate.filters != batch.filters
+                                || candidate.shaders != batch.shaders))
                         || candidate.instance_start
                             != batch.instance_start + instance_count as usize
                     {
@@ -163,7 +164,46 @@ impl Renderer {
                 pass.set_bind_group(1, bind_group, &[]);
                 bound_material = Some(batch_material);
             }
-            pass.draw_indexed(0..mesh.index_count, 0, 0..instance_count);
+            if options.use_materials {
+                let split_instances =
+                    options.transparent && batch.shaders.iter().any(Option::is_some);
+                let draws = if split_instances { instance_count } else { 1 };
+                for instance in 0..draws {
+                    for (slot, shader) in batch.shaders.iter().enumerate() {
+                        if batch.shaders[..slot].contains(shader) {
+                            continue;
+                        }
+                        let mask = batch.shaders.iter().enumerate().fold(
+                            0u32,
+                            |mask, (index, candidate)| {
+                                mask | if candidate == shader { 1 << index } else { 0 }
+                            },
+                        );
+                        let pipeline = shader.map_or(options.pipeline, |handle| {
+                            let shader = &self.material_shaders[&handle];
+                            if options.transparent {
+                                &shader.transparent_pipeline
+                            } else {
+                                &shader.pipeline
+                            }
+                        });
+                        pass.set_pipeline(pipeline);
+                        pass.set_bind_group(
+                            3,
+                            &self.shader_selection.bind_group,
+                            &[mask * self.shader_selection.stride],
+                        );
+                        let instances = if split_instances {
+                            instance..instance + 1
+                        } else {
+                            0..instance_count
+                        };
+                        pass.draw_indexed(0..mesh.index_count, 0, instances);
+                    }
+                }
+            } else {
+                pass.draw_indexed(0..mesh.index_count, 0, 0..instance_count);
+            }
             index = next;
         }
     }

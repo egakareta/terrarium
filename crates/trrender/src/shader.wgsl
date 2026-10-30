@@ -121,9 +121,9 @@ var material_sampler_4: sampler;
 var material_sampler_5: sampler;
 
 // Per-face PBR factors for every deduplicated part material set. Each set
-// packs six directional slots in MaterialSlot order as three vec4s per slot:
+// packs six directional slots in MaterialSlot order as four vec4s per slot:
 // base color, emissive RGB + roughness, then metallic, projection, occlusion
-// strength, and dielectric reflectance.
+// strength, and dielectric reflectance, followed by custom shader parameters.
 //
 // Stored in a 2D float texture (width = MATERIAL_VEC4S_PER_SET, height =
 // set count) instead of a storage buffer: OpenGL ES / WebGL backends expose
@@ -132,8 +132,11 @@ var material_sampler_5: sampler;
 @group(2) @binding(0)
 var material_factor_texture: texture_2d<f32>;
 
-const MATERIAL_VEC4S_PER_SLOT: u32 = 3u;
-const MATERIAL_VEC4S_PER_SET: u32 = 18u;
+@group(3) @binding(0)
+var<uniform> shader_selection: vec4<u32>;
+
+const MATERIAL_VEC4S_PER_SLOT: u32 = 4u;
+const MATERIAL_VEC4S_PER_SET: u32 = 24u;
 
 fn load_material_vec4(set_index: u32, vec4_index: u32) -> vec4<f32> {
     return textureLoad(material_factor_texture, vec2<u32>(vec4_index, set_index), 0);
@@ -904,8 +907,8 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
             tangent * normal_sample.x + bitangent * normal_sample.y + world_normal * normal_sample.z,
         );
     }
-    let base_color = base_color_sample * vertex.vertex_color * vertex.tint * slot_factors;
-    let ambient_occlusion = mix(
+    var base_color = base_color_sample * vertex.vertex_color * vertex.tint * slot_factors;
+    var ambient_occlusion = mix(
         1.0,
         clamp(emissive_sample.a, 0.0, 1.0),
         clamp(material_occlusion_strength, 0.0, 1.0),
@@ -914,18 +917,46 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // the surface layer, so each projection sample supplies both.
     let metallic_roughness_sample = vec4<f32>(0.0, surface_sample.a, surface_sample.b, 1.0);
 
-    let metallic = clamp(
+    var metallic = clamp(
         slot_metallic * metallic_roughness_sample.b,
         0.0,
         1.0,
     );
-    let roughness = clamp(
+    var roughness = clamp(
         slot_emissive_roughness.w * metallic_roughness_sample.g,
         0.04,
         1.0,
     );
 
     let view_direction = normalize(camera.camera_position.xyz - vertex.world_position);
+    let surface = shade_surface(
+        SurfaceInput(
+            vertex.world_position,
+            world_normal,
+            view_direction,
+            vertex.uv,
+            load_material_vec4(vertex.material_set, vertex.material_slot * MATERIAL_VEC4S_PER_SLOT + 3u),
+        ),
+        Surface(
+            base_color,
+            mapped_normal,
+            slot_emissive_roughness.rgb * emissive_sample.rgb,
+            metallic,
+            roughness,
+            slot_reflectance,
+            ambient_occlusion,
+            0u,
+        ),
+    );
+    // Hooks may use derivatives, so slot rejection must follow the hook.
+    if (shader_selection.x & (1u << vertex.material_slot)) == 0u {
+        discard;
+    }
+    base_color = surface.base_color;
+    mapped_normal = normalize(surface.normal);
+    metallic = clamp(surface.metallic, 0.0, 1.0);
+    roughness = clamp(surface.roughness, 0.04, 1.0);
+    ambient_occlusion = clamp(surface.occlusion, 0.0, 1.0);
     let light_direction = normalize(camera.light_direction.xyz);
     let half_direction = normalize(view_direction + light_direction);
     let geometric_normal_dot_light = max(dot(world_normal, light_direction), 0.0);
@@ -934,7 +965,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let normal_dot_half = max(dot(mapped_normal, half_direction), 0.0);
     let view_dot_half = max(dot(view_direction, half_direction), 0.0);
 
-    let dielectric_reflectance = clamp(slot_reflectance, 0.0, 1.0);
+    let dielectric_reflectance = clamp(surface.reflectance, 0.0, 1.0);
     let base_reflectance = mix(
         vec3<f32>(0.16 * dielectric_reflectance * dielectric_reflectance),
         base_color.rgb,
@@ -1072,8 +1103,11 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
         );
     }
     var color = ambient + direct + local_direct
-        + slot_emissive_roughness.rgb * emissive_sample.rgb
+        + surface.emissive
         + image_based + base_color.rgb * (top_shift + bottom_shift);
+    if surface.unlit != 0u {
+        color = base_color.rgb + surface.emissive;
+    }
     let fog_amount = smoothstep(
         camera.fog_params.x,
         camera.fog_params.y,

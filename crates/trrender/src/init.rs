@@ -17,6 +17,68 @@ fn mesh_vertex_layout<'a>() -> wgpu::VertexBufferLayout<'a> {
     }
 }
 
+pub(super) fn create_mesh_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    format: wgpu::TextureFormat,
+    transparent: bool,
+    cache: Option<&wgpu::PipelineCache>,
+) -> wgpu::RenderPipeline {
+    let constants = [(
+        "FRAMEBUFFER_IS_SRGB",
+        if format.is_srgb() { 1.0 } else { 0.0 },
+    )];
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(if transparent {
+            "transparent mesh pipeline"
+        } else {
+            "mesh pipeline"
+        }),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            buffers: &[Some(mesh_vertex_layout()), Some(InstanceRaw::layout())],
+        },
+        primitive: wgpu::PrimitiveState {
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: Some(!transparent),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &constants,
+                ..Default::default()
+            },
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend: Some(if transparent {
+                    wgpu::BlendState::ALPHA_BLENDING
+                } else {
+                    wgpu::BlendState::REPLACE
+                }),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache,
+    })
+}
+
 impl Renderer {
     /// Creates a renderer for the supplied WGPU device, queue, and output format.
     pub fn new(
@@ -440,71 +502,32 @@ impl Renderer {
             "FRAMEBUFFER_IS_SRGB",
             if format.is_srgb() { 1.0 } else { 0.0 },
         )];
+        let shader_selection = shader::ShaderSelection::new(&device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh pipeline layout"),
             bind_group_layouts: &[
                 Some(&camera_bind_group_layout),
                 Some(&material_bind_group_layout),
                 Some(&material_factor_bind_group_layout),
+                Some(&shader_selection.layout),
             ],
             immediate_size: 0,
         });
-        let create_mesh_pipeline = |label, depth_write_enabled, blend| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(label),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &shader_constants,
-                        ..Default::default()
-                    },
-                    buffers: &[Some(mesh_vertex_layout()), Some(InstanceRaw::layout())],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    // All primitive meshes are closed solids, so backfaces never
-                    // contribute a visible pixel: they are always behind a front
-                    // face and depth-rejected after shading. Culling them skips
-                    // roughly half the fragment work with identical output.
-                    cull_mode: Some(wgpu::Face::Back),
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(depth_write_enabled),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: wgpu::PipelineCompilationOptions {
-                        constants: &shader_constants,
-                        ..Default::default()
-                    },
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(blend),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: pipeline_cache.as_ref(),
-            })
-        };
-        let pipeline = create_mesh_pipeline("PBR mesh pipeline", true, wgpu::BlendState::REPLACE);
-        let transparent_pipeline = create_mesh_pipeline(
-            "transparent PBR mesh pipeline",
+        let pipeline = create_mesh_pipeline(
+            &device,
+            &pipeline_layout,
+            &shader,
+            format,
             false,
-            wgpu::BlendState::ALPHA_BLENDING,
+            pipeline_cache.as_ref(),
+        );
+        let transparent_pipeline = create_mesh_pipeline(
+            &device,
+            &pipeline_layout,
+            &shader,
+            format,
+            true,
+            pipeline_cache.as_ref(),
         );
         let shadow_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -897,6 +920,7 @@ impl Renderer {
             }],
         });
 
+        let post_processing = shader::PostProcessing::new(&device);
         let mut renderer = Self {
             device,
             queue,
@@ -917,6 +941,10 @@ impl Renderer {
             _shadow_sampler: shadow_sampler,
             pipeline,
             transparent_pipeline,
+            mesh_pipeline_layout: pipeline_layout,
+            shader_selection,
+            material_shaders: HashMap::default(),
+            post_processing,
             shadow_pipeline,
             outline_composite_pipeline,
             toon_mask_pipeline,
@@ -985,6 +1013,7 @@ impl Renderer {
             shadow_pass_enabled: true,
             local_shadow_layer_count: 0,
             last_frame: Instant::now(),
+            delta_secs_cap: 0.1,
             fps_timer: Instant::now(),
             frame_count: 0,
             fps: 0.0,

@@ -22,6 +22,7 @@ mod init;
 mod lighting;
 mod mesh;
 mod scene;
+mod shader;
 mod skybox;
 #[cfg(test)]
 mod tests;
@@ -70,7 +71,12 @@ impl RendererShaders {
             })
         };
         Self {
-            mesh: create("PBR mesh shader", include_str!("shader.wgsl")),
+            mesh: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("PBR mesh shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    shader::mesh_shader_source(shader::DEFAULT_SURFACE).into(),
+                ),
+            }),
             blit: create("outline composite shader", include_str!("blit.wgsl")),
             outline: create("outline geometry shader", include_str!("outline.wgsl")),
             skybox: create("skybox shader", include_str!("skybox.wgsl")),
@@ -184,6 +190,20 @@ pub enum RendererError {
     /// A web pixel readback was requested but no completed capture is available yet.
     #[error("render-target pixels are still being read back")]
     PixelReadbackPending,
+    /// Custom WGSL or its render pipeline failed validation.
+    #[error("shader {label:?} failed validation: {message}")]
+    InvalidShader {
+        /// Label supplied when registering the shader.
+        label: String,
+        /// WGPU validation diagnostic.
+        message: String,
+    },
+    /// A material used a shader not registered with this renderer.
+    #[error("material shader handle {0:?} is not registered with this renderer")]
+    InvalidMaterialShader(MaterialShaderHandle),
+    /// A post-process handle was not registered with this renderer.
+    #[error("post-process handle {0:?} is not registered with this renderer")]
+    InvalidPostProcess(PostProcessHandle),
 }
 
 #[repr(C)]
@@ -239,11 +259,22 @@ struct RenderBatch {
     mesh: GpuMeshHandle,
     textures: MaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
+    shaders: [Option<MaterialShaderHandle>; MATERIAL_SLOT_COUNT],
     visibility_mask: u16,
     transparent: bool,
     sort_depth: f32,
     instances: Vec<InstanceRaw>,
     instance_start: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct RenderBatchKey {
+    mesh: GpuMeshHandle,
+    textures: MaterialTextures,
+    filters: [TextureFilter; MATERIAL_SLOT_COUNT],
+    shaders: [Option<MaterialShaderHandle>; MATERIAL_SLOT_COUNT],
+    visibility_mask: u16,
+    transparent: bool,
 }
 
 struct DrawBatchOptions<'a> {
@@ -259,6 +290,7 @@ struct PreparedRenderBatch {
     mesh: GpuMeshHandle,
     packed_textures: PackedMaterialTextures,
     filters: [TextureFilter; MATERIAL_SLOT_COUNT],
+    shaders: [Option<MaterialShaderHandle>; MATERIAL_SLOT_COUNT],
     visibility_mask: u16,
     transparent: bool,
     instance_start: usize,
@@ -337,9 +369,8 @@ struct PackedMaterialTextures {
 struct PackedTextureHandle(usize);
 
 /// Packed `vec4` count for one deduplicated per-face PBR factor set: six
-/// directional slots times three `vec4`s per slot (base color, emissive RGB +
-/// roughness, metallic, projection mode, occlusion strength, and reflectance).
-const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 3;
+/// directional slots times four `vec4`s per slot, including shader parameters.
+const MATERIAL_VEC4S_PER_SET: usize = MATERIAL_SLOT_COUNT * 4;
 
 /// Width of the material-factor data texture: one texel per packed `vec4`,
 /// so each deduplicated set occupies exactly one row.
@@ -352,13 +383,13 @@ const MATERIAL_FACTOR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat:
 
 /// Hashable per-face PBR factors for one part: bit patterns of base color
 /// RGBA, metallic, roughness, emissive RGB, projection mode, occlusion strength,
-/// and reflectance for each directional slot, with unset slots resolved to the
-/// default material.
+/// reflectance, and shader parameters for each directional slot, with unset
+/// slots resolved to the default material.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct MaterialSetKey([[u32; 12]; MATERIAL_SLOT_COUNT]);
+struct MaterialSetKey([[u32; 16]; MATERIAL_SLOT_COUNT]);
 
 impl MaterialSetKey {
-    fn base_bits(material: &Material) -> [u32; 12] {
+    fn base_bits(material: &Material) -> [u32; 16] {
         let base_color = material.base_color();
         let emissive = material.emissive();
         [
@@ -378,12 +409,16 @@ impl MaterialSetKey {
             },
             material.occlusion_strength().to_bits(),
             material.reflectance().to_bits(),
+            material.shader_parameters()[0].to_bits(),
+            material.shader_parameters()[1].to_bits(),
+            material.shader_parameters()[2].to_bits(),
+            material.shader_parameters()[3].to_bits(),
         ]
     }
 
     /// A uniform set where every face uses the default material: the common
     /// case for parts without slot overrides.
-    fn uniform(material: [u32; 12]) -> Self {
+    fn uniform(material: [u32; 16]) -> Self {
         Self([material; MATERIAL_SLOT_COUNT])
     }
 
@@ -391,7 +426,7 @@ impl MaterialSetKey {
         if material_slots.slots.is_empty() {
             return Self::uniform(Self::base_bits(&DEFAULT_MATERIAL));
         }
-        let mut slots = [[0u32; 12]; MATERIAL_SLOT_COUNT];
+        let mut slots = [[0u32; 16]; MATERIAL_SLOT_COUNT];
         for (index, slot) in Face::ALL.into_iter().enumerate() {
             let material = material_slots.get(slot).unwrap_or(&DEFAULT_MATERIAL);
             slots[index] = Self::base_bits(material);
@@ -400,29 +435,30 @@ impl MaterialSetKey {
     }
 
     /// Expands the key back into the GPU `vec4` sequence consumed by
-    /// `shader.wgsl`: per slot, base color, then emissive RGB + roughness,
-    /// then metallic, projection mode, occlusion strength, and reflectance.
+    /// `shader.wgsl`: base color, emissive RGB + roughness, material properties,
+    /// then shader parameters for each slot.
     fn vec4s(&self) -> [[f32; 4]; MATERIAL_VEC4S_PER_SET] {
         let mut vec4s = [[0.0; 4]; MATERIAL_VEC4S_PER_SET];
         for (index, bits) in self.0.iter().enumerate() {
-            vec4s[index * 3] = [
+            vec4s[index * 4] = [
                 f32::from_bits(bits[0]),
                 f32::from_bits(bits[1]),
                 f32::from_bits(bits[2]),
                 f32::from_bits(bits[3]),
             ];
-            vec4s[index * 3 + 1] = [
+            vec4s[index * 4 + 1] = [
                 f32::from_bits(bits[6]),
                 f32::from_bits(bits[7]),
                 f32::from_bits(bits[8]),
                 f32::from_bits(bits[5]),
             ];
-            vec4s[index * 3 + 2] = [
+            vec4s[index * 4 + 2] = [
                 f32::from_bits(bits[4]),
                 f32::from_bits(bits[9]),
                 f32::from_bits(bits[10]),
                 f32::from_bits(bits[11]),
             ];
+            vec4s[index * 4 + 3] = std::array::from_fn(|i| f32::from_bits(bits[12 + i]));
         }
         vec4s
     }
@@ -536,6 +572,10 @@ pub struct Renderer {
     _shadow_sampler: wgpu::Sampler,
     pipeline: wgpu::RenderPipeline,
     transparent_pipeline: wgpu::RenderPipeline,
+    mesh_pipeline_layout: wgpu::PipelineLayout,
+    shader_selection: shader::ShaderSelection,
+    material_shaders: HashMap<MaterialShaderHandle, shader::MaterialShader>,
+    post_processing: shader::PostProcessing,
     shadow_pipeline: wgpu::RenderPipeline,
     outline_composite_pipeline: wgpu::RenderPipeline,
     toon_mask_pipeline: wgpu::RenderPipeline,
@@ -580,9 +620,9 @@ pub struct Renderer {
     material_factors_dirty: bool,
     /// Hot cache for consecutive parts sharing one material set.
     material_factor_last: Option<(MaterialSetKey, u32)>,
-    /// Hot cache for the override-free case, comparing only the 12
+    /// Hot cache for the override-free case, comparing only the 16
     /// base-material words instead of the full material-set key.
-    material_factor_last_uniform: Option<([u32; 12], u32)>,
+    material_factor_last_uniform: Option<([u32; 16], u32)>,
     textures: Vec<GpuTexture>,
     workspace_texture_handles: HashMap<(u64, TextureHandle), (GpuTextureHandle, u64)>,
     texture_dedup: HashMap<Texture, GpuTextureHandle>,
@@ -602,6 +642,7 @@ pub struct Renderer {
     shadow_pass_enabled: bool,
     local_shadow_layer_count: usize,
     last_frame: Instant,
+    delta_secs_cap: f32,
     fps_timer: Instant,
     frame_count: u32,
     fps: f32,
@@ -609,16 +650,7 @@ pub struct Renderer {
     outline_batches: [Vec<OutlineRenderBatch>; 3],
     local_light_scratch: Vec<LocalLightCandidate>,
     batch_scratch: Vec<RenderBatch>,
-    batch_indices_scratch: HashMap<
-        (
-            GpuMeshHandle,
-            MaterialTextures,
-            [TextureFilter; MATERIAL_SLOT_COUNT],
-            u16,
-            bool,
-        ),
-        usize,
-    >,
+    batch_indices_scratch: HashMap<RenderBatchKey, usize>,
     material_bind_groups:
         HashMap<(PackedMaterialTextures, [TextureFilter; MATERIAL_SLOT_COUNT]), wgpu::BindGroup>,
     light_revision: u64,
@@ -627,6 +659,8 @@ pub struct Renderer {
     transparent_sort_indices: Vec<usize>,
     transparent_sort_tmp: Vec<InstanceRaw>,
 }
+
+pub use shader::PostProcessHandle;
 
 #[repr(C)]
 /// The camera and fixed lighting values consumed by the built-in shader.
