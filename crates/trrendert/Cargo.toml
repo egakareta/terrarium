@@ -13,6 +13,7 @@ bytemuck = { version = "1", features = ["derive"] }
 glam = { version = "0.34", default-features = false, features = ["std"] }
 image = { version = "0.25", default-features = false, features = ["webp"] }
 serde_json = { version = "1", optional = true }
+trproperty = { workspace = true }
 trmacros = { workspace = true, optional = true, features = ["devtools"] }
 thiserror = "2"
 

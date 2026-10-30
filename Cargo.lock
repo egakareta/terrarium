@@ -4746,6 +4746,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "trproperty"
+version = "0.1.0"
+
+[[package]]
 name = "trrender"
 version = "0.1.0"
 dependencies = [
@@ -4770,6 +4774,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "trmacros",
+ "trproperty",
 ]
 
 [[package]]
@@ -4787,6 +4792,7 @@ dependencies = [
  "slotmap",
  "thiserror 2.0.21",
  "trmacros",
+ "trproperty",
  "trrendert",
  "winit",
 ]

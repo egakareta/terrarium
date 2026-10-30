@@ -74,6 +74,79 @@ impl Default for Material {
     }
 }
 
+trproperty::property_api! {
+    impl Material {
+        property shader: Option<MaterialShaderHandle> {
+            getter shader copy;
+            builder with_shader(shader: MaterialShaderHandle) owned => Some(shader);
+            builder without_shader() owned => None;
+        }
+        property shader_parameters: [f32; 4] {
+            getter shader_parameters copy;
+            builder with_shader_parameters(parameters) owned;
+        }
+        property base_color: [f32; 4] {
+            getter base_color copy;
+            builder with_base_color(base_color) owned;
+        }
+        property metallic: f32 {
+            getter metallic copy;
+            builder with_metallic(metallic) owned;
+        }
+        property roughness: f32 {
+            getter roughness copy;
+            builder with_roughness(roughness) owned;
+        }
+        property occlusion_strength: f32 {
+            getter occlusion_strength copy;
+            builder with_occlusion_strength(strength) owned;
+        }
+        property occlusion_texture: Option<TextureHandle> {
+            getter occlusion_texture copy;
+            builder with_occlusion_texture(texture: TextureHandle) owned => Some(texture);
+        }
+        property reflectance: f32 {
+            getter reflectance copy;
+            builder with_reflectance(reflectance) owned;
+        }
+        property emissive: [f32; 3] {
+            getter emissive copy;
+            builder with_emissive(emissive) owned;
+        }
+        property textures: TextureSet {
+            getter textures copy;
+            custom_builder with_textures(textures: TextureSet) owned |this| {
+                this.textures = textures;
+                this.occlusion_texture = None;
+                this.clear_builtin_source();
+            }
+            custom_builder with_base_color_texture(texture: TextureHandle) owned |this| {
+                this.textures.base_color = Some(texture);
+            }
+            custom_builder with_normal_texture(texture: TextureHandle) owned |this| {
+                this.textures.normal = Some(texture);
+            }
+            custom_builder with_metallic_roughness_texture(texture: TextureHandle) owned |this| {
+                this.textures.metallic_roughness = Some(texture);
+            }
+            custom_builder with_emissive_texture(texture: TextureHandle) owned |this| {
+                this.textures.emissive = Some(texture);
+            }
+        }
+        property filter: TextureFilter {
+            getter filter copy;
+            builder with_filter(filter) owned;
+        }
+        property projection: TextureProjection {
+            getter projection copy;
+            builder with_projection(projection) owned;
+        }
+        property builtin: Option<BuiltinMaterial> {
+            getter #[cfg(feature = "default-materials")] builtin_material copy;
+        }
+    }
+}
+
 /// The default material used when a surface has no material override.
 pub const DEFAULT_MATERIAL: Material = Material {
     base_color: [1.0, 1.0, 1.0, 1.0],
@@ -98,34 +171,6 @@ pub const DEFAULT_MATERIAL: Material = Material {
 };
 
 impl Material {
-    /// Returns the custom surface shader, or `None` for built-in PBR shading.
-    pub fn shader(&self) -> Option<MaterialShaderHandle> {
-        self.shader
-    }
-
-    /// Returns the values exposed as `SurfaceInput.parameters` in WGSL.
-    pub fn shader_parameters(&self) -> [f32; 4] {
-        self.shader_parameters
-    }
-
-    /// Selects a shader registered with the renderer that will draw this material.
-    pub fn with_shader(mut self, shader: MaterialShaderHandle) -> Self {
-        self.shader = Some(shader);
-        self
-    }
-
-    /// Restores built-in PBR shading without changing the material's properties.
-    pub fn without_shader(mut self) -> Self {
-        self.shader = None;
-        self
-    }
-
-    /// Sets the values exposed as `SurfaceInput.parameters` in WGSL.
-    pub fn with_shader_parameters(mut self, parameters: [f32; 4]) -> Self {
-        self.shader_parameters = parameters;
-        self
-    }
-
     /// Creates a material from a built-in PBR material.
     ///
     /// Its maps are decoded and uploaded lazily by the renderer, so this can be
@@ -147,13 +192,6 @@ impl Material {
         }
     }
 
-    #[cfg(feature = "default-materials")]
-    /// Returns the built-in material source, if this material uses one.
-    #[cfg(feature = "default-materials")]
-    pub fn builtin_material(&self) -> Option<BuiltinMaterial> {
-        self.builtin
-    }
-
     /// Returns whether this material references any texture maps.
     pub fn has_texture_maps(&self) -> bool {
         #[cfg(feature = "default-materials")]
@@ -168,105 +206,6 @@ impl Material {
             || self.occlusion_texture.is_some()
     }
 
-    /// RGBA multiplier for the base color. Values are not clamped on assignment.
-    pub fn base_color(&self) -> [f32; 4] {
-        self.base_color
-    }
-
-    /// Metallic factor, clamped to `0.0..=1.0` during rendering.
-    pub fn metallic(&self) -> f32 {
-        self.metallic
-    }
-
-    /// Roughness factor, clamped to `0.04..=1.0` during rendering.
-    pub fn roughness(&self) -> f32 {
-        self.roughness
-    }
-
-    /// Ambient visibility multiplier, clamped to `0.0..=1.0` during rendering.
-    pub fn occlusion_strength(&self) -> f32 {
-        self.occlusion_strength
-    }
-
-    /// Returns the optional linear ambient-occlusion map.
-    pub fn occlusion_texture(&self) -> Option<TextureHandle> {
-        self.occlusion_texture
-    }
-
-    /// Dielectric reflectance, clamped to `0.0..=1.0` during rendering.
-    ///
-    /// A value of `0.5` produces 4% reflectance at normal incidence.
-    pub fn reflectance(&self) -> f32 {
-        self.reflectance
-    }
-
-    /// RGB emissive contribution added after direct and ambient lighting.
-    pub fn emissive(&self) -> [f32; 3] {
-        self.emissive
-    }
-
-    /// Optional texture maps multiplied by the scalar factors.
-    pub fn textures(&self) -> TextureSet {
-        self.textures
-    }
-
-    /// Texture sampling filter used for this material's texture maps.
-    pub fn filter(&self) -> TextureFilter {
-        self.filter
-    }
-
-    /// Texture coordinate projection used by this material's maps.
-    pub fn projection(&self) -> TextureProjection {
-        self.projection
-    }
-
-    /// Sets the RGBA multiplier for the base color. Values are not clamped on assignment.
-    pub fn with_base_color(mut self, base_color: [f32; 4]) -> Self {
-        self.base_color = base_color;
-        self
-    }
-
-    /// Sets the metallic factor, clamped to `0.0..=1.0` during rendering.
-    pub fn with_metallic(mut self, metallic: f32) -> Self {
-        self.metallic = metallic;
-        self
-    }
-
-    /// Sets the roughness factor, clamped to `0.04..=1.0` during rendering.
-    pub fn with_roughness(mut self, roughness: f32) -> Self {
-        self.roughness = roughness;
-        self
-    }
-
-    /// Sets the ambient visibility multiplier, clamped to `0.0..=1.0` during rendering.
-    pub fn with_occlusion_strength(mut self, strength: f32) -> Self {
-        self.occlusion_strength = strength;
-        self
-    }
-
-    /// Sets dielectric reflectance, clamped to `0.0..=1.0` during rendering.
-    pub fn with_reflectance(mut self, reflectance: f32) -> Self {
-        self.reflectance = reflectance;
-        self
-    }
-
-    /// Sets the RGB emissive contribution added after direct and ambient lighting.
-    pub fn with_emissive(mut self, emissive: [f32; 3]) -> Self {
-        self.emissive = emissive;
-        self
-    }
-
-    /// Replaces the texture maps multiplied by the scalar factors.
-    ///
-    /// This replaces any built-in map source. Use an individual texture builder
-    /// to override one map while retaining the other built-in maps.
-    pub fn with_textures(mut self, textures: TextureSet) -> Self {
-        self.textures = textures;
-        self.occlusion_texture = None;
-        self.clear_builtin_source();
-        self
-    }
-
     #[cfg(feature = "default-materials")]
     fn clear_builtin_source(&mut self) {
         self.builtin = None;
@@ -278,52 +217,6 @@ impl Material {
     /// Creates a material using a texture as its base-color map.
     pub fn textured(texture: TextureHandle) -> Self {
         Self::default().with_base_color_texture(texture)
-    }
-
-    /// Returns a copy of this material with a base-color map assigned.
-    pub fn with_base_color_texture(mut self, texture: TextureHandle) -> Self {
-        self.textures.base_color = Some(texture);
-        self
-    }
-
-    /// Returns a copy of this material with a normal map assigned.
-    pub fn with_normal_texture(mut self, texture: TextureHandle) -> Self {
-        self.textures.normal = Some(texture);
-        self
-    }
-
-    /// Returns a copy of this material with a metallic-roughness map assigned.
-    pub fn with_metallic_roughness_texture(mut self, texture: TextureHandle) -> Self {
-        self.textures.metallic_roughness = Some(texture);
-        self
-    }
-
-    /// Returns a copy of this material with an emissive map assigned.
-    pub fn with_emissive_texture(mut self, texture: TextureHandle) -> Self {
-        self.textures.emissive = Some(texture);
-        self
-    }
-
-    /// Returns a copy of this material with a linear ambient-occlusion map assigned.
-    pub fn with_occlusion_texture(mut self, texture: TextureHandle) -> Self {
-        self.occlusion_texture = Some(texture);
-        self
-    }
-
-    /// Returns a copy of this material with a texture sampling filter assigned.
-    ///
-    /// Each directional slot samples with its own filter, so set the same
-    /// filter on every slot material when they should match. Unset slots fall
-    /// back to the default material's filter.
-    pub fn with_filter(mut self, filter: TextureFilter) -> Self {
-        self.filter = filter;
-        self
-    }
-
-    /// Returns a copy of this material with a texture coordinate projection assigned.
-    pub fn with_projection(mut self, projection: TextureProjection) -> Self {
-        self.projection = projection;
-        self
     }
 
     /// Creates a material whose base color comes from an RGB tint.

@@ -4,6 +4,11 @@
 extern crate self as trscene;
 
 pub use egui;
+/// Internal method generator shared by declarative and instance properties.
+#[doc(hidden)]
+pub mod __property_api {
+    pub use trproperty::*;
+}
 #[cfg(feature = "sound")]
 pub use euphorium;
 #[cfg(feature = "physics")]

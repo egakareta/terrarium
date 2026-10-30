@@ -682,13 +682,23 @@ fn expand(
                     quote!(::core::clone::Clone::clone(&#runtime::Project::<#class>::project(self).#field_name)),
                 )
             };
-            let getter_mode = if borrow { quote!(ref) } else { quote!(value) };
+            let getter_mode = if borrow {
+                quote!(borrow)
+            } else {
+                quote!(clone)
+            };
             property_method_names.insert(field_name.to_string());
             property_method_tokens.push(quote! {
-                #runtime::__property_api::__property_api_method! {
-                    @getter [#(#cfg)* #(#docs)*] [] #getter_mode #field_name #field_name: #ty { #read }
+                #runtime::__property_api::__property_api_instance_getter! {
+                    [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) #getter_mode
                 }
             });
+            let setter_mode = match (sanitize.as_ref(), setter_hook.as_ref()) {
+                (None, None) => quote!(direct),
+                (Some(sanitize), None) => quote!(sanitize(#sanitize)),
+                (None, Some(hook)) => quote!(hook(#hook)),
+                (Some(sanitize), Some(hook)) => quote!(sanitize(#sanitize) hook(#hook)),
+            };
             let value =
                 sanitize.map_or_else(|| quote!(value), |sanitize| quote!((#sanitize)(value)));
             let write = setter_hook.map_or_else(
@@ -696,23 +706,19 @@ fn expand(
                 |setter| quote!(#runtime::Project::<#class>::project_mut(self).#setter(#value);),
             );
             methods.push(parse_quote! {
-                #(#cfg)* #(#docs)*
-                #[doc = concat!("Returns `", stringify!(#field_name), "`.")]
+                #(#cfg)*
                 fn #field_name(&self) -> #return_type { #read }
             });
             if borrow {
                 let getter_mut = format_ident!("{field_name}_mut");
                 property_method_names.insert(getter_mut.to_string());
                 property_method_tokens.push(quote! {
-                    #runtime::__property_api::__property_api_method! {
-                        @getter [#(#cfg)* #(#docs)*] [] ref_mut #getter_mut #field_name: #ty {
-                            &mut #runtime::Project::<#class>::project_mut(self).#field_name
-                        }
+                    #runtime::__property_api::__property_api_instance_getter! {
+                        [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) borrow_mut(#getter_mut)
                     }
                 });
                 methods.push(parse_quote! {
-                    #(#cfg)* #(#docs)*
-                    #[doc = concat!("Returns mutable access to `", stringify!(#field_name), "`.")]
+                    #(#cfg)*
                     fn #getter_mut(&mut self) -> &mut #ty {
                         &mut #runtime::Project::<#class>::project_mut(self).#field_name
                     }
@@ -720,12 +726,12 @@ fn expand(
             }
             property_method_names.insert(setter.to_string());
             property_method_tokens.push(quote! {
-                #runtime::__property_api::__property_api_method! {
-                    @setter [#(#cfg)* #(#docs)*] [] #setter #field_name (value: #ty) { #write }
+                #runtime::__property_api::__property_api_instance_setter! {
+                    [#(#cfg)* #(#docs)*] runtime[#runtime] class(#class) field(#field_name) type(#ty) setter(#setter) #setter_mode
                 }
             });
             methods.push(parse_quote! {
-                #(#cfg)* #[doc = concat!("Sets `", stringify!(#field_name), "`.")] #(#docs)*
+                #(#cfg)*
                 fn #setter(&mut self, value: #ty) { #write }
             });
             let builder_ty = if into {
@@ -739,16 +745,14 @@ fn expand(
                 quote!(value)
             };
             property_method_names.insert(builder.to_string());
+            let builder_mode = if into { quote!(into) } else { quote!(value) };
             property_method_tokens.push(quote! {
-                #runtime::__property_api::__property_api_method! {
-                    @builder [#(#cfg)* #(#docs)*] [] owned #builder #field_name (value: #builder_ty) [where Self: Sized] {
-                        self.#setter(#builder_value);
-                        self
-                    }
+                #runtime::__property_api::__property_api_instance_builder! {
+                    [#(#cfg)* #(#docs)*] field(#field_name) setter(#setter) builder(#builder) type(#ty) #builder_mode
                 }
             });
             methods.push(parse_quote! {
-                #(#cfg)* #[doc = concat!("Returns this instance with `", stringify!(#field_name), "` set.")] #(#docs)*
+                #(#cfg)*
                 fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized { self.#setter(#builder_value); self }
             });
             if definition.inspect {
@@ -978,7 +982,7 @@ fn expand(
         let setter = &signature.ident;
         let args = arguments(signature)?;
         let mut signature = signature.clone();
-        signature.ident = builder;
+        signature.ident = builder.clone();
         signature.inputs[0] = parse_quote!(mut self);
         signature.output = parse_quote!(-> Self);
         signature
@@ -1000,10 +1004,18 @@ fn expand(
             .filter(|attr| attr.path().is_ident("doc"))
             .cloned()
             .collect();
+        property_method_names.insert(builder.to_string());
+        property_method_tokens.push(quote! {
+            #runtime::__property_api::__property_api_doc! {
+                @builder #getter {
+                    #(#cfg)*
+                    #(#docs)*
+                    #signature { self.#setter(#(#args),*); self }
+                }
+            }
+        });
         builders.push(parse_quote! {
-            #(#cfg)*
-            #[doc = concat!("Returns this instance with `", #property, "` set.")]
-            #(#docs)*
+            #(#cfg)* #(#docs)*
             #signature { self.#setter(#(#args),*); self }
         });
     }
@@ -1092,11 +1104,11 @@ fn expand(
         .iter()
         .filter(|method| !property_method_names.contains(&method.sig.ident.to_string()))
         .map(|method| {
-        let ImplItemFn {
-            attrs, sig, block, ..
-        } = method;
-        quote!(#(#attrs)* #sig #block)
-    });
+            let ImplItemFn {
+                attrs, sig, block, ..
+            } = method;
+            quote!(#(#attrs)* #sig #block)
+        });
     let forwarded = methods
         .iter()
         .filter(|method| {

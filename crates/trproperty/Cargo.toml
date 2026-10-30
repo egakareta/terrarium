@@ -1,0 +1,8 @@
+[package]
+name = "trproperty"
+version.workspace = true
+edition.workspace = true
+description = "Dependency-free property accessors and builder macros for Terrarium."
+documentation.workspace = true
+repository.workspace = true
+license.workspace = true
