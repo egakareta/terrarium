@@ -7,8 +7,8 @@
     <link rel="icon" href="/terrarium/player/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/player/terrarium-ff7ade85d697b4b2.js';
-const wasm = await init({ module_or_path: '/terrarium/player/terrarium-195523a1f5ad4fe_bg.wasm' });
+import init, * as bindings from '/terrarium/player/terrarium-2698fc63eb28e7b3.js';
+const wasm = await init({ module_or_path: '/terrarium/player/terrarium-539e5ea3af98425f_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/player/terrarium-ff7ade85d697b4b2.js" crossorigin="anonymous" integrity="sha384-y+nV4IcPDoQRhGt2ozbyU9GvDHVfApQNp/zM5SUUC9WkfhqfM+f8pSvsa+++eo2X"><link rel="modulepreload" href="/terrarium/player/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/player/terrarium-195523a1f5ad4fe_bg.wasm" crossorigin="anonymous" integrity="sha384-Wx2B78PiiqtYahWqjUOCq8MSi7zrKNoftHssTOEp9uNX+LWeU7wY/dptYPmsQ0FY" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/player/terrarium-2698fc63eb28e7b3.js" crossorigin="anonymous" integrity="sha384-YaGL9ntrKSl84QtDStcg36R0KYGc6XSB7Lp5k03DMoWuWp+dfLdG2vMmE8nhRzvc"><link rel="modulepreload" href="/terrarium/player/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/player/terrarium-539e5ea3af98425f_bg.wasm" crossorigin="anonymous" integrity="sha384-1S7vP5m/Nhf3fwdzfrnPZTGv4SMIsIr1uiq2osWJ0qYk1slGMZMqsrDGgFLdO9wP" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>

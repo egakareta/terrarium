@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e6acef90.js";
+            window.path_to_searchindex_js = "searchindex-a08e883b.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-85d854a6.js"></script>
@@ -277,8 +277,11 @@ of <code>Part</code> as well as the APIs provided by <code>Motor</code>. <code>G
 identity storage with <code>InstanceData</code>.</p>
 <h2 id="field-properties-and-defaults"><a class="header" href="#field-properties-and-defaults">Field properties and defaults</a></h2>
 <p>Mark a stored field with <code>#[property]</code> to generate a getter named after the
-field, a <code>set_&lt;field&gt;</code> setter, and a consuming <code>with_&lt;field&gt;</code> builder. The
-property attribute accepts these options:</p>
+field, a <code>set_&lt;field&gt;</code> setter, and a consuming <code>with_&lt;field&gt;</code> builder. To select
+accessors explicitly, list <code>getter</code>, <code>setter</code>, and/or <code>builder</code>; when any are
+listed, unlisted accessors are omitted. Each flag also accepts <code>= true</code> or
+<code>= false</code>. With no accessor flags, all three are generated for compatibility.
+The property attribute accepts these options:</p>
 <div class="table-wrapper">
 <table>
 <thead>
@@ -287,12 +290,19 @@ property attribute accepts these options:</p>
 <tbody>
 <tr><td><code>default = expression</code></td><td>Uses the expression to initialize the field. Without an explicit initializer, fields use <code>Default::default()</code>.</td></tr>
 <tr><td></td><td></td></tr>
+<tr><td><code>getter</code></td><td>Generates the getter. With <code>borrow</code>, also generates <code>&lt;field&gt;_mut</code>.</td></tr>
+<tr><td><code>setter</code></td><td>Generates <code>set_&lt;field&gt;</code>; <code>setter = method</code> routes it through that field method.</td></tr>
+<tr><td><code>builder</code></td><td>Generates the consuming <code>with_&lt;field&gt;</code> builder.</td></tr>
 <tr><td><code>sanitize = expression</code></td><td>Calls the expression as a function on values passed to the setter.</td></tr>
-<tr><td><code>borrow</code></td><td>Returns <code>&amp;T</code> from the getter and generates <code>&lt;field&gt;_mut(&amp;mut self) -&gt; &amp;mut T</code>.</td></tr>
+<tr><td><code>borrow</code></td><td>Returns <code>&amp;T</code> from the getter; with <code>setter</code> enabled, also generates <code>&lt;field&gt;_mut(&amp;mut self) -&gt; &amp;mut T</code>.</td></tr>
 <tr><td><code>into</code></td><td>Makes the builder accept <code>impl Into&lt;T&gt;</code> and convert its argument. The setter still accepts <code>T</code>.</td></tr>
 </tbody>
 </table>
 </div>
+<p>For example, <code>#[property(getter)]</code> or
+<code>#[property(getter = true, setter = false, builder = false)]</code> generates only
+the getter. A getter without a setter is shown as read-only in the devtools
+inspector.</p>
 <p>For example:</p>
 <pre><code class="language-rust ignore">#[property(default = String::new(), borrow, into)]
 label: String,

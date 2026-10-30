@@ -7,8 +7,8 @@
     <link rel="icon" href="/terrarium/headless/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/headless/terrarium-ec3a7df48a36261d.js';
-const wasm = await init({ module_or_path: '/terrarium/headless/terrarium-310af47ef3a8b311_bg.wasm' });
+import init, * as bindings from '/terrarium/headless/terrarium-c0ac1b490843fb30.js';
+const wasm = await init({ module_or_path: '/terrarium/headless/terrarium-5c3e49bae9264faf_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/headless/terrarium-ec3a7df48a36261d.js" crossorigin="anonymous" integrity="sha384-IjcsmPECKEWPRclEn11uxXNcHqPUlHZACdMGKqRlDbbJyuWn7l59EPrx0R8SK7Yh"><link rel="modulepreload" href="/terrarium/headless/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/headless/terrarium-310af47ef3a8b311_bg.wasm" crossorigin="anonymous" integrity="sha384-EEH5IOdOy0y0gj4j6rTfsWx3iyBkqye54kmG2XQ40azjIhAEPyYUuuzyo1aDln7V" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/headless/terrarium-c0ac1b490843fb30.js" crossorigin="anonymous" integrity="sha384-D1I9gxNDmDpoNPI+SL0MlM7jQh7CgsVB8Ay8vJVj4xoDgNeySAlG/4YaIv2/kCAt"><link rel="modulepreload" href="/terrarium/headless/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/headless/terrarium-5c3e49bae9264faf_bg.wasm" crossorigin="anonymous" integrity="sha384-uz7kdMLUmAHEJNyi5cOXfGaRxOE19d29cqX0YH/O1ivFOihUJ3aAQAOLJvCp+0zO" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>

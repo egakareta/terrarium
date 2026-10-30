@@ -193,10 +193,10 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <td>Max concurrency:</td><td>1 (jobs=4 ncpu=4)</td>
 </tr>
 <tr>
-<td>Build start:</td><td>2026-10-30T07:59:16.016557844Z</td>
+<td>Build start:</td><td>2026-10-30T12:30:18.996188535Z</td>
 </tr>
 <tr>
-<td>Total time:</td><td>1.5s</td>
+<td>Total time:</td><td>2.0s</td>
 </tr>
 <tr>
 <td>rustc:</td><td>rustc 1.96.0-nightly (3b1b0ef4d 2026-03-11)<br>Host: x86_64-unknown-linux-gnu<br>Target: wasm32-unknown-unknown, x86_64-unknown-linux-gnu</td>
@@ -245,7 +245,7 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <tr>
 <td>1.</td>
 <td>terrarium v0.1.0 outlines "example"</td>
-<td>1.3s</td>
+<td>1.7s</td>
 
 <td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, no_dynamic_linking, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
 </tr>
@@ -10424,8 +10424,8 @@ const UNIT_DATA = [
       "webgpu",
       "x11"
     ],
-    "start": 0.2,
-    "duration": 1.27,
+    "start": 0.28,
+    "duration": 1.72,
     "unblocked_units": [],
     "unblocked_rmeta_units": [],
     "sections": null
@@ -10439,13 +10439,13 @@ const CONCURRENCY_DATA = [
     "inactive": 1
   },
   {
-    "t": 0.2,
+    "t": 0.28,
     "active": 1,
     "waiting": 0,
     "inactive": 0
   },
   {
-    "t": 1.47,
+    "t": 2.0,
     "active": 0,
     "waiting": 0,
     "inactive": 0
@@ -10453,12 +10453,16 @@ const CONCURRENCY_DATA = [
 ];
 const CPU_USAGE = [
   [
-    0.702046803,
-    62.735849056603776
+    0.787437145,
+    50.22831050228311
   ],
   [
-    1.202216767,
-    92.5
+    1.290408961,
+    89.5
+  ],
+  [
+    1.790611009,
+    77.8894472361809
   ]
 ];
 // Position of the vertical axis.

@@ -193,10 +193,10 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <td>Max concurrency:</td><td>1 (jobs=4 ncpu=4)</td>
 </tr>
 <tr>
-<td>Build start:</td><td>2026-10-30T08:00:58.730038724Z</td>
+<td>Build start:</td><td>2026-10-30T12:32:37.794715848Z</td>
 </tr>
 <tr>
-<td>Total time:</td><td>1.8s</td>
+<td>Total time:</td><td>2.4s</td>
 </tr>
 <tr>
 <td>rustc:</td><td>rustc 1.96.0-nightly (3b1b0ef4d 2026-03-11)<br>Host: x86_64-unknown-linux-gnu<br>Target: wasm32-unknown-unknown, x86_64-unknown-linux-gnu</td>
@@ -245,7 +245,7 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 <tr>
 <td>1.</td>
 <td>terrarium v0.1.0 rig "example"</td>
-<td>1.6s</td>
+<td>2.1s</td>
 
 <td>asio, bevy, cli, clipboard, compat, default, default-fonts, default-materials, default-player-rig, default-skybox, devtools, dx12, dynamic_linking, eframe-default-fonts, flac, gles, jack, meshpart, metal, mp3, mp4, nightly, no_dynamic_linking, persistence, phosphor, physics, sound, static_linking, vorbis, vulkan, wav, webgl, webgpu, x11</td>
 </tr>
@@ -3564,7 +3564,7 @@ See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Doc
 </tbody>
 </table>
 <script>
-DURATION = 2;
+DURATION = 3;
 const UNIT_DATA = [
   {
     "i": 228,
@@ -10424,8 +10424,8 @@ const UNIT_DATA = [
       "webgpu",
       "x11"
     ],
-    "start": 0.2,
-    "duration": 1.61,
+    "start": 0.28,
+    "duration": 2.1,
     "unblocked_units": [],
     "unblocked_rmeta_units": [],
     "sections": null
@@ -10439,13 +10439,13 @@ const CONCURRENCY_DATA = [
     "inactive": 1
   },
   {
-    "t": 0.2,
+    "t": 0.28,
     "active": 1,
     "waiting": 0,
     "inactive": 0
   },
   {
-    "t": 1.81,
+    "t": 2.38,
     "active": 0,
     "waiting": 0,
     "inactive": 0
@@ -10453,16 +10453,20 @@ const CONCURRENCY_DATA = [
 ];
 const CPU_USAGE = [
   [
-    0.703526845,
-    58.76777251184834
+    0.781619141,
+    48.1651376146789
   ],
   [
-    1.203712268,
-    93.53233830845771
+    1.281819888,
+    90.95477386934674
   ],
   [
-    1.703893355,
-    68.34170854271358
+    1.781997621,
+    99.0
+  ],
+  [
+    2.282180231,
+    51.5
   ]
 ];
 // Position of the vertical axis.
