@@ -606,6 +606,8 @@ fn expand(
     let mut aliases = Vec::new();
     let mut defaults = Vec::new();
     let mut property_inspect = Vec::new();
+    let mut property_method_tokens = Vec::new();
+    let mut property_method_names = std::collections::HashSet::new();
     let Fields::Named(fields) = &mut definition.item.fields else {
         unreachable!()
     };
@@ -624,6 +626,7 @@ fn expand(
             Ok(())
         })?;
         let mut sanitize: Option<Expr> = None;
+        let mut setter_hook: Option<Ident> = None;
         let mut borrow = false;
         let mut into = false;
         take_attrs(&mut field.attrs, "property", |attr| {
@@ -636,12 +639,14 @@ fn expand(
                     default = Some(meta.value()?.parse()?);
                 } else if meta.path.is_ident("sanitize") {
                     sanitize = Some(meta.value()?.parse()?);
+                } else if meta.path.is_ident("setter") {
+                    setter_hook = Some(meta.value()?.parse()?);
                 } else if meta.path.is_ident("into") {
                     into = true;
                 } else if meta.path.is_ident("borrow") {
                     borrow = true;
                 } else {
-                    return Err(meta.error("expected default, sanitize, borrow, or into"));
+                    return Err(meta.error("expected default, sanitize, setter, borrow, or into"));
                 }
                 Ok(())
             })
@@ -677,8 +682,19 @@ fn expand(
                     quote!(::core::clone::Clone::clone(&#runtime::Project::<#class>::project(self).#field_name)),
                 )
             };
+            let getter_mode = if borrow { quote!(ref) } else { quote!(value) };
+            property_method_names.insert(field_name.to_string());
+            property_method_tokens.push(quote! {
+                #runtime::__property_api::__property_api_method! {
+                    @getter [#(#cfg)* #(#docs)*] [] #getter_mode #field_name #field_name: #ty { #read }
+                }
+            });
             let value =
                 sanitize.map_or_else(|| quote!(value), |sanitize| quote!((#sanitize)(value)));
+            let write = setter_hook.map_or_else(
+                || quote!(#runtime::Project::<#class>::project_mut(self).#field_name = #value;),
+                |setter| quote!(#runtime::Project::<#class>::project_mut(self).#setter(#value);),
+            );
             methods.push(parse_quote! {
                 #(#cfg)* #(#docs)*
                 #[doc = concat!("Returns `", stringify!(#field_name), "`.")]
@@ -686,6 +702,14 @@ fn expand(
             });
             if borrow {
                 let getter_mut = format_ident!("{field_name}_mut");
+                property_method_names.insert(getter_mut.to_string());
+                property_method_tokens.push(quote! {
+                    #runtime::__property_api::__property_api_method! {
+                        @getter [#(#cfg)* #(#docs)*] [] ref_mut #getter_mut #field_name: #ty {
+                            &mut #runtime::Project::<#class>::project_mut(self).#field_name
+                        }
+                    }
+                });
                 methods.push(parse_quote! {
                     #(#cfg)* #(#docs)*
                     #[doc = concat!("Returns mutable access to `", stringify!(#field_name), "`.")]
@@ -694,9 +718,15 @@ fn expand(
                     }
                 });
             }
+            property_method_names.insert(setter.to_string());
+            property_method_tokens.push(quote! {
+                #runtime::__property_api::__property_api_method! {
+                    @setter [#(#cfg)* #(#docs)*] [] #setter #field_name (value: #ty) { #write }
+                }
+            });
             methods.push(parse_quote! {
                 #(#cfg)* #[doc = concat!("Sets `", stringify!(#field_name), "`.")] #(#docs)*
-                fn #setter(&mut self, value: #ty) { #runtime::Project::<#class>::project_mut(self).#field_name = #value; }
+                fn #setter(&mut self, value: #ty) { #write }
             });
             let builder_ty = if into {
                 quote!(impl Into<#ty>)
@@ -708,6 +738,15 @@ fn expand(
             } else {
                 quote!(value)
             };
+            property_method_names.insert(builder.to_string());
+            property_method_tokens.push(quote! {
+                #runtime::__property_api::__property_api_method! {
+                    @builder [#(#cfg)* #(#docs)*] [] owned #builder #field_name (value: #builder_ty) [where Self: Sized] {
+                        self.#setter(#builder_value);
+                        self
+                    }
+                }
+            });
             methods.push(parse_quote! {
                 #(#cfg)* #[doc = concat!("Returns this instance with `", stringify!(#field_name), "` set.")] #(#docs)*
                 fn #builder(mut self, value: #builder_ty) -> Self where Self: Sized { self.#setter(#builder_value); self }
@@ -1049,7 +1088,10 @@ fn expand(
     };
     let supers = entries.iter().map(|entry| &entry.api);
     let receiver_super = is_instance.then(|| quote!(+ #runtime::InstanceReceiver));
-    let method_tokens = methods.iter().map(|method| {
+    let method_tokens = methods
+        .iter()
+        .filter(|method| !property_method_names.contains(&method.sig.ident.to_string()))
+        .map(|method| {
         let ImplItemFn {
             attrs, sig, block, ..
         } = method;
@@ -1280,6 +1322,7 @@ fn expand(
         #(#inherited_projects)*
         #[doc = concat!("Methods provided by `", stringify!(#class), "` and its composed bases.")]
         #visibility trait #api: #runtime::Project<#class> #receiver_super #( + #supers)* {
+            #(#property_method_tokens)*
             #(#method_tokens)*
         }
         impl #api for #class {}

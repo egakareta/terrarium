@@ -2,77 +2,48 @@ use trscene::Instance;
 
 use super::*;
 
-/// An offscreen scene that can be rendered into an egui texture or a CPU-side [`trrender::Image`].
-///
-/// A viewport owns a workspace, so callers can add materials, lights, or more
-/// instances through [`Self::workspace_mut`] after creating it from a mesh.
-pub struct Viewport {
-    workspace: Workspace,
-    size: [u32; 2],
-    clear_color: [f32; 4],
-}
+instance!({
+    #[instance(default = false, inspect = false)]
+    /// An offscreen scene that can be rendered into an egui texture or a CPU-side [`trrender::Image`].
+    ///
+    /// A viewport owns a workspace, so callers can add materials, lights, or more
+    /// instances through [`Self::workspace_mut`] after creating it from a mesh.
+    #[derive(Clone, Debug)]
+    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
+    pub struct Viewport {
+        #[extends]
+        workspace: Workspace,
+        #[cfg_attr(feature = "devtools", inspect(skip))]
+        /// Output image dimensions in pixels.
+        #[property(setter = apply_output_size)]
+        output_size: [u32; 2],
+        #[property]
+        /// Color used to clear the viewport before drawing.
+        clear_color: [f32; 4],
+    }
 
-impl Viewport {
-    /// Creates an empty viewport with a transparent background.
-    pub fn new(size: [u32; 2]) -> Self {
-        let size = normalized_size(size);
-        let mut workspace = Workspace::new();
-        workspace.lighting.clear_skybox();
-        workspace.camera_mut().resize(size[0], size[1]);
-        Self {
-            workspace,
-            size,
-            clear_color: [0.0, 0.0, 0.0, 0.0],
+    impl Viewport {
+        /// Creates an empty viewport with a transparent background.
+        pub fn new(size: [u32; 2]) -> Self {
+            let size = normalized_size(size);
+            let mut workspace = Workspace::new();
+            workspace.lighting.clear_skybox();
+            workspace.camera_mut().resize(size[0], size[1]);
+            Self {
+                workspace,
+                output_size: size,
+                clear_color: [0.0, 0.0, 0.0, 0.0],
+            }
+        }
+
+        fn apply_output_size(&mut self, size: [u32; 2]) {
+            self.output_size = normalized_size(size);
+            self.workspace
+                .camera_mut()
+                .resize(self.output_size[0], self.output_size[1]);
         }
     }
-
-    /// Returns the viewport's workspace.
-    pub fn workspace(&self) -> &Workspace {
-        &self.workspace
-    }
-
-    /// Returns mutable access to the viewport's workspace.
-    pub fn workspace_mut(&mut self) -> &mut Workspace {
-        &mut self.workspace
-    }
-
-    /// Returns the output image dimensions in pixels.
-    pub fn size(&self) -> [u32; 2] {
-        self.size
-    }
-
-    /// Returns the color used to clear the viewport before drawing.
-    pub fn clear_color(&self) -> [f32; 4] {
-        self.clear_color
-    }
-
-    /// Returns this viewport with a new output size in pixels.
-    pub fn with_size(mut self, size: [u32; 2]) -> Self {
-        self.set_size(size);
-        self
-    }
-
-    /// Changes the output image dimensions in pixels.
-    pub fn set_size(&mut self, size: [u32; 2]) -> &mut Self {
-        self.size = normalized_size(size);
-        self.workspace
-            .camera_mut()
-            .resize(self.size[0], self.size[1]);
-        self
-    }
-
-    /// Returns this viewport with a new RGBA clear color.
-    pub fn with_clear_color(mut self, color: [f32; 4]) -> Self {
-        self.clear_color = color;
-        self
-    }
-
-    /// Changes the RGBA color used to clear the viewport before drawing.
-    pub fn set_clear_color(&mut self, color: [f32; 4]) -> &mut Self {
-        self.clear_color = color;
-        self
-    }
-}
+});
 
 impl RenderAdapter {
     pub(super) fn render_viewport(
@@ -80,8 +51,8 @@ impl RenderAdapter {
         viewport: &Viewport,
         render_state: &crate::egui_wgpu::RenderState,
     ) -> Result<ViewportTexture, RendererError> {
-        let size = viewport.size;
-        let viewport_id = viewport.workspace.id().data().as_ffi();
+        let size = viewport.output_size();
+        let viewport_id = viewport.id().data().as_ffi();
         self.ensure_viewport_target(viewport_id, size, render_state);
         let scene = viewport.workspace.render_scene();
         let target = self
@@ -246,5 +217,25 @@ impl crate::Engine {
             .ok_or(RendererError::MissingEframeWgpuRenderState)?
             .clone();
         self.renderer().render_viewport(viewport, &render_state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generated_viewport_properties_preserve_output_size_behavior() {
+        let mut viewport = Viewport::new([4, 2])
+            .with_output_size([3, 0])
+            .with_clear_color([0.25, 0.5, 0.75, 1.0]);
+
+        assert_eq!(viewport.output_size(), [3, 1]);
+        assert_eq!(viewport.clear_color(), [0.25, 0.5, 0.75, 1.0]);
+        assert_eq!(viewport.workspace().camera().aspect(), 3.0);
+
+        viewport.set_output_size([0, 0]);
+        assert_eq!(viewport.output_size(), [1, 1]);
+        assert_eq!(viewport.workspace().camera().aspect(), 1.0);
     }
 }
