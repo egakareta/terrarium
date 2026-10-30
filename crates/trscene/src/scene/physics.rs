@@ -23,7 +23,7 @@ use crate::{
 /// and flag, and connected bodies do not collide with each other.
 /// Use [`Self::rapier_mut`] for forces, impulses, joints, and other advanced Rapier operations.
 pub struct PhysicsWorld {
-    world: RapierPhysicsWorld,
+    rapier: RapierPhysicsWorld,
     bodies: HashMap<InstanceId, BodyEntry>,
     body_instances: HashMap<InstanceId, InstanceId>,
     collider_instances: HashMap<ColliderHandle, InstanceId>,
@@ -89,7 +89,7 @@ impl PhysicsWorld {
     /// Creates an empty physics world with Rapier's default gravity and integration parameters.
     pub fn new() -> Self {
         Self {
-            world: RapierPhysicsWorld::new(),
+            rapier: RapierPhysicsWorld::new(),
             bodies: HashMap::new(),
             body_instances: HashMap::new(),
             collider_instances: HashMap::new(),
@@ -102,34 +102,34 @@ impl PhysicsWorld {
 
     /// Returns the gravity applied to dynamic bodies, in world units per second squared.
     pub fn gravity(&self) -> Vec3 {
-        from_rapier_vector(self.world.gravity)
+        from_rapier_vector(self.rapier.gravity)
     }
 
     /// Sets the gravity applied to dynamic bodies, in world units per second squared.
     ///
     pub fn with_gravity(&mut self, gravity: Vec3) -> &mut Self {
-        self.world.gravity = rapier_vector(gravity);
+        self.rapier.gravity = rapier_vector(gravity);
         self
     }
 
     /// Returns Rapier's integration parameters.
     pub fn integration_parameters(&self) -> &IntegrationParameters {
-        &self.world.integration_parameters
+        &self.rapier.integration_parameters
     }
 
     /// Returns mutable access to Rapier's integration parameters.
     pub fn integration_parameters_mut(&mut self) -> &mut IntegrationParameters {
-        &mut self.world.integration_parameters
+        &mut self.rapier.integration_parameters
     }
 
     /// Returns the Rapier world used by this physics integration.
     pub fn rapier(&self) -> &RapierPhysicsWorld {
-        &self.world
+        &self.rapier
     }
 
     /// Returns mutable access to the Rapier world used by this physics integration.
     pub fn rapier_mut(&mut self) -> &mut RapierPhysicsWorld {
-        &mut self.world
+        &mut self.rapier
     }
 
     /// Returns the body handle for a part or rig, including members of a rig.
@@ -141,13 +141,13 @@ impl PhysicsWorld {
     /// Returns the Rapier body associated with a workspace instance.
     pub fn body(&self, instance: InstanceId) -> Option<&RigidBody> {
         let handle = self.body_handle(instance)?;
-        self.world.bodies.get(handle)
+        self.rapier.bodies.get(handle)
     }
 
     /// Returns mutable access to the Rapier body associated with a workspace instance.
     pub fn body_mut(&mut self, instance: InstanceId) -> Option<&mut RigidBody> {
         let handle = self.body_handle(instance)?;
-        self.world.bodies.get_mut(handle)
+        self.rapier.bodies.get_mut(handle)
     }
 
     pub(crate) fn queue_player_motion(
@@ -172,7 +172,7 @@ impl PhysicsWorld {
     /// Uses the most recently completed physics step. Missing bodies are not grounded.
     pub fn is_grounded(&self, instance: InstanceId) -> bool {
         self.body_handle(instance)
-            .is_some_and(|handle| Self::body_is_grounded(&self.world, handle))
+            .is_some_and(|handle| Self::body_is_grounded(&self.rapier, handle))
     }
 
     fn body_is_grounded(world: &RapierPhysicsWorld, body_handle: RigidBodyHandle) -> bool {
@@ -222,7 +222,7 @@ impl PhysicsWorld {
         let query_pose = rapier_pose(query.transform);
         let mut results = Vec::new();
         for (collider, _) in
-            self.world
+            self.rapier
                 .intersect_shape(query_pose, query_shape.shape(), QueryFilter::default())
         {
             let Some(instance) = self.collider_instances.get(&collider).copied() else {
@@ -259,8 +259,8 @@ impl PhysicsWorld {
             };
             let jump_speed = motion
                 .jump_speed
-                .filter(|_| Self::body_is_grounded(&self.world, entry.handle));
-            let Some(body) = self.world.bodies.get_mut(entry.handle) else {
+                .filter(|_| Self::body_is_grounded(&self.rapier, entry.handle));
+            let Some(body) = self.rapier.bodies.get_mut(entry.handle) else {
                 continue;
             };
             if !body.is_dynamic() {
@@ -288,9 +288,9 @@ impl PhysicsWorld {
         }
 
         if delta_seconds.is_finite() && delta_seconds > 0.0 {
-            self.world.integration_parameters.dt = delta_seconds.min(0.1);
+            self.rapier.integration_parameters.dt = delta_seconds.min(0.1);
             self.update_tissue_anchors(instances, delta_seconds.min(0.1));
-            self.world.step();
+            self.rapier.step();
         } else {
             self.update_tissue_anchors(instances, 0.0);
         }
@@ -303,7 +303,7 @@ impl PhysicsWorld {
             if instance.anchored {
                 continue;
             }
-            let Some(body) = self.world.bodies.get(entry.handle) else {
+            let Some(body) = self.rapier.bodies.get(entry.handle) else {
                 continue;
             };
             let transform = body_transform(body);
@@ -315,8 +315,8 @@ impl PhysicsWorld {
 
     pub(crate) fn clone_configuration(&self) -> Self {
         let mut clone = Self::new();
-        clone.world.gravity = self.world.gravity;
-        clone.world.integration_parameters = self.world.integration_parameters;
+        clone.rapier.gravity = self.rapier.gravity;
+        clone.rapier.integration_parameters = self.rapier.integration_parameters;
         clone
     }
 
@@ -342,7 +342,7 @@ impl PhysicsWorld {
             .collect();
         for id in stale {
             if let Some(entry) = self.bodies.remove(&id) {
-                self.world.remove_body(entry.handle);
+                self.rapier.remove_body(entry.handle);
                 for collider in entry.colliders.values() {
                     self.collider_instances.remove(&collider.handle);
                 }
@@ -360,7 +360,7 @@ impl PhysicsWorld {
                 .bodies
                 .remove(&instance.id)
                 .filter(|entry| {
-                    if self.world.bodies.get(entry.handle).is_some() {
+                    if self.rapier.bodies.get(entry.handle).is_some() {
                         return true;
                     }
                     for collider in entry.colliders.values() {
@@ -375,7 +375,7 @@ impl PhysicsWorld {
                         .joint
                         .as_ref()
                         .and_then(|joint| self.bodies.get(&joint.parent))
-                        .and_then(|entry| self.world.bodies.get(entry.handle))
+                        .and_then(|entry| self.rapier.bodies.get(entry.handle))
                     {
                         let offset = rapier_vector(instance.transform.w_axis.truncate())
                             - parent.translation();
@@ -383,12 +383,12 @@ impl PhysicsWorld {
                             .linvel(parent.linvel() + parent.angvel().cross(offset))
                             .angvel(parent.angvel());
                     }
-                    let handle = self.world.insert_body(builder);
-                    self.world
+                    let handle = self.rapier.insert_body(builder);
+                    self.rapier
                         .bodies
                         .get_mut(handle)
                         .expect("inserted body")
-                        .recompute_mass_properties_from_colliders(&self.world.colliders);
+                        .recompute_mass_properties_from_colliders(&self.rapier.colliders);
                     BodyEntry {
                         handle,
                         anchored: instance.anchored,
@@ -402,7 +402,7 @@ impl PhysicsWorld {
             if instance.joint.is_some()
                 && let Some(delta) = teleports.get(&instance.assembly)
                 && self.last_transforms.contains_key(&instance.id)
-                && let Some(body) = self.world.bodies.get_mut(entry.handle)
+                && let Some(body) = self.rapier.bodies.get_mut(entry.handle)
             {
                 body.set_position(rapier_pose(*delta * body_transform(body)), true);
                 body.set_linvel(rapier_vector(Vec3::ZERO), true);
@@ -410,7 +410,7 @@ impl PhysicsWorld {
             }
             if let Some(delta) = teleports.get(&instance.assembly)
                 && let Some(handle) = self.tissue_anchors.get(&instance.id)
-                && let Some(body) = self.world.bodies.get_mut(*handle)
+                && let Some(body) = self.rapier.bodies.get_mut(*handle)
             {
                 body.set_position(rapier_pose(*delta * body_transform(body)), true);
             }
@@ -431,19 +431,19 @@ impl PhysicsWorld {
                     joint.binding.joint.motion,
                     RigJointMotion::SoftTissue { .. }
                 )
-            }) && self.world.bodies.get(*handle).is_some()
+            }) && self.rapier.bodies.get(*handle).is_some()
             {
                 true
             } else {
-                self.world.remove_body(*handle);
+                self.rapier.remove_body(*handle);
                 false
             }
         });
         self.joints.retain(|id, handle| {
-            if active.contains_key(id) && self.world.impulse_joints.get(*handle).is_some() {
+            if active.contains_key(id) && self.rapier.impulse_joints.get(*handle).is_some() {
                 true
             } else {
-                self.world.impulse_joints.remove(*handle, true);
+                self.rapier.impulse_joints.remove(*handle, true);
                 false
             }
         });
@@ -461,14 +461,14 @@ impl PhysicsWorld {
             let frame1 = if soft_tissue {
                 // Dominance groups only isolate contacts, not joint forces.
                 let pose = *self
-                    .world
+                    .rapier
                     .bodies
                     .get(parent)
                     .expect("synchronized parent")
                     .position()
                     * rapier_pose(joint.binding.frame1);
                 parent = *self.tissue_anchors.entry(id).or_insert_with(|| {
-                    self.world
+                    self.rapier
                         .insert_body(RigidBodyBuilder::kinematic_position_based().pose(pose))
                 });
                 Mat4::IDENTITY
@@ -520,7 +520,7 @@ impl PhysicsWorld {
             }
             if let Some(handle) = self.joints.get(&id).copied() {
                 let existing = self
-                    .world
+                    .rapier
                     .impulse_joints
                     .get_mut(handle, false)
                     .expect("synchronized joint");
@@ -534,15 +534,15 @@ impl PhysicsWorld {
                     }
                     let changed = existing.data != data;
                     existing.data = data;
-                    if changed && let Some(body) = self.world.bodies.get_mut(child) {
+                    if changed && let Some(body) = self.rapier.bodies.get_mut(child) {
                         body.wake_up(true);
                     }
                     continue;
                 }
-                self.world.impulse_joints.remove(handle, true);
+                self.rapier.impulse_joints.remove(handle, true);
             }
             let handle = self
-                .world
+                .rapier
                 .impulse_joints
                 .insert(parent, child, builder, true);
             self.joints.insert(id, handle);
@@ -560,13 +560,13 @@ impl PhysicsWorld {
             let Some(parent) = self
                 .bodies
                 .get(&joint.parent)
-                .and_then(|entry| self.world.bodies.get(entry.handle))
+                .and_then(|entry| self.rapier.bodies.get(entry.handle))
             else {
                 continue;
             };
             let pose =
                 parent.predict_position_using_velocity(dt) * rapier_pose(joint.binding.frame1);
-            let Some(anchor) = self.world.bodies.get_mut(*handle) else {
+            let Some(anchor) = self.rapier.bodies.get_mut(*handle) else {
                 continue;
             };
             if dt == 0.0 {
@@ -578,7 +578,7 @@ impl PhysicsWorld {
 
     fn update_instance(&mut self, instance: &PhysicsInstance, entry: &mut BodyEntry) {
         let body = self
-            .world
+            .rapier
             .bodies
             .get_mut(entry.handle)
             .expect("synchronized body");
@@ -630,7 +630,7 @@ impl PhysicsWorld {
             .collect();
         for id in stale {
             if let Some(collider) = entry.colliders.remove(&id) {
-                self.world.remove_collider(collider.handle);
+                self.rapier.remove_collider(collider.handle);
                 self.collider_instances.remove(&collider.handle);
             }
         }
@@ -643,10 +643,10 @@ impl PhysicsWorld {
             if let Some(collider) = existing.filter(|collider| {
                 collider.shape == part.shape
                     && vectors_approximately_equal(collider.size, size)
-                    && self.world.colliders.get(collider.handle).is_some()
+                    && self.rapier.colliders.get(collider.handle).is_some()
             }) {
                 if !matrices_approximately_equal(collider.local_pose, local_pose) {
-                    self.world
+                    self.rapier
                         .colliders
                         .get_mut(collider.handle)
                         .expect("existing collider")
@@ -660,10 +660,10 @@ impl PhysicsWorld {
                 continue;
             }
             if let Some(collider) = entry.colliders.remove(&part.id) {
-                self.world.remove_collider(collider.handle);
+                self.rapier.remove_collider(collider.handle);
                 self.collider_instances.remove(&collider.handle);
             }
-            let handle = self.world.insert_collider(
+            let handle = self.rapier.insert_collider(
                 collider_builder(part.shape, part.transform).position(rapier_pose(local_pose)),
                 Some(entry.handle),
             );
@@ -681,12 +681,12 @@ impl PhysicsWorld {
         let fallback_mass = instance.articulated && entry.colliders.is_empty();
         if entry.fallback_mass != fallback_mass {
             let body = self
-                .world
+                .rapier
                 .bodies
                 .get_mut(entry.handle)
                 .expect("synchronized body");
             body.set_additional_mass_properties(fallback_mass_properties(fallback_mass), true);
-            body.recompute_mass_properties_from_colliders(&self.world.colliders);
+            body.recompute_mass_properties_from_colliders(&self.rapier.colliders);
             entry.fallback_mass = fallback_mass;
         }
     }
@@ -703,8 +703,8 @@ impl fmt::Debug for PhysicsWorld {
         formatter
             .debug_struct("PhysicsWorld")
             .field("gravity", &self.gravity())
-            .field("body_count", &self.world.bodies.len())
-            .field("collider_count", &self.world.colliders.len())
+            .field("body_count", &self.rapier.bodies.len())
+            .field("collider_count", &self.rapier.colliders.len())
             .finish()
     }
 }
