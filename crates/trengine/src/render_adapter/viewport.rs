@@ -9,11 +9,9 @@ instance!({
     /// A viewport owns a workspace, so callers can add materials, lights, or more
     /// instances through [`Self::workspace_mut`] after creating it from a mesh.
     #[derive(Clone, Debug)]
-    #[cfg_attr(feature = "devtools", derive(devtools::Inspect))]
     pub struct Viewport {
         #[extends]
         workspace: Workspace,
-        #[cfg_attr(feature = "devtools", inspect(skip))]
         /// Output image dimensions in pixels.
         #[property(setter = apply_output_size)]
         output_size: [u32; 2],
@@ -44,6 +42,51 @@ instance!({
         }
     }
 });
+
+trscene::__instance_inspection_items! {
+    impl trscene::devtools::Inspect for Viewport {
+        fn properties(&self) -> Vec<trscene::devtools::Property> {
+            let mut properties = trscene::devtools::Inspect::properties(&self.workspace)
+                .into_iter()
+                .map(|property| property.prefixed("workspace"))
+                .collect::<Vec<_>>();
+            properties.extend(
+                trscene::devtools::Inspect::properties(&self.clear_color)
+                    .into_iter()
+                    .map(|property| property.prefixed("clear_color")),
+            );
+            properties
+        }
+
+        fn set_property(
+            &mut self,
+            path: &str,
+            value: trscene::devtools::PropertyValue,
+        ) -> Result<(), trscene::devtools::PropertyError> {
+            if let Some(tail) = trscene::devtools::property_tail(path, "workspace") {
+                return trscene::devtools::Inspect::set_property(&mut self.workspace, tail, value);
+            }
+            if let Some(tail) = trscene::devtools::property_tail(path, "clear_color") {
+                return trscene::devtools::Inspect::set_property(&mut self.clear_color, tail, value);
+            }
+            Err(trscene::devtools::PropertyError::NotFound)
+        }
+
+        fn validate_property(
+            &self,
+            path: &str,
+            value: &trscene::devtools::PropertyValue,
+        ) -> Result<(), trscene::devtools::PropertyError> {
+            if let Some(tail) = trscene::devtools::property_tail(path, "workspace") {
+                return trscene::devtools::Inspect::validate_property(&self.workspace, tail, value);
+            }
+            if let Some(tail) = trscene::devtools::property_tail(path, "clear_color") {
+                return trscene::devtools::Inspect::validate_property(&self.clear_color, tail, value);
+            }
+            Err(trscene::devtools::PropertyError::NotFound)
+        }
+    }
+}
 
 impl RenderAdapter {
     pub(super) fn render_viewport(
