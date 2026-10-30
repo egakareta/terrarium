@@ -95,6 +95,10 @@ required-features = ["default-player-rig", "physics"]
 name = "sound"
 required-features = ["sound"]
 
+[[example]]
+name = "webgl"
+required-features = ["webgl"]
+
 [[bench]]
 name = "render_benchmark"
 harness = false
