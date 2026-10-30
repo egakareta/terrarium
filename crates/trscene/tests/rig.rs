@@ -678,12 +678,18 @@ fn animated_colliders_follow_local_poses_and_report_child_part_ids() {
     let rig_id = workspace.add_child(rig);
     workspace.step(1.0);
     assert_eq!(
-        workspace.get_part_bounds_in_box(&BoxOverlapQuery::new(translation(3.0))),
+        workspace.get_part_bounds_in_box(&BoxOverlapQuery {
+            transform: translation(3.0),
+            ..Default::default()
+        }),
         vec![arm_id]
     );
     assert!(
         workspace
-            .get_part_bounds_in_box(&BoxOverlapQuery::new(translation(1.0)))
+            .get_part_bounds_in_box(&BoxOverlapQuery {
+                transform: translation(1.0),
+                ..Default::default()
+            })
             .is_empty()
     );
     assert!(workspace.physics().body_handle(ghost).is_some());
@@ -694,7 +700,10 @@ fn animated_colliders_follow_local_poses_and_report_child_part_ids() {
     workspace.step(1.0 / 60.0);
     assert!(
         workspace
-            .get_part_bounds_in_box(&BoxOverlapQuery::new(translation(3.0)))
+            .get_part_bounds_in_box(&BoxOverlapQuery {
+                transform: translation(3.0),
+                ..Default::default()
+            })
             .is_empty()
     );
     workspace.get_mut::<Rig>(rig_id).unwrap().destroy();

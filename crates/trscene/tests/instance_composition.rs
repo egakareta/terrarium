@@ -355,9 +355,14 @@ fn composed_primitives_participate_in_physics_and_overlap_queries() {
     }
     let position = workspace.view::<PVInstance>(id).unwrap().position();
     assert!(position.y < 10.0);
-    let hits = workspace.get_part_bounds_in_box(&BoxOverlapQuery::new(
-        Mat4::from_scale_rotation_translation(Vec3::splat(4.0), glam::Quat::IDENTITY, position),
-    ));
+    let hits = workspace.get_part_bounds_in_box(&BoxOverlapQuery {
+        transform: Mat4::from_scale_rotation_translation(
+            Vec3::splat(4.0),
+            glam::Quat::IDENTITY,
+            position,
+        ),
+        ..Default::default()
+    });
     assert!(hits.contains(&id));
 }
 

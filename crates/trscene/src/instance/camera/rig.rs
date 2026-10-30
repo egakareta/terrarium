@@ -29,7 +29,7 @@ instance!({
         orbit_subject: Option<InstanceId>,
         orbit_yaw: f32,
         orbit_pitch: f32,
-        queued_look: Vec2,
+        pub(crate) queued_look: Vec2,
         queued_subject_zoom: f32,
     }
 
@@ -76,24 +76,6 @@ impl Default for CameraRig {
 }
 
 impl CameraRig {
-    /// Sets the bounds used to clamp orbit distance during zoom.
-    pub fn with_subject_distance_limits(mut self, min: f32, max: f32) -> Self {
-        self.set_min_subject_distance(min);
-        self.set_max_subject_distance(max);
-        self
-    }
-
-    /// Sets the pitch bounds for third-person orbit, in radians.
-    pub fn with_subject_pitch_limits(mut self, min: f32, max: f32) -> Self {
-        self.set_min_subject_pitch(min);
-        self.set_max_subject_pitch(max);
-        self
-    }
-
-    pub(crate) fn queued_look(&self) -> Vec2 {
-        self.queued_look
-    }
-
     pub(crate) fn update_camera(
         &mut self,
         camera: &mut Camera,

@@ -6,38 +6,14 @@ use crate::{glam::*, *};
 
 /// Parameters for querying colliders intersecting a world-space box.
 #[cfg(feature = "physics")]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BoxOverlapQuery {
-    pub(crate) transform: Mat4,
-    pub(crate) excluded_instances: Vec<InstanceId>,
-    pub(crate) max_parts: usize,
-}
-
-#[cfg(feature = "physics")]
-impl BoxOverlapQuery {
-    /// Creates a box query from its world-space transform.
-    pub fn new(transform: Mat4) -> Self {
-        Self {
-            transform,
-            excluded_instances: Vec::new(),
-            max_parts: 0,
-        }
-    }
-
-    /// Excludes parts with these instance IDs from the results.
-    pub fn with_excluded_instances(
-        mut self,
-        instances: impl IntoIterator<Item = InstanceId>,
-    ) -> Self {
-        self.excluded_instances.extend(instances);
-        self
-    }
-
-    /// Limits the number of returned parts; zero means no limit.
-    pub fn with_max_parts(mut self, max_parts: usize) -> Self {
-        self.max_parts = max_parts;
-        self
-    }
+    /// The overlap transform.
+    pub transform: Mat4,
+    /// Instances to exclude from the query.
+    pub excluded_instances: Vec<InstanceId>,
+    /// The maximum number of results to return.
+    pub max_parts: usize,
 }
 
 /// Starting geometry for a workspace.

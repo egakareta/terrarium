@@ -180,7 +180,7 @@ impl PlayerController {
         let mut reference = ControllerActions::default();
         if workspace.camera().subject() == Some(id) {
             self.camera_rig.queue_look(actions.look * self.sensitivity);
-            reference.look = self.camera_rig.queued_look();
+            reference.look = self.camera_rig.queued_look;
         }
         let movement_rotation = reference.yaw_rotation(workspace.camera().pose(), 1.0);
         #[cfg(feature = "physics")]

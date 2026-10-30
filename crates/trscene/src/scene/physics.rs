@@ -981,21 +981,24 @@ mod tests {
 
         workspace.step(1.0 / 60.0);
 
-        let params = BoxOverlapQuery::new(Mat4::from_scale(Vec3::splat(4.0)));
+        let mut params = BoxOverlapQuery {
+            transform: Mat4::from_scale(Vec3::splat(4.0)),
+            ..Default::default()
+        };
         let overlaps = workspace.get_part_bounds_in_box(&params);
         assert_eq!(overlaps.len(), 2);
         assert!(overlaps.contains(&fixed_id));
         assert!(overlaps.contains(&dynamic_id));
         assert!(!overlaps.contains(&non_collidable_id));
 
-        let filtered_params = params.with_excluded_instances([fixed_id]);
-        assert_eq!(
-            workspace.get_part_bounds_in_box(&filtered_params),
-            vec![dynamic_id]
-        );
+        params.excluded_instances.extend([fixed_id]);
+        assert_eq!(workspace.get_part_bounds_in_box(&params), vec![dynamic_id]);
 
-        let limited_params =
-            BoxOverlapQuery::new(Mat4::from_scale(Vec3::splat(4.0))).with_max_parts(1);
+        let limited_params = BoxOverlapQuery {
+            transform: Mat4::from_scale(Vec3::splat(4.0)),
+            max_parts: 1,
+            ..Default::default()
+        };
         assert_eq!(workspace.get_part_bounds_in_box(&limited_params).len(), 1);
     }
 }
