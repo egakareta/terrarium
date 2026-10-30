@@ -1,5 +1,5 @@
 <div align="center">
-<img style="width:128px" src="assets/favicon.svg" width="128px">
+<img style="width:128px" src="https://raw.githubusercontent.com/egakareta/terrarium/refs/heads/master/assets/favicon.svg" width="128px">
 
 <a href="https://github.com/egakareta/terrarium/actions/workflows/ci.yml"><img alt="Build Status" src="https://github.com/egakareta/terrarium/actions/workflows/ci.yml/badge.svg?branch=master"/></a>
 <a href="https://crates.io/crates/terrarium"><img alt="crates.io" src="https://img.shields.io/crates/v/terrarium"/></a>
