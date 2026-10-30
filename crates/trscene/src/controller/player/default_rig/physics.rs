@@ -1,13 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{
-    glam::*,
-    instance::rig::{
-        add_soft_tissue,
-        physics::{RagdollPreset, resolve_mut},
-    },
-    *,
-};
+use crate::{glam::*, *};
 
 pub(super) fn install(rig: &mut Rig) {
     fn collect(
@@ -113,7 +106,7 @@ pub(super) fn install(rig: &mut Rig) {
             (start + end) * 0.5,
         );
         colliders.push(add_collider(rig, path, transform));
-        simulated.push(RigJoint::new(path.clone()).with_angular_limits(Vec3::splat(limit)));
+        simulated.push(RigJoint::new(path.clone()).with_angular_limits(Some(Vec3::splat(limit))));
     }
     for (bone, offset, size) in [
         ("Head", 0.10, Vec3::new(0.18, 0.22, 0.18)),
@@ -127,7 +120,7 @@ pub(super) fn install(rig: &mut Rig) {
             Mat4::from_scale_rotation_translation(size, Quat::IDENTITY, position),
         ));
         if bone == "Head" {
-            simulated.push(RigJoint::new(path.clone()).with_angular_limits(Vec3::splat(0.6)));
+            simulated.push(RigJoint::new(path.clone()).with_angular_limits(Some(Vec3::splat(0.6))));
         }
     }
     rig.set_physics_joints(animated.clone())

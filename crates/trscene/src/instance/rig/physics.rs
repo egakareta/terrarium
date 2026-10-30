@@ -29,20 +29,28 @@ pub enum RigJointMotion {
     },
 }
 
-/// Physics constraints targeting a named spatial subtree within a rig.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RigJoint {
-    target: Vec<String>,
-    /// The joint's response to animation and external forces.
-    pub motion: RigJointMotion,
-    /// Attachment point in the target's local space, including its scale.
-    pub anchor: Vec3,
-    /// Optional symmetric XYZ angular limits in radians, each in `0..=PI`.
-    ///
-    /// Limits are relative to the bound rest pose, or the animated pose for jiggle.
-    /// Soft-tissue joints ignore these limits and lock rotation instead.
-    pub angular_limits: Option<Vec3>,
-}
+instance!({
+    #[instance(default = false)]
+    /// Physics constraints targeting a named spatial subtree within a rig.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct RigJoint {
+        /// The target path relative to the owning rig.
+        #[property]
+        target: Vec<String>,
+        /// The joint's response to animation and external forces.
+        #[property]
+        pub motion: RigJointMotion,
+        /// Attachment point in the target's local space, including its scale.
+        #[property]
+        pub anchor: Vec3,
+        /// Optional symmetric XYZ angular limits in radians, each in `0..=PI`.
+        ///
+        /// Limits are relative to the bound rest pose, or the animated pose for jiggle.
+        /// Soft-tissue joints ignore these limits and lock rotation instead.
+        #[property]
+        pub angular_limits: Option<Vec3>,
+    }
+});
 
 impl RigJoint {
     /// Creates a ragdoll joint at the target's origin without angular limits.
@@ -53,29 +61,6 @@ impl RigJoint {
             anchor: Vec3::ZERO,
             angular_limits: None,
         }
-    }
-
-    /// Sets the joint's response to animation and external forces.
-    pub fn with_motion(mut self, motion: RigJointMotion) -> Self {
-        self.motion = motion;
-        self
-    }
-
-    /// Sets the attachment point in the target's local space.
-    pub fn with_anchor(mut self, anchor: Vec3) -> Self {
-        self.anchor = anchor;
-        self
-    }
-
-    /// Sets symmetric XYZ angular limits in radians.
-    pub fn with_angular_limits(mut self, limits: Vec3) -> Self {
-        self.angular_limits = Some(limits);
-        self
-    }
-
-    /// Returns the target path relative to the owning rig.
-    pub fn target(&self) -> &[String] {
-        &self.target
     }
 }
 

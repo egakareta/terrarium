@@ -13,7 +13,7 @@ pub(crate) use gltf::add_soft_tissue;
 #[cfg(feature = "physics")]
 pub(crate) mod physics;
 #[cfg(feature = "physics")]
-pub use physics::{RigJoint, RigJointMotion, RigPhysicsError};
+pub use physics::*;
 
 #[derive(Clone, Debug)]
 struct AnimationTransition {

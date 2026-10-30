@@ -93,7 +93,7 @@ fn angular_limits_constrain_ragdolls() {
     let mut rig = Rig::new();
     let arm = rig.add_child(Part::new().with_name("Arm"));
     rig.set_physics_joints(vec![
-        RigJoint::new(["Arm"]).with_angular_limits(Vec3::new(0.0, 0.0, 0.3)),
+        RigJoint::new(["Arm"]).with_angular_limits(Some(Vec3::new(0.0, 0.0, 0.3))),
     ])
     .unwrap();
     let mut workspace = Workspace::new();
@@ -238,7 +238,7 @@ fn invalid_joint_configuration_is_atomic() {
         vec![RigJoint::new(["Light"])],
         vec![RigJoint::new(["Arm"]), RigJoint::new(["Arm"])],
         vec![RigJoint::new(["Arm"]).with_anchor(Vec3::NAN)],
-        vec![RigJoint::new(["Arm"]).with_angular_limits(Vec3::splat(-1.0))],
+        vec![RigJoint::new(["Arm"]).with_angular_limits(Some(Vec3::splat(-1.0)))],
         vec![RigJoint::new(["Arm"]).with_motion(RigJointMotion::Jiggle {
             stiffness: f32::NAN,
             damping: 1.0,
