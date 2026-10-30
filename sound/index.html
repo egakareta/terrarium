@@ -7,8 +7,8 @@
     <link rel="icon" href="/terrarium/sound/favicon-abb39abbf3eda173.svg" integrity="sha384-agcbJuyauwHEjX4p1s4M9NEvteZoDTcThLo+naIDTJC56PX4xSgYDZWYVTfNCh2b"/>
     
 <script type="module">
-import init, * as bindings from '/terrarium/sound/terrarium-f5bccc05d8f5e716.js';
-const wasm = await init({ module_or_path: '/terrarium/sound/terrarium-c770fecad7492846_bg.wasm' });
+import init, * as bindings from '/terrarium/sound/terrarium-2aecd287858fed97.js';
+const wasm = await init({ module_or_path: '/terrarium/sound/terrarium-eb0e7316f1fe1d56_bg.wasm' });
 
 
 window.wasmBindings = bindings;
@@ -31,7 +31,7 @@ dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
         height: 100vh;
       }
     </style>
-  <link rel="modulepreload" href="/terrarium/sound/terrarium-f5bccc05d8f5e716.js" crossorigin="anonymous" integrity="sha384-N2T4pMmbTs/2H88ZVMw6Uem+Z8GV0hebjlaardDS7BilZxN+aZ7uhP9HFJZVEJhS"><link rel="modulepreload" href="/terrarium/sound/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/sound/terrarium-c770fecad7492846_bg.wasm" crossorigin="anonymous" integrity="sha384-G5D+U/DK9tJobR5+f/XXuF8dUtOToAe9hXLFYPUS64DFVd+fpZDliA72rYBwkDDL" as="fetch" type="application/wasm"></head>
+  <link rel="modulepreload" href="/terrarium/sound/terrarium-2aecd287858fed97.js" crossorigin="anonymous" integrity="sha384-GOOTzL+02AhWrDazFe1tri6emiPr2cXbpouZottO/SDFqAgBYy+jjTa+0QdDBEYr"><link rel="modulepreload" href="/terrarium/sound/snippets/renfs-b1c7875a951cb328/inline0.js" crossorigin="anonymous" integrity="sha384-7wThwIbwjiA9tNW0eY7Un4DiliOxoCbFX+GM1DK/qXTVb8dQE9QeJDD1IkyBkafl"><link rel="preload" href="/terrarium/sound/terrarium-eb0e7316f1fe1d56_bg.wasm" crossorigin="anonymous" integrity="sha384-ZaUxHZqpusV9ZmKbRsK4rqepdo1GTOjDymRhRirlyILHon9jJ/VFNAqaYFElSSqM" as="fetch" type="application/wasm"></head>
   <body>
     <canvas id="app"></canvas>
   </body>
