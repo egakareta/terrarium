@@ -9,16 +9,16 @@ license.workspace = true
 autoexamples = false
 
 [dependencies]
-egui = "0.36"
+egui = "0.37"
 egui-text-outline = { workspace = true, optional = true }
-egui_ltreeview = { version = "0.9", optional = true }
+egui_ltreeview = { version = "0.10", optional = true }
 egui-phosphor = { version = "0.14", default-features = false, features = [
   "regular",
 ], optional = true }
-egui_taffy = { version = "0.14", optional = true }
+egui_taffy = { version = "0.16", optional = true }
 
 [dev-dependencies]
-eframe = { version = "0.36", default-features = false, features = [
+eframe = { version = "0.37", default-features = false, features = [
   "wgpu_no_default_features",
   "wayland",
 ] }
